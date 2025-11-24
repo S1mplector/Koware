@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -13,6 +14,32 @@ public partial class MainWindow : Window
 {
     private readonly PlayerArguments _args;
     private static readonly HttpClient HttpClient = new();
+    private static readonly string[] ProxySkipHosts = { "cdn.jsdelivr.net" };
+    private static readonly string[] ProxyExtensions =
+    {
+        ".m3u8",
+        ".mpd",
+        ".ts",
+        ".m4s",
+        ".mp4",
+        ".webm",
+        ".aac",
+        ".mp3",
+        ".mov",
+        ".cmfv",
+        ".cmfa",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".webp",
+        ".ico",
+        ".bmp",
+        ".txt",
+        ".css",
+        ".js",
+        ".html"
+    };
 
     public MainWindow(PlayerArguments args)
     {
@@ -80,13 +107,13 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(_args.Referer))
             {
                 e.Request.Headers.SetHeader("Referer", _args.Referer);
-                e.Request.Headers.SetHeader("Origin", _args.Referer);
+                if (Uri.TryCreate(_args.Referer, UriKind.Absolute, out var refererUri))
+                {
+                    e.Request.Headers.SetHeader("Origin", refererUri.GetLeftPart(UriPartial.Authority));
+                }
             }
 
-            // Strengthen accept headers for HLS manifests/segments.
-            if (uri.Contains(".m3u8", StringComparison.OrdinalIgnoreCase)
-                || uri.Contains(".ts", StringComparison.OrdinalIgnoreCase)
-                || uri.Contains(".m4s", StringComparison.OrdinalIgnoreCase))
+            if (ShouldProxy(uri))
             {
                 var deferral = e.GetDeferral();
                 try
@@ -105,6 +132,33 @@ public partial class MainWindow : Window
         {
             // ignored
         }
+    }
+
+    private static bool ShouldProxy(string? uri)
+    {
+        if (string.IsNullOrWhiteSpace(uri))
+        {
+            return false;
+        }
+
+        if (Uri.TryCreate(uri, UriKind.Absolute, out var parsed))
+        {
+            if (ProxySkipHosts.Any(skip => parsed.Host.Contains(skip, StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+        }
+
+        var lower = uri.ToLowerInvariant();
+        if (ProxyExtensions.Any(ext => lower.Contains(ext)))
+        {
+            return true;
+        }
+
+        // Many hosts disguise transport segments with arbitrary extensions (seg-*.jpg/.css/etc).
+        return lower.Contains("seg-", StringComparison.OrdinalIgnoreCase)
+               || lower.Contains("chunk", StringComparison.OrdinalIgnoreCase)
+               || lower.Contains("/_v", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task ProxyHlsRequestAsync(CoreWebView2WebResourceRequestedEventArgs e, string uri)
@@ -126,7 +180,7 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(_args.Referer) && Uri.TryCreate(_args.Referer, UriKind.Absolute, out var refUri))
             {
                 httpRequest.Headers.Referrer = refUri;
-                httpRequest.Headers.TryAddWithoutValidation("Origin", _args.Referer.TrimEnd('/'));
+                httpRequest.Headers.TryAddWithoutValidation("Origin", refUri.GetLeftPart(UriPartial.Authority));
             }
 
             var rangeHeader = e.Request.Headers.GetHeader("Range");
@@ -135,7 +189,10 @@ public partial class MainWindow : Window
                 httpRequest.Headers.TryAddWithoutValidation("Range", rangeHeader);
             }
 
-            if (uri.Contains(".m3u8", StringComparison.OrdinalIgnoreCase))
+            var lower = uri.ToLowerInvariant();
+            var isPlaylist = lower.Contains(".m3u8");
+
+            if (isPlaylist)
             {
                 httpRequest.Headers.Accept.ParseAdd("application/vnd.apple.mpegurl,application/x-mpegURL,application/json;q=0.8,*/*;q=0.5");
             }
@@ -191,7 +248,7 @@ public partial class MainWindow : Window
     {
         // Log manifest and segment responses to help debug CORS/403 issues.
         var uri = e.Request.Uri;
-        if (uri.Contains(".m3u8", StringComparison.OrdinalIgnoreCase) || uri.Contains(".ts", StringComparison.OrdinalIgnoreCase))
+        if (ShouldProxy(uri))
         {
             _ = Dispatcher.InvokeAsync(async () =>
             {

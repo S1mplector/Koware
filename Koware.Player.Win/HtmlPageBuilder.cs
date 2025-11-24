@@ -35,43 +35,54 @@ internal static class HtmlPageBuilder
 
         body {
             margin: 0;
-            padding: 16px;
-            background: radial-gradient(circle at 25% 25%, rgba(56, 189, 248, 0.08), transparent 26%),
-                        radial-gradient(circle at 80% 20%, rgba(248, 113, 113, 0.06), transparent 22%),
-                        var(--bg);
+            padding: 24px;
+            background:
+                radial-gradient(circle at 25% 25%, rgba(56, 189, 248, 0.08), transparent 26%),
+                radial-gradient(circle at 80% 20%, rgba(248, 113, 113, 0.06), transparent 22%),
+                var(--bg);
             color: var(--text);
             font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
             min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         #chrome {
-            width: min(1100px, 100%);
-            margin: 0 auto;
-            background: var(--panel);
+            width: min(1200px, 100%);
+            background: linear-gradient(145deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)) var(--panel);
             border: 1px solid var(--border);
-            border-radius: 14px;
-            padding: 14px;
+            border-radius: 16px;
+            padding: 16px;
             display: grid;
-            gap: 10px;
+            gap: 12px;
+            box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
         }
 
         #title {
             font-weight: 700;
             letter-spacing: 0.01em;
             color: var(--text);
+            text-align: center;
         }
 
         #player-wrapper {
             position: relative;
             overflow: hidden;
-            border-radius: 12px;
+            border-radius: 14px;
             border: 1px solid var(--border);
+            background: radial-gradient(circle at 50% 35%, rgba(56, 189, 248, 0.08), rgba(15, 23, 42, 0.9));
+            display: grid;
+            place-items: center;
+            aspect-ratio: 16 / 9;
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
         }
 
         video {
             width: 100%;
-            height: 62vh;
-            max-height: 760px;
+            height: 100%;
+            display: block;
+            object-fit: contain;
             background: #0b1221;
         }
 
@@ -96,6 +107,7 @@ internal static class HtmlPageBuilder
             border-radius: 10px;
             padding: 10px;
             color: var(--muted);
+            display: none; /* Set enableLogging to true below and remove this to show inline logs. */
         }
     </style>
 </head>
@@ -104,16 +116,19 @@ internal static class HtmlPageBuilder
         <div id="title">{{TITLE}}</div>
         <div id="player-wrapper">
             <video id="video" controls autoplay playsinline></video>
-            <div id="status">Loading stream…</div>
+            <div id="status">Loading stream...</div>
         </div>
         <div id="log"></div>
     </div>
     <script>
+        // Flip to true to surface inline logs during debugging.
+        const enableLogging = false;
+
         const source = {{URL_JSON}};
         const title = {{TITLE_JSON}};
         const video = document.getElementById("video");
         const statusEl = document.getElementById("status");
-        const logEl = document.getElementById("log");
+        const logEl = enableLogging ? document.getElementById("log") : null;
         let hlsInstance = null;
         let fallbackUsed = false;
 
@@ -127,8 +142,11 @@ internal static class HtmlPageBuilder
         }
 
         function log(line) {
+            if (!enableLogging) return;
             const stamp = new Date().toISOString().substring(11, 19);
-            logEl.textContent += `[${stamp}] ${line}\n`;
+            if (logEl) {
+                logEl.textContent += `[${stamp}] ${line}\n`;
+            }
             if (window.chrome?.webview?.postMessage) {
                 try { window.chrome.webview.postMessage(line); } catch {}
             }
@@ -136,7 +154,7 @@ internal static class HtmlPageBuilder
 
         // Expose logging for the host (C#) to call.
         window.__log = log;
-        if (window.chrome?.webview?.addEventListener) {
+        if (enableLogging && window.chrome?.webview?.addEventListener) {
             window.chrome.webview.addEventListener("message", (e) => {
                 log(e.data);
             });
@@ -200,7 +218,7 @@ internal static class HtmlPageBuilder
 
             hls.on(Hls.Events.MANIFEST_PARSED, () => {
                 log("Manifest parsed");
-                setStatus("Starting playback…");
+                setStatus("Starting playback...");
             });
 
             hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -209,7 +227,7 @@ internal static class HtmlPageBuilder
                 log(`HLS error: ${detail} (fatal=${data?.fatal})`);
                 if (data?.fatal && !fallbackUsed && data?.details === "manifestLoadError") {
                     fallbackUsed = true;
-                    setStatus(`Retrying with native player…`, true);
+                    setStatus("Retrying with native player...", true);
                     log("Retrying with native HLS after manifest load error.");
                     hls.destroy();
                     hlsInstance = null;
@@ -259,7 +277,7 @@ internal static class HtmlPageBuilder
                 log("Playing");
             });
             video.addEventListener("waiting", () => {
-                setStatus("Buffering…");
+                setStatus("Buffering...");
                 log("Buffering");
             });
             video.addEventListener("ended", () => {
@@ -267,7 +285,7 @@ internal static class HtmlPageBuilder
                 log("Ended");
             });
             video.addEventListener("stalled", () => {
-                setStatus("Network stalled…", true);
+                setStatus("Network stalled...", true);
                 log("Stalled");
             });
 
