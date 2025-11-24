@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -42,8 +43,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         };
 
         var uri = BuildApiUri(gql, variables);
-        using var request = BuildRequest(uri);
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var response = await SendWithRetryAsync(uri, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -74,8 +74,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         var variables = new { showId = anime.Id.Value };
         var uri = BuildApiUri(gql, variables);
 
-        using var request = BuildRequest(uri);
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var response = await SendWithRetryAsync(uri, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -110,8 +109,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         };
 
         var uri = BuildApiUri(gql, variables);
-        using var request = BuildRequest(uri);
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var response = await SendWithRetryAsync(uri, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -139,8 +137,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             var decodedPath = AllAnimeSourceDecoder.Decode(source.Url);
             var absoluteUrl = EnsureAbsolute(decodedPath);
 
-            using var request = BuildRequest(new Uri(absoluteUrl));
-            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            using var response = await SendWithRetryAsync(new Uri(absoluteUrl), cancellationToken);
             response.EnsureSuccessStatusCode();
             var payload = await response.Content.ReadAsStringAsync(cancellationToken);
 
