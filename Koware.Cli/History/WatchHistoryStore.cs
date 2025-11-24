@@ -118,10 +118,10 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
         await connection.OpenAsync(cancellationToken);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = $
+        command.CommandText =
             """
             SELECT provider, anime_id, anime_title, episode_number, episode_title, quality, watched_at_utc
-            FROM {TableName}
+            FROM watch_history
             WHERE anime_title = $animeTitle COLLATE NOCASE
             ORDER BY watched_at_utc DESC
             LIMIT 1;

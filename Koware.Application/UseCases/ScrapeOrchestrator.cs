@@ -29,7 +29,7 @@ public sealed class ScrapeOrchestrator
 
     public Task<ScrapeResult> ExecuteAsync(ScrapePlan plan, CancellationToken cancellationToken = default)
     {
-        return ExecuteAsync(plan, selection: null, cancellationToken);
+        return ExecuteAsync(plan, selection: matches => ChooseMatch(matches, plan.PreferredMatchIndex), cancellationToken);
     }
 
     public async Task<ScrapeResult> ExecuteAsync(
@@ -40,7 +40,7 @@ public sealed class ScrapeOrchestrator
         cancellationToken.ThrowIfCancellationRequested();
 
         var matches = await SearchAsync(plan.Query, cancellationToken);
-        var selectedAnime = selection?.Invoke(matches) ?? matches.FirstOrDefault();
+        var selectedAnime = selection?.Invoke(matches) ?? ChooseMatch(matches, preferredIndex: null);
 
         IReadOnlyCollection<Episode>? episodes = null;
         Episode? selectedEpisode = null;
@@ -64,6 +64,21 @@ public sealed class ScrapeOrchestrator
         }
 
         return new ScrapeResult(matches, selectedAnime, episodes, selectedEpisode, streams);
+    }
+
+    private static Anime? ChooseMatch(IReadOnlyCollection<Anime> matches, int? preferredIndex)
+    {
+        if (matches.Count == 0)
+        {
+            return null;
+        }
+
+        if (preferredIndex.HasValue && preferredIndex.Value > 0 && preferredIndex.Value <= matches.Count)
+        {
+            return matches.ElementAt(preferredIndex.Value - 1);
+        }
+
+        return matches.First();
     }
 
     private static Episode? TryPickEpisode(IReadOnlyCollection<Episode>? episodes, int? requestedNumber)

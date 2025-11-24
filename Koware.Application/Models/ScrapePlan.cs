@@ -1,3 +1,8 @@
 namespace Koware.Application.Models;
 
-public sealed record ScrapePlan(string Query, int? EpisodeNumber = null, string? PreferredQuality = null);
+public sealed record ScrapePlan(
+    string Query,
+    int? EpisodeNumber = null,
+    string? PreferredQuality = null,
+    int? PreferredMatchIndex = null,
+    bool NonInteractive = false);

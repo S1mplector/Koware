@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using Koware.Application.DependencyInjection;
 using Koware.Application.Models;
@@ -25,6 +26,9 @@ static IHost BuildHost(string[] args)
     builder.Services.AddInfrastructure(builder.Configuration);
     builder.Services.Configure<PlayerOptions>(builder.Configuration.GetSection("Player"));
     builder.Services.AddSingleton<IWatchHistoryStore, SqliteWatchHistoryStore>();
+    builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+    builder.Logging.AddFilter("System.Net.Http.HttpClient.Default", LogLevel.Warning);
+    builder.Logging.AddFilter("Microsoft.Extensions.Http.DefaultHttpClientFactory", LogLevel.Warning);
 
     return builder.Build();
 }
@@ -92,21 +96,9 @@ static async Task<int> ExecuteAndPlayAsync(
     IServiceProvider services,
     IWatchHistoryStore history,
     ILogger logger,
-    CancellationToken cancellationToken,
-    bool interactiveSelection = false)
+    CancellationToken cancellationToken)
 {
-    ScrapeResult result;
-    if (interactiveSelection)
-    {
-        result = await orchestrator.ExecuteAsync(
-            plan,
-            matches => SelectAnimeInteractive(plan.Query, matches),
-            cancellationToken);
-    }
-    else
-    {
-        result = await orchestrator.ExecuteAsync(plan, cancellationToken);
-    }
+    var result = await orchestrator.ExecuteAsync(plan, cancellationToken);
     if (result.SelectedEpisode is null || result.Streams is null || result.Streams.Count == 0)
     {
         logger.LogWarning("No streams found for the query/episode.");
@@ -114,11 +106,17 @@ static async Task<int> ExecuteAndPlayAsync(
         return 1;
     }
 
-    var stream = result.Streams.First();
+    var stream = PickBestStream(result.Streams);
+    if (stream is null)
+    {
+        logger.LogWarning("No playable streams found.");
+        return 1;
+    }
+
     var options = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
     var exitCode = LaunchPlayer(options, stream, logger);
 
-    if (exitCode == 0 && result.SelectedAnime is not null && result.SelectedEpisode is not null)
+    if (result.SelectedAnime is not null && result.SelectedEpisode is not null)
     {
         var entry = new WatchHistoryEntry
         {
@@ -134,6 +132,10 @@ static async Task<int> ExecuteAndPlayAsync(
         try
         {
             await history.AddAsync(entry, cancellationToken);
+            if (exitCode != 0)
+            {
+                logger.LogWarning("Player exited with code {ExitCode}, but history was saved so you can retry with 'koware last --play'.", exitCode);
+            }
         }
         catch (Exception ex)
         {
@@ -186,7 +188,7 @@ static async Task<int> HandleLastAsync(string[] args, IServiceProvider services,
     var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
     var plan = new ScrapePlan(entry.AnimeTitle, entry.EpisodeNumber, entry.Quality);
 
-    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken, interactiveSelection: false);
+    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
 }
 
 static async Task<int> HandleContinueAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
@@ -254,7 +256,7 @@ static async Task<int> HandleContinueAsync(string[] args, IServiceProvider servi
     var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
     var plan = new ScrapePlan(entry.AnimeTitle, targetEpisode, quality);
 
-    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken, interactiveSelection: false);
+    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
 }
 
 static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string[] args, ILogger logger, CancellationToken cancellationToken)
@@ -286,6 +288,8 @@ static async Task<int> HandlePlanAsync(ScrapeOrchestrator orchestrator, string[]
         return 1;
     }
 
+    plan = await MaybeSelectMatchAsync(orchestrator, plan, logger, cancellationToken);
+
     var result = await orchestrator.ExecuteAsync(plan, cancellationToken);
     RenderPlan(plan, result);
     return 0;
@@ -305,78 +309,191 @@ static async Task<int> HandlePlayAsync(ScrapeOrchestrator orchestrator, string[]
         return 1;
     }
 
+    plan = await MaybeSelectMatchAsync(orchestrator, plan, logger, cancellationToken);
+
     var history = services.GetRequiredService<IWatchHistoryStore>();
-    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken, interactiveSelection: true);
+    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
 }
 
-static Anime? SelectAnimeInteractive(string query, IReadOnlyCollection<Anime> matches)
+static async Task<ScrapePlan> MaybeSelectMatchAsync(ScrapeOrchestrator orchestrator, ScrapePlan plan, ILogger logger, CancellationToken cancellationToken)
 {
+    if (plan.PreferredMatchIndex.HasValue)
+    {
+        return plan;
+    }
+
+    if (plan.NonInteractive)
+    {
+        return plan with { PreferredMatchIndex = 1 };
+    }
+
+    var matches = await orchestrator.SearchAsync(plan.Query, cancellationToken);
     if (matches.Count == 0)
     {
-        return null;
+        RenderSearch(plan.Query, matches);
+        return plan;
     }
 
     if (matches.Count == 1)
     {
-        return matches.First();
+        return plan with { PreferredMatchIndex = 1 };
     }
 
-    Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine($"Multiple matches for \"{query}\":");
-    Console.ResetColor();
-
-    var index = 1;
-    foreach (var anime in matches)
+    RenderSearch(plan.Query, matches);
+    Console.Write($"Select anime [1-{matches.Count}] (Enter for 1): ");
+    var input = Console.ReadLine();
+    if (int.TryParse(input, out var choice) && choice >= 1 && choice <= matches.Count)
     {
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.Write($"  [{index}] ");
-        Console.ResetColor();
-        Console.WriteLine(anime.Title);
-        index++;
+        return plan with { PreferredMatchIndex = choice };
     }
 
-    while (true)
+    if (!string.IsNullOrWhiteSpace(input))
     {
-        Console.Write($"Select anime [1-{matches.Count}] (or 0 to cancel): ");
-        var input = Console.ReadLine();
-        if (string.IsNullOrWhiteSpace(input))
-        {
-            continue;
-        }
-
-        if (!int.TryParse(input, out var choice))
-        {
-            Console.WriteLine("Please enter a number.");
-            continue;
-        }
-
-        if (choice == 0)
-        {
-            return null;
-        }
-
-        if (choice < 1 || choice > matches.Count)
-        {
-            Console.WriteLine("Choice out of range.");
-            continue;
-        }
-
-        return matches.ElementAt(choice - 1);
+        logger.LogWarning("Invalid selection '{Input}'. Defaulting to the first match.", input);
     }
+
+    return plan with { PreferredMatchIndex = 1 };
+}
+
+static StreamLink? PickBestStream(IReadOnlyCollection<StreamLink> streams)
+{
+    return streams
+        .OrderByDescending(ScoreStream)
+        .FirstOrDefault();
+}
+
+static int ScoreStream(StreamLink stream)
+{
+    var score = 0;
+    var url = stream.Url.ToString();
+    var host = stream.Url.Host;
+    var quality = stream.Quality ?? string.Empty;
+
+    if (url.Contains(".m3u8", StringComparison.OrdinalIgnoreCase) || quality.Contains("hls", StringComparison.OrdinalIgnoreCase))
+    {
+        score += 200;
+    }
+
+    if (quality.Contains("dash", StringComparison.OrdinalIgnoreCase) || url.Contains("dash", StringComparison.OrdinalIgnoreCase))
+    {
+        score += 150;
+    }
+
+    if (TryParseQualityNumber(quality, out var q))
+    {
+        score += q / 10;
+    }
+
+    if (stream.Url.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+    {
+        score += 20;
+    }
+
+    if (host.Contains("sharepoint", StringComparison.OrdinalIgnoreCase))
+    {
+        score -= 150;
+    }
+
+    if (host.Contains("akamaized", StringComparison.OrdinalIgnoreCase) || host.Contains("haildrop", StringComparison.OrdinalIgnoreCase))
+    {
+        score += 30;
+    }
+
+    return score;
+}
+
+static bool TryParseQualityNumber(string? quality, out int value)
+{
+    value = 0;
+    if (string.IsNullOrWhiteSpace(quality))
+    {
+        return false;
+    }
+
+    var digits = new string(quality.Where(char.IsDigit).ToArray());
+    if (digits.Length == 0)
+    {
+        return false;
+    }
+
+    return int.TryParse(digits, out value);
+}
+
+static string? ResolveExecutablePath(string command)
+{
+    if (string.IsNullOrWhiteSpace(command))
+    {
+        return null;
+    }
+
+    if (Path.IsPathRooted(command) && File.Exists(command))
+    {
+        return command;
+    }
+
+    var candidates = Path.HasExtension(command)
+        ? new[] { command }
+        : new[] { command, $"{command}.exe" };
+
+    var paths = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
+        .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    foreach (var dir in paths)
+    {
+        foreach (var candidate in candidates)
+        {
+            var fullPath = Path.Combine(dir, candidate);
+            if (File.Exists(fullPath))
+            {
+                return fullPath;
+            }
+        }
+    }
+
+    return null;
 }
 
 static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger)
 {
-    var command = string.IsNullOrWhiteSpace(options.Command) ? "mpv" : options.Command;
-    var arguments = string.IsNullOrWhiteSpace(options.Args)
+    var candidates = new List<string>();
+    if (!string.IsNullOrWhiteSpace(options.Command))
+    {
+        candidates.Add(options.Command);
+    }
+    candidates.Add("vlc");
+    candidates.Add("mpv");
+
+    string? resolvedCommand = null;
+    string chosen = candidates.FirstOrDefault(c => (resolvedCommand = ResolveExecutablePath(c)) is not null)
+        ?? string.Empty;
+
+    if (resolvedCommand is null)
+    {
+        logger.LogError("No supported player found (tried {Candidates}). Install VLC or mpv, or set Player:Command in appsettings.json.", string.Join(", ", candidates));
+        return 1;
+    }
+
+    var playerName = Path.GetFileNameWithoutExtension(resolvedCommand);
+    var defaultArgs = string.Empty;
+    if (string.Equals(playerName, "vlc", StringComparison.OrdinalIgnoreCase))
+    {
+        defaultArgs = "--play-and-exit --quiet";
+    }
+    else if (string.Equals(playerName, "mpv", StringComparison.OrdinalIgnoreCase))
+    {
+        defaultArgs = "--no-terminal --force-window=yes";
+    }
+
+    var argsPrefix = string.IsNullOrWhiteSpace(options.Args) ? defaultArgs : options.Args;
+    var arguments = string.IsNullOrWhiteSpace(argsPrefix)
         ? $"\"{stream.Url}\""
-        : $"{options.Args} \"{stream.Url}\"";
+        : $"{argsPrefix} \"{stream.Url}\"";
 
     try
     {
         var start = new ProcessStartInfo
         {
-            FileName = command,
+            FileName = resolvedCommand,
             Arguments = arguments,
             UseShellExecute = false
         };
@@ -388,11 +505,12 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
             return 1;
         }
 
-        return 0;
+        proc.WaitForExit();
+        return proc.ExitCode;
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "Unable to launch player {Command}", command);
+        logger.LogError(ex, "Unable to launch player {Command}", chosen);
         return 1;
     }
 }
@@ -402,6 +520,8 @@ static ScrapePlan ParsePlan(string[] args)
     var queryParts = new List<string>();
     int? episodeNumber = null;
     string? preferredQuality = null;
+    int? preferredIndex = null;
+    var nonInteractive = false;
 
     for (var i = 1; i < args.Length; i++)
     {
@@ -425,7 +545,30 @@ static ScrapePlan ParsePlan(string[] args)
             continue;
         }
 
+        if (arg.Equals("--index", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            if (!int.TryParse(args[i + 1], out var parsedIndex) || parsedIndex < 1)
+            {
+                throw new ArgumentException("--index must be a positive integer.", nameof(args));
+            }
+
+            preferredIndex = parsedIndex;
+            i++;
+            continue;
+        }
+
+        if (arg.Equals("--non-interactive", StringComparison.OrdinalIgnoreCase))
+        {
+            nonInteractive = true;
+            continue;
+        }
+
         queryParts.Add(arg);
+    }
+
+    if (queryParts.Count == 0)
+    {
+        throw new ArgumentException("Query is required", nameof(args));
     }
 
     if (episodeNumber is null && queryParts.Count > 1 && int.TryParse(queryParts[^1], out var positionalEpisode))
@@ -440,7 +583,7 @@ static ScrapePlan ParsePlan(string[] args)
         throw new ArgumentException("Query is required", nameof(args));
     }
 
-    return new ScrapePlan(query, episodeNumber, preferredQuality);
+    return new ScrapePlan(query, episodeNumber, preferredQuality, preferredIndex, nonInteractive);
 }
 
 static void RenderSearch(string query, IReadOnlyCollection<Anime> matches)
@@ -516,9 +659,9 @@ static void PrintUsage()
     Console.ResetColor();
     Console.WriteLine("Usage:");
     Console.WriteLine("  search <query>");
-    Console.WriteLine("  stream <query> [--episode <number>] [--quality <label>]");
-    Console.WriteLine("  watch <query> [--episode <number>] [--quality <label>]");
-    Console.WriteLine("  play  <query> [--episode <number>] [--quality <label>] (alias for 'watch')");
+    Console.WriteLine("  stream <query> [--episode <number>] [--quality <label>] [--index <n>] [--non-interactive]");
+    Console.WriteLine("  watch <query> [--episode <number>] [--quality <label>] [--index <n>] [--non-interactive]");
+    Console.WriteLine("  play  <query> [--episode <number>] [--quality <label>] [--index <n>] [--non-interactive] (alias for 'watch')");
     Console.WriteLine("  last  [--play] [--json]");
     Console.WriteLine("  continue [<anime name>] [--from <episode>] [--quality <label>]");
 }

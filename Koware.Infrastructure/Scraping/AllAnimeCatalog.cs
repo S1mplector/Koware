@@ -129,26 +129,35 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         await Task.WhenAll(tasks);
 
         return streams
+            .GroupBy(s => s.Url)
+            .Select(g => g.First())
             .OrderByDescending(s => ParseQualityScore(s.Quality))
             .ToArray();
     }
 
     private async Task ResolveSourceAsync(ProviderSource source, ConcurrentBag<StreamLink> collector, CancellationToken cancellationToken)
     {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+
         try
         {
             var decodedPath = AllAnimeSourceDecoder.Decode(source.Url);
             var absoluteUrl = EnsureAbsolute(decodedPath);
 
-            using var response = await SendWithRetryAsync(new Uri(absoluteUrl), cancellationToken);
+            using var response = await SendWithRetryAsync(new Uri(absoluteUrl), timeoutCts.Token);
             response.EnsureSuccessStatusCode();
-            var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+            var payload = await response.Content.ReadAsStringAsync(timeoutCts.Token);
 
-            var links = await ExtractLinksAsync(payload, absoluteUrl, source.Name, cancellationToken);
+            var links = await ExtractLinksAsync(payload, absoluteUrl, source.Name, timeoutCts.Token);
             foreach (var link in links)
             {
                 collector.Add(link);
             }
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            _logger.LogDebug("Source {Source} returned 404; skipping.", source.Name);
         }
         catch (Exception ex)
         {
@@ -166,7 +175,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         }
         catch (JsonException)
         {
-            _logger.LogWarning("Source payload for {Provider} was not JSON, attempting raw scan.", provider);
+            _logger.LogDebug("Source payload for {Provider} was not JSON, attempting raw scan.", provider);
         }
 
         // If payload was m3u8 URL only, try that
@@ -241,9 +250,12 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         request.Headers.Referrer = new Uri(_options.Referer);
         request.Headers.UserAgent.ParseAdd(_options.UserAgent);
 
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(6));
+
+        using var response = await _httpClient.SendAsync(request, timeoutCts.Token);
         response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(timeoutCts.Token);
         var lines = body.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         string? currentResolution = null;
@@ -333,12 +345,15 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
     private async Task<HttpResponseMessage> SendWithRetryAsync(Uri uri, CancellationToken cancellationToken)
     {
         const int maxAttempts = 3;
+        const int perAttemptTimeoutSeconds = 6;
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             using var request = BuildRequest(uri);
+            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            attemptCts.CancelAfter(TimeSpan.FromSeconds(perAttemptTimeoutSeconds));
             try
             {
-                var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, attemptCts.Token);
                 if (response.IsSuccessStatusCode || attempt == maxAttempts)
                 {
                     return response;
@@ -348,7 +363,11 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             }
             catch (HttpRequestException ex) when (attempt < maxAttempts)
             {
-                _logger.LogWarning(ex, "Request to {Uri} failed on attempt {Attempt}/{MaxAttempts}. Retrying...", uri, attempt, maxAttempts);
+                _logger.LogDebug(ex, "Request to {Uri} failed on attempt {Attempt}/{MaxAttempts}. Retrying...", uri, attempt, maxAttempts);
+            }
+            catch (OperationCanceledException) when (attemptCts.IsCancellationRequested && attempt < maxAttempts)
+            {
+                _logger.LogDebug("Request to {Uri} timed out on attempt {Attempt}/{MaxAttempts}. Retrying...", uri, attempt, maxAttempts);
             }
 
             await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt), cancellationToken);
