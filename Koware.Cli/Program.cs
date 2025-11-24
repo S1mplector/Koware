@@ -117,7 +117,8 @@ static async Task<int> ExecuteAndPlayAsync(
 
     var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
     var allAnimeOptions = services.GetService<IOptions<AllAnimeOptions>>()?.Value;
-    var exitCode = LaunchPlayer(playerOptions, stream, logger, allAnimeOptions?.Referer, allAnimeOptions?.UserAgent);
+    var displayTitle = BuildPlayerTitle(result, stream);
+    var exitCode = LaunchPlayer(playerOptions, stream, logger, allAnimeOptions?.Referer, allAnimeOptions?.UserAgent, displayTitle);
 
     if (result.SelectedAnime is not null && result.SelectedEpisode is not null)
     {
@@ -492,6 +493,30 @@ static bool IsJsonStream(StreamLink stream)
     return path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
 }
 
+static string BuildPlayerTitle(ScrapeResult result, StreamLink stream)
+{
+    var parts = new List<string>();
+    if (result.SelectedAnime is not null)
+    {
+        parts.Add(result.SelectedAnime.Title);
+    }
+
+    if (result.SelectedEpisode is not null)
+    {
+        var episodeTitle = string.IsNullOrWhiteSpace(result.SelectedEpisode.Title)
+            ? $"Episode {result.SelectedEpisode.Number}"
+            : $"Episode {result.SelectedEpisode.Number}: {result.SelectedEpisode.Title}";
+        parts.Add(episodeTitle);
+    }
+
+    if (!string.IsNullOrWhiteSpace(stream.Quality))
+    {
+        parts.Add(stream.Quality!);
+    }
+
+    return parts.Count == 0 ? stream.Url.ToString() : string.Join(" — ", parts);
+}
+
 static string? ResolveExecutablePath(string command)
 {
     if (string.IsNullOrWhiteSpace(command))
@@ -499,9 +524,61 @@ static string? ResolveExecutablePath(string command)
         return null;
     }
 
-    if (Path.IsPathRooted(command) && File.Exists(command))
+    var trimmed = command.Trim('"');
+    if (Path.IsPathRooted(trimmed) && File.Exists(trimmed))
     {
-        return command;
+        return trimmed;
+    }
+
+    var isNativePlayer = trimmed.StartsWith("Koware.Player.Win", StringComparison.OrdinalIgnoreCase);
+
+    if (isNativePlayer)
+    {
+        var localBinRoots = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Koware.Player.Win", "bin"),
+            Path.Combine(Environment.CurrentDirectory, "Koware.Player.Win", "bin")
+        };
+
+        foreach (var root in localBinRoots)
+        {
+            if (!Directory.Exists(root))
+            {
+                continue;
+            }
+
+            var candidatePath = Directory
+                .EnumerateFiles(root, "Koware.Player.Win.exe", SearchOption.AllDirectories)
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .FirstOrDefault();
+
+            if (candidatePath is not null)
+            {
+                return Path.GetFullPath(candidatePath);
+            }
+        }
+    }
+
+    var candidates = Path.HasExtension(trimmed)
+        ? new[] { trimmed }
+        : new[] { trimmed, $"{trimmed}.exe" };
+
+    var probeRoots = new[]
+    {
+        AppContext.BaseDirectory,
+        Environment.CurrentDirectory
+    };
+
+    foreach (var root in probeRoots)
+    {
+        foreach (var candidate in candidates)
+        {
+            var full = Path.Combine(root, candidate);
+            if (File.Exists(full))
+            {
+                return Path.GetFullPath(full);
+            }
+        }
     }
 
     var wellKnown = new[]
@@ -512,15 +589,11 @@ static string? ResolveExecutablePath(string command)
 
     foreach (var path in wellKnown)
     {
-        if (File.Exists(path) && command.Equals("vlc", StringComparison.OrdinalIgnoreCase))
+        if (File.Exists(path) && trimmed.Equals("vlc", StringComparison.OrdinalIgnoreCase))
         {
             return path;
         }
     }
-
-    var candidates = Path.HasExtension(command)
-        ? new[] { command }
-        : new[] { command, $"{command}.exe" };
 
     var paths = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
         .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -540,27 +613,58 @@ static string? ResolveExecutablePath(string command)
     return null;
 }
 
-static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger, string? httpReferrer, string? httpUserAgent)
+static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger, string? httpReferrer, string? httpUserAgent, string? displayTitle)
 {
     var candidates = new List<string>();
     if (!string.IsNullOrWhiteSpace(options.Command))
     {
         candidates.Add(options.Command);
     }
-    candidates.AddRange(new[] { "vlc", "mpv" });
-    candidates = candidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    candidates.AddRange(new[] { "Koware.Player.Win", "Koware.Player.Win.exe", "vlc", "mpv" });
+    candidates = candidates
+        .Where(c => !string.IsNullOrWhiteSpace(c))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
 
-    string? resolvedCommand = null;
-    string chosen = candidates.FirstOrDefault(c => (resolvedCommand = ResolveExecutablePath(c)) is not null)
-        ?? string.Empty;
+    var resolved = candidates
+        .Select(c => new { Command = c, Path = ResolveExecutablePath(c) })
+        .FirstOrDefault(x => x.Path is not null);
 
-    if (resolvedCommand is null)
+    if (resolved?.Path is null)
     {
-        logger.LogError("No supported player found (tried {Candidates}). Install VLC or mpv, or set Player:Command in appsettings.json.", string.Join(", ", candidates));
+        logger.LogError("No supported player found (tried {Candidates}). Build Koware.Player.Win or set Player:Command in appsettings.json.", string.Join(", ", candidates));
         return 1;
     }
 
-    var playerName = Path.GetFileNameWithoutExtension(resolvedCommand);
+    var playerPath = resolved.Path;
+    var playerName = Path.GetFileNameWithoutExtension(playerPath);
+
+    if (string.Equals(playerName, "Koware.Player.Win", StringComparison.OrdinalIgnoreCase))
+    {
+        var start = new ProcessStartInfo
+        {
+            FileName = playerPath,
+            UseShellExecute = false
+        };
+
+        start.ArgumentList.Add(stream.Url.ToString());
+        start.ArgumentList.Add(string.IsNullOrWhiteSpace(displayTitle) ? stream.Url.ToString() : displayTitle!);
+
+        if (!string.IsNullOrWhiteSpace(httpReferrer))
+        {
+            start.ArgumentList.Add("--referer");
+            start.ArgumentList.Add(httpReferrer!);
+        }
+
+        if (!string.IsNullOrWhiteSpace(httpUserAgent))
+        {
+            start.ArgumentList.Add("--user-agent");
+            start.ArgumentList.Add(httpUserAgent!);
+        }
+
+        return StartProcessAndWait(logger, start, playerPath);
+    }
+
     var defaultArgs = string.Empty;
     if (string.Equals(playerName, "vlc", StringComparison.OrdinalIgnoreCase))
     {
@@ -609,15 +713,25 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
         ? $"\"{stream.Url}\""
         : $"{string.Join(" ", argParts)} \"{stream.Url}\"";
 
+    var startInfo = new ProcessStartInfo
+    {
+        FileName = playerPath,
+        Arguments = arguments,
+        UseShellExecute = false
+    };
+
+    return StartProcessAndWait(logger, startInfo, playerPath, arguments);
+}
+
+static int StartProcessAndWait(ILogger logger, ProcessStartInfo start, string command, string? arguments = null)
+{
+    var formattedArgs = start.ArgumentList.Count > 0
+        ? string.Join(" ", start.ArgumentList.Select(a => a.Contains(' ') ? $"\"{a}\"" : a))
+        : arguments ?? string.Empty;
+
     try
     {
-        logger.LogInformation("Launching player: {Player} {Args}", resolvedCommand, arguments);
-        var start = new ProcessStartInfo
-        {
-            FileName = resolvedCommand,
-            Arguments = arguments,
-            UseShellExecute = false
-        };
+        logger.LogInformation("Launching player: {Player} {Args}", command, formattedArgs);
 
         using var proc = Process.Start(start);
         if (proc is null)
@@ -636,7 +750,7 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "Unable to launch player {Command}", chosen);
+        logger.LogError(ex, "Unable to launch player {Command}", command);
         return 1;
     }
 }
