@@ -90,11 +90,15 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         var episodes = new List<Episode>();
         foreach (var ep in episodesElement.EnumerateArray())
         {
-            if (int.TryParse(ep.GetString(), out var num))
+            var raw = ep.GetString();
+            if (!int.TryParse(raw, out var num) || num < 1)
             {
-                var page = new Uri($"{_options.Referer.TrimEnd('/')}/anime/{anime.Id.Value}/episode-{num}");
-                episodes.Add(new Episode(new EpisodeId($"{anime.Id.Value}:ep-{num}"), $"Episode {num}", num, page));
+                _logger.LogDebug("Skipping invalid episode '{Episode}' for anime {AnimeId}", raw, anime.Id.Value);
+                continue;
             }
+
+            var page = new Uri($"{_options.Referer.TrimEnd('/')}/anime/{anime.Id.Value}/episode-{num}");
+            episodes.Add(new Episode(new EpisodeId($"{anime.Id.Value}:ep-{num}"), $"Episode {num}", num, page));
         }
 
         return episodes.OrderBy(e => e.Number).ToArray();
