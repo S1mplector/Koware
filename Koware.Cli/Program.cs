@@ -911,17 +911,15 @@ static void RenderPlan(ScrapePlan plan, ScrapeResult result)
 
 static void PrintUsage()
 {
-    Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine("Koware CLI");
-    Console.ResetColor();
+    WriteHeader("Koware CLI");
     Console.WriteLine("Usage:");
-    Console.WriteLine("  search <query>");
-    Console.WriteLine("  stream <query> [--episode <number>] [--quality <label>] [--index <n>] [--non-interactive]");
-    Console.WriteLine("  watch <query> [--episode <number>] [--quality <label>] [--index <n>] [--non-interactive]");
-    Console.WriteLine("  play  <query> [--episode <number>] [--quality <label>] [--index <n>] [--non-interactive] (alias for 'watch')");
-    Console.WriteLine("  last  [--play] [--json]");
-    Console.WriteLine("  continue [<anime name>] [--from <episode>] [--quality <label>]");
-    Console.WriteLine("  help [command]");
+    WriteCommand("search <query>", "Find anime and list matches.");
+    WriteCommand("stream <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Show plan + streams, no player.");
+    WriteCommand("watch <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Pick a stream and play (alias: play).");
+    WriteCommand("play <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Same as watch.");
+    WriteCommand("last [--play] [--json]", "Show or replay your most recent watch.");
+    WriteCommand("continue [<anime>] [--from <episode>] [--quality <label>]", "Resume from history (auto next episode).");
+    WriteCommand("help [command]", "Show this guide or a command-specific help page.");
 }
 
 static int HandleHelp(string[] args)
@@ -978,8 +976,26 @@ static int HandleHelp(string[] args)
 
 static void PrintTopicHeader(string name, string description)
 {
-    Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine($"Help: {name}");
-    Console.ResetColor();
+    WriteHeader($"Help: {name}");
     Console.WriteLine(description);
+}
+
+static void WriteHeader(string text)
+{
+    var prev = Console.ForegroundColor;
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine(text);
+    Console.ForegroundColor = prev;
+}
+
+static void WriteCommand(string signature, string description)
+{
+    var prev = Console.ForegroundColor;
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.Write($"  {signature,-14}");
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.Write(" - ");
+    Console.ForegroundColor = ConsoleColor.Gray;
+    Console.WriteLine(description);
+    Console.ForegroundColor = prev;
 }
