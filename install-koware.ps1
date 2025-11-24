@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $cliProject = Join-Path $repoRoot "Koware.Cli"
+$playerProject = Join-Path $repoRoot "Koware.Player.Win"
 $installDir = Join-Path $env:LOCALAPPDATA "koware"
 
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
@@ -13,6 +14,13 @@ New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 if ($Publish) {
     Write-Host "Publishing Koware CLI to $installDir ..."
     dotnet publish $cliProject -c Release -o $installDir | Out-Host
+
+    if (Test-Path $playerProject) {
+        Write-Host "Publishing Koware Player (WebView2) to $installDir ..."
+        dotnet publish $playerProject -c Release -o $installDir | Out-Host
+    } else {
+        Write-Warning "Player project not found at $playerProject; skipping player publish."
+    }
 } else {
     Write-Host "Skipping publish (use -Publish to prebuild). CLI will run via dotnet run if no exe is found."
 }
