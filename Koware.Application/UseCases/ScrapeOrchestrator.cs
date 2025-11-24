@@ -27,12 +27,20 @@ public sealed class ScrapeOrchestrator
         return _catalog.SearchAsync(query.Trim(), cancellationToken);
     }
 
-    public async Task<ScrapeResult> ExecuteAsync(ScrapePlan plan, CancellationToken cancellationToken = default)
+    public Task<ScrapeResult> ExecuteAsync(ScrapePlan plan, CancellationToken cancellationToken = default)
+    {
+        return ExecuteAsync(plan, selection: null, cancellationToken);
+    }
+
+    public async Task<ScrapeResult> ExecuteAsync(
+        ScrapePlan plan,
+        Func<IReadOnlyCollection<Anime>, Anime?>? selection,
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
         var matches = await SearchAsync(plan.Query, cancellationToken);
-        var selectedAnime = matches.FirstOrDefault();
+        var selectedAnime = selection?.Invoke(matches) ?? matches.FirstOrDefault();
 
         IReadOnlyCollection<Episode>? episodes = null;
         Episode? selectedEpisode = null;

@@ -66,6 +66,8 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandlePlayAsync(orchestrator, args, services, logger, cts.Token);
             case "last":
                 return await HandleLastAsync(args, services, logger, cts.Token);
+            case "continue":
+                return await HandleContinueAsync(args, services, logger, cts.Token);
             default:
                 logger.LogWarning("Unknown command: {Command}", command);
                 PrintUsage();
@@ -90,9 +92,21 @@ static async Task<int> ExecuteAndPlayAsync(
     IServiceProvider services,
     IWatchHistoryStore history,
     ILogger logger,
-    CancellationToken cancellationToken)
+    CancellationToken cancellationToken,
+    bool interactiveSelection = false)
 {
-    var result = await orchestrator.ExecuteAsync(plan, cancellationToken);
+    ScrapeResult result;
+    if (interactiveSelection)
+    {
+        result = await orchestrator.ExecuteAsync(
+            plan,
+            matches => SelectAnimeInteractive(plan.Query, matches),
+            cancellationToken);
+    }
+    else
+    {
+        result = await orchestrator.ExecuteAsync(plan, cancellationToken);
+    }
     if (result.SelectedEpisode is null || result.Streams is null || result.Streams.Count == 0)
     {
         logger.LogWarning("No streams found for the query/episode.");
@@ -172,7 +186,75 @@ static async Task<int> HandleLastAsync(string[] args, IServiceProvider services,
     var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
     var plan = new ScrapePlan(entry.AnimeTitle, entry.EpisodeNumber, entry.Quality);
 
-    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
+    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken, interactiveSelection: false);
+}
+
+static async Task<int> HandleContinueAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+{
+    string? animeQuery;
+    int? fromEpisode = null;
+    string? preferredQuality = null;
+
+    var queryParts = new List<string>();
+    for (var i = 1; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if (arg.Equals("--from", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            if (!int.TryParse(args[i + 1], out var parsedFrom))
+            {
+                logger.LogWarning("Episode number for --from must be an integer.");
+                PrintUsage();
+                return 1;
+            }
+
+            fromEpisode = parsedFrom;
+            i++;
+            continue;
+        }
+
+        if (arg.Equals("--quality", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            preferredQuality = args[i + 1];
+            i++;
+            continue;
+        }
+
+        queryParts.Add(arg);
+    }
+
+    animeQuery = queryParts.Count == 0 ? null : string.Join(' ', queryParts).Trim();
+
+    var history = services.GetRequiredService<IWatchHistoryStore>();
+    WatchHistoryEntry? entry;
+
+    if (string.IsNullOrWhiteSpace(animeQuery))
+    {
+        entry = await history.GetLastAsync(cancellationToken);
+    }
+    else
+    {
+        entry = await history.GetLastForAnimeAsync(animeQuery, cancellationToken);
+    }
+
+    if (entry is null)
+    {
+        logger.LogWarning("No watch history found to continue from.");
+        return 1;
+    }
+
+    var targetEpisode = fromEpisode ?? (entry.EpisodeNumber + 1);
+    if (targetEpisode <= 0)
+    {
+        targetEpisode = 1;
+    }
+
+    var quality = preferredQuality ?? entry.Quality;
+
+    var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
+    var plan = new ScrapePlan(entry.AnimeTitle, targetEpisode, quality);
+
+    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken, interactiveSelection: false);
 }
 
 static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string[] args, ILogger logger, CancellationToken cancellationToken)
@@ -224,7 +306,63 @@ static async Task<int> HandlePlayAsync(ScrapeOrchestrator orchestrator, string[]
     }
 
     var history = services.GetRequiredService<IWatchHistoryStore>();
-    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
+    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken, interactiveSelection: true);
+}
+
+static Anime? SelectAnimeInteractive(string query, IReadOnlyCollection<Anime> matches)
+{
+    if (matches.Count == 0)
+    {
+        return null;
+    }
+
+    if (matches.Count == 1)
+    {
+        return matches.First();
+    }
+
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine($"Multiple matches for \"{query}\":");
+    Console.ResetColor();
+
+    var index = 1;
+    foreach (var anime in matches)
+    {
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($"  [{index}] ");
+        Console.ResetColor();
+        Console.WriteLine(anime.Title);
+        index++;
+    }
+
+    while (true)
+    {
+        Console.Write($"Select anime [1-{matches.Count}] (or 0 to cancel): ");
+        var input = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            continue;
+        }
+
+        if (!int.TryParse(input, out var choice))
+        {
+            Console.WriteLine("Please enter a number.");
+            continue;
+        }
+
+        if (choice == 0)
+        {
+            return null;
+        }
+
+        if (choice < 1 || choice > matches.Count)
+        {
+            Console.WriteLine("Choice out of range.");
+            continue;
+        }
+
+        return matches.ElementAt(choice - 1);
+    }
 }
 
 static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger)
@@ -307,7 +445,9 @@ static ScrapePlan ParsePlan(string[] args)
 
 static void RenderSearch(string query, IReadOnlyCollection<Anime> matches)
 {
+    Console.ForegroundColor = ConsoleColor.Cyan;
     Console.WriteLine($"Matches for \"{query}\":");
+    Console.ResetColor();
     if (matches.Count == 0)
     {
         Console.WriteLine("  No results yet. Try a different query.");
@@ -317,14 +457,19 @@ static void RenderSearch(string query, IReadOnlyCollection<Anime> matches)
     var index = 1;
     foreach (var anime in matches)
     {
-        Console.WriteLine($"  [{index}] {anime.Title} -> {anime.DetailPage}");
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($"  [{index}] ");
+        Console.ResetColor();
+        Console.WriteLine($"{anime.Title} -> {anime.DetailPage}");
         index++;
     }
 }
 
 static void RenderPlan(ScrapePlan plan, ScrapeResult result)
 {
+    Console.ForegroundColor = ConsoleColor.Cyan;
     Console.WriteLine($"Query: {plan.Query}");
+    Console.ResetColor();
     Console.WriteLine($"Matches: {result.Matches.Count}");
 
     if (result.SelectedAnime is null)
@@ -366,10 +511,14 @@ static void RenderPlan(ScrapePlan plan, ScrapeResult result)
 
 static void PrintUsage()
 {
+    Console.ForegroundColor = ConsoleColor.Cyan;
     Console.WriteLine("Koware CLI");
+    Console.ResetColor();
     Console.WriteLine("Usage:");
     Console.WriteLine("  search <query>");
     Console.WriteLine("  stream <query> [--episode <number>] [--quality <label>]");
     Console.WriteLine("  watch <query> [--episode <number>] [--quality <label>]");
     Console.WriteLine("  play  <query> [--episode <number>] [--quality <label>] (alias for 'watch')");
+    Console.WriteLine("  last  [--play] [--json]");
+    Console.WriteLine("  continue [<anime name>] [--from <episode>] [--quality <label>]");
 }

@@ -32,6 +32,8 @@ public interface IWatchHistoryStore
     Task AddAsync(WatchHistoryEntry entry, CancellationToken cancellationToken = default);
 
     Task<WatchHistoryEntry?> GetLastAsync(CancellationToken cancellationToken = default);
+
+    Task<WatchHistoryEntry?> GetLastForAnimeAsync(string animeTitle, CancellationToken cancellationToken = default);
 }
 
 public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
@@ -84,6 +86,47 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
             ORDER BY watched_at_utc DESC
             LIMIT 1;
             """;
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new WatchHistoryEntry
+        {
+            Provider = reader.GetString(0),
+            AnimeId = reader.GetString(1),
+            AnimeTitle = reader.GetString(2),
+            EpisodeNumber = reader.GetInt32(3),
+            EpisodeTitle = reader.IsDBNull(4) ? null : reader.GetString(4),
+            Quality = reader.IsDBNull(5) ? null : reader.GetString(5),
+            WatchedAt = DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
+        };
+    }
+
+    public async Task<WatchHistoryEntry?> GetLastForAnimeAsync(string animeTitle, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(animeTitle))
+        {
+            throw new ArgumentException("Anime title is required", nameof(animeTitle));
+        }
+
+        await EnsureInitializedAsync(cancellationToken);
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $
+            """
+            SELECT provider, anime_id, anime_title, episode_number, episode_title, quality, watched_at_utc
+            FROM {TableName}
+            WHERE anime_title = $animeTitle COLLATE NOCASE
+            ORDER BY watched_at_utc DESC
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$animeTitle", animeTitle);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
