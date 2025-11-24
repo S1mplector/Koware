@@ -431,6 +431,20 @@ static string? ResolveExecutablePath(string command)
         return command;
     }
 
+    var wellKnown = new[]
+    {
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "VideoLAN", "VLC", "vlc.exe"),
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "VideoLAN", "VLC", "vlc.exe")
+    };
+
+    foreach (var path in wellKnown)
+    {
+        if (File.Exists(path) && command.Equals("vlc", StringComparison.OrdinalIgnoreCase))
+        {
+            return path;
+        }
+    }
+
     var candidates = Path.HasExtension(command)
         ? new[] { command }
         : new[] { command, $"{command}.exe" };
@@ -460,8 +474,8 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
     {
         candidates.Add(options.Command);
     }
-    candidates.Add("vlc");
-    candidates.Add("mpv");
+    candidates.AddRange(new[] { "vlc", "mpv" });
+    candidates = candidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
     string? resolvedCommand = null;
     string chosen = candidates.FirstOrDefault(c => (resolvedCommand = ResolveExecutablePath(c)) is not null)
