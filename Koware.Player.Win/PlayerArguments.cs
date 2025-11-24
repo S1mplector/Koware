@@ -4,12 +4,14 @@ namespace Koware.Player.Win;
 
 public sealed class PlayerArguments
 {
-    public PlayerArguments(Uri url, string title, string? referer, string? userAgent)
+    public PlayerArguments(Uri url, string title, string? referer, string? userAgent, Uri? subtitleUrl, string? subtitleLabel)
     {
         Url = url;
         Title = string.IsNullOrWhiteSpace(title) ? "Koware Player" : title;
         Referer = referer;
         UserAgent = userAgent;
+        SubtitleUrl = subtitleUrl;
+        SubtitleLabel = subtitleLabel;
     }
 
     public Uri Url { get; }
@@ -19,6 +21,10 @@ public sealed class PlayerArguments
     public string? Referer { get; }
 
     public string? UserAgent { get; }
+
+    public Uri? SubtitleUrl { get; }
+
+    public string? SubtitleLabel { get; }
 
     public static bool TryParse(string[] args, out PlayerArguments? parsed, out string? error)
     {
@@ -40,6 +46,8 @@ public sealed class PlayerArguments
         var title = args.Length > 1 ? args[1] : "Koware Player";
         string? referer = null;
         string? userAgent = null;
+        Uri? subtitleUrl = null;
+        string? subtitleLabel = null;
 
         for (var i = 2; i < args.Length; i++)
         {
@@ -56,6 +64,21 @@ public sealed class PlayerArguments
                 continue;
             }
 
+            if (current.Equals("--subtitle", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                if (Uri.TryCreate(args[++i], UriKind.Absolute, out var subUri))
+                {
+                    subtitleUrl = subUri;
+                }
+                continue;
+            }
+
+            if (current.Equals("--subtitle-label", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                subtitleLabel = args[++i];
+                continue;
+            }
+
             if (current.Equals("--ua", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
             {
                 userAgent = args[++i];
@@ -66,7 +89,7 @@ public sealed class PlayerArguments
             return false;
         }
 
-        parsed = new PlayerArguments(url, title, referer, userAgent);
+        parsed = new PlayerArguments(url, title, referer, userAgent, subtitleUrl, subtitleLabel);
         return true;
     }
 }

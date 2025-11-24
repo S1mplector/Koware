@@ -9,6 +9,8 @@ internal static class HtmlPageBuilder
     {
         var urlJson = JsonSerializer.Serialize(args.Url.ToString());
         var titleJson = JsonSerializer.Serialize(args.Title);
+        var subtitleJson = JsonSerializer.Serialize(args.SubtitleUrl?.ToString());
+        var subtitleLabelJson = JsonSerializer.Serialize(args.SubtitleLabel);
         var encodedTitle = WebUtility.HtmlEncode(args.Title);
 
         const string template = """
@@ -98,6 +100,41 @@ internal static class HtmlPageBuilder
             transition: opacity 0.25s ease;
         }
 
+        #controls {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            display: flex;
+            gap: 8px;
+            z-index: 2;
+        }
+
+        #cc-toggle {
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            background: rgba(56, 189, 248, 0.15);
+            color: var(--text);
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-weight: 600;
+            font-size: 12px;
+            letter-spacing: 0.01em;
+            cursor: pointer;
+            transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+        }
+
+        #cc-toggle[aria-pressed="true"] {
+            background: rgba(56, 189, 248, 0.15);
+            border-color: rgba(56, 189, 248, 0.35);
+        }
+
+        #cc-toggle:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(226, 232, 240, 0.15);
+        }
+
         #log {
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
             font-size: 12px;
@@ -115,6 +152,9 @@ internal static class HtmlPageBuilder
     <div id="chrome">
         <div id="title">{{TITLE}}</div>
         <div id="player-wrapper">
+            <div id="controls" aria-label="Player controls">
+                <button id="cc-toggle" type="button" aria-pressed="false">CC</button>
+            </div>
             <video id="video" controls autoplay playsinline></video>
             <div id="status">Loading stream...</div>
         </div>
@@ -129,8 +169,14 @@ internal static class HtmlPageBuilder
         const video = document.getElementById("video");
         const statusEl = document.getElementById("status");
         const logEl = enableLogging ? document.getElementById("log") : null;
+        const subtitleUrl = {{SUB_JSON}};
+        const subtitleLabel = {{SUB_LABEL_JSON}};
+        const ccToggle = document.getElementById("cc-toggle");
         let hlsInstance = null;
         let fallbackUsed = false;
+        let subtitleTrackEl = null;
+        let subtitlesEnabled = true;
+        const hasSubtitles = !!subtitleUrl;
 
         video.playsInline = true;
         video.muted = true;
@@ -245,13 +291,59 @@ internal static class HtmlPageBuilder
             hls.loadSource(source);
             hls.attachMedia(video);
             log("Using hls.js");
+            attachSubtitle();
             return true;
         }
 
         function attachStandard() {
             video.src = source;
             log("Using direct src (non-HLS)");
+            attachSubtitle();
             return true;
+        }
+
+        function attachSubtitle() {
+            if (!subtitleUrl) {
+                updateCcToggle(false, true);
+                return;
+            }
+            const track = document.createElement("track");
+            track.kind = "subtitles";
+            track.src = subtitleUrl;
+            track.default = true;
+            track.label = subtitleLabel || "Subtitles";
+            track.srclang = "en";
+            video.appendChild(track);
+            subtitleTrackEl = track;
+            updateCcToggle(true, false);
+        }
+
+        function syncSubtitleToggle(on) {
+            if (!subtitleTrackEl) return;
+            const tracks = video.textTracks;
+            for (let i = 0; i < tracks.length; i++) {
+                tracks[i].mode = on ? "showing" : "disabled";
+            }
+            if (ccToggle) {
+                ccToggle.textContent = on ? "CC On" : "CC Off";
+                ccToggle.setAttribute("aria-pressed", on ? "true" : "false");
+            }
+        }
+
+        function updateCcToggle(enabled, disabledState) {
+            if (!ccToggle) return;
+            if (!enabled) {
+                ccToggle.textContent = "CC N/A";
+                ccToggle.disabled = true;
+                return;
+            }
+            ccToggle.disabled = !!disabledState;
+            ccToggle.textContent = subtitlesEnabled ? "CC On" : "CC Off";
+            ccToggle.setAttribute("aria-pressed", subtitlesEnabled ? "true" : "false");
+            ccToggle.onclick = () => {
+                subtitlesEnabled = !subtitlesEnabled;
+                syncSubtitleToggle(subtitlesEnabled);
+            };
         }
 
         (function start() {
@@ -302,6 +394,8 @@ internal static class HtmlPageBuilder
         return template
             .Replace("{{TITLE}}", encodedTitle)
             .Replace("{{URL_JSON}}", urlJson)
-            .Replace("{{TITLE_JSON}}", titleJson);
+            .Replace("{{TITLE_JSON}}", titleJson)
+            .Replace("{{SUB_JSON}}", subtitleJson)
+            .Replace("{{SUB_LABEL_JSON}}", subtitleLabelJson);
     }
 }

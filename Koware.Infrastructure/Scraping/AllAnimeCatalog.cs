@@ -291,7 +291,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         return null;
     }
 
-    private void AddLinkIfValid(List<StreamLink> links, string url, string quality, string provider, string? referrer)
+    private void AddLinkIfValid(List<StreamLink> links, string url, string quality, string provider, string? referrer, IReadOnlyList<SubtitleTrack>? subtitles = null)
     {
         if (string.IsNullOrWhiteSpace(url))
         {
@@ -300,13 +300,13 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
 
         if (Uri.TryCreate(url, UriKind.Absolute, out var abs))
         {
-            links.Add(new StreamLink(abs, quality, provider, referrer));
+            links.Add(new StreamLink(abs, quality, provider, referrer, subtitles));
             return;
         }
 
         if (Uri.TryCreate(new Uri(_options.Referer), url, out var resolved))
         {
-            links.Add(new StreamLink(resolved, quality, provider, referrer));
+            links.Add(new StreamLink(resolved, quality, provider, referrer, subtitles));
         }
     }
 
@@ -331,6 +331,8 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         var body = await response.Content.ReadAsStringAsync(timeoutCts.Token);
         var lines = body.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+        var subtitleTracks = ExtractSubtitleTracks(lines, m3u8Url);
+
         string? currentResolution = null;
         foreach (var line in lines)
         {
@@ -354,17 +356,72 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
                     url = resolved.ToString();
                 }
 
-                AddLinkIfValid(links, url, $"{currentResolution}p", provider, effectiveReferrer);
+                AddLinkIfValid(links, url, $"{currentResolution}p", provider, effectiveReferrer, subtitleTracks);
                 currentResolution = null;
             }
         }
 
         if (links.Count == 0)
         {
-            AddLinkIfValid(links, m3u8Url, "auto", provider, effectiveReferrer);
+            AddLinkIfValid(links, m3u8Url, "auto", provider, effectiveReferrer, subtitleTracks);
         }
 
         return links;
+    }
+
+    private static IReadOnlyList<SubtitleTrack> ExtractSubtitleTracks(string[] lines, string m3u8Url)
+    {
+        var subtitles = new List<SubtitleTrack>();
+        foreach (var line in lines.Where(l => l.StartsWith("#EXT-X-MEDIA", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (!line.Contains("TYPE=SUBTITLES", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var attributes = ParseAttributes(line);
+            if (!attributes.TryGetValue("URI", out var uriVal) || string.IsNullOrWhiteSpace(uriVal))
+            {
+                continue;
+            }
+
+            var label = attributes.TryGetValue("NAME", out var nameVal) ? nameVal : "Subtitles";
+            var lang = attributes.TryGetValue("LANGUAGE", out var langVal) ? langVal : null;
+            var subtitleUrl = uriVal;
+            if (!Uri.IsWellFormedUriString(subtitleUrl, UriKind.Absolute) && Uri.TryCreate(new Uri(m3u8Url), subtitleUrl, out var resolvedSub))
+            {
+                subtitleUrl = resolvedSub.ToString();
+            }
+
+            if (Uri.TryCreate(subtitleUrl, UriKind.Absolute, out var subUri))
+            {
+                subtitles.Add(new SubtitleTrack(label, subUri, lang));
+            }
+        }
+
+        return subtitles;
+    }
+
+    private static Dictionary<string, string> ParseAttributes(string line)
+    {
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var colonIdx = line.IndexOf(':');
+        if (colonIdx < 0 || colonIdx + 1 >= line.Length)
+        {
+            return dict;
+        }
+
+        var attributePart = line[(colonIdx + 1)..];
+        var parts = attributePart.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var part in parts)
+        {
+            var kv = part.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (kv.Length != 2) continue;
+            var value = kv[1].Trim('"');
+            dict[kv[0]] = value;
+        }
+
+        return dict;
     }
 
     private static (string showId, int episodeNumber) ParseEpisodeId(Episode episode)

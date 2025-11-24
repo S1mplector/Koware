@@ -28,6 +28,7 @@ public partial class MainWindow : Window
         ".mov",
         ".cmfv",
         ".cmfa",
+        ".vtt",
         ".jpg",
         ".jpeg",
         ".png",

@@ -364,7 +364,13 @@ static async Task<int> HandlePlanAsync(ScrapeOrchestrator orchestrator, string[]
                 url = s.Url.ToString(),
                 quality = s.Quality,
                 provider = s.Provider,
-                referer = s.Referrer
+                referer = s.Referrer,
+                subtitles = s.Subtitles.Select(sub => new
+                {
+                    label = sub.Label,
+                    url = sub.Url.ToString(),
+                    language = sub.Language
+                })
             }) ?? Enumerable.Empty<object>(),
             matches = result.Matches.Select(m => new { id = m.Id.Value, title = m.Title })
         };
@@ -718,6 +724,7 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
 
     var playerPath = resolved.Path;
     var playerName = Path.GetFileNameWithoutExtension(playerPath);
+    var subtitle = stream.Subtitles.FirstOrDefault();
 
     if (string.Equals(playerName, "Koware.Player.Win", StringComparison.OrdinalIgnoreCase))
     {
@@ -740,6 +747,17 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
         {
             start.ArgumentList.Add("--user-agent");
             start.ArgumentList.Add(httpUserAgent!);
+        }
+
+        if (subtitle is not null)
+        {
+            start.ArgumentList.Add("--subtitle");
+            start.ArgumentList.Add(subtitle.Url.ToString());
+            if (!string.IsNullOrWhiteSpace(subtitle.Label))
+            {
+                start.ArgumentList.Add("--subtitle-label");
+                start.ArgumentList.Add(subtitle.Label);
+            }
         }
 
         return StartProcessAndWait(logger, start, playerPath);
