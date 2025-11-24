@@ -258,7 +258,8 @@ static async Task<int> HandleContinueAsync(string[] args, IServiceProvider servi
     }
     else
     {
-        entry = await history.GetLastForAnimeAsync(animeQuery, cancellationToken);
+        entry = await history.SearchLastAsync(animeQuery, cancellationToken)
+                ?? await history.GetLastForAnimeAsync(animeQuery, cancellationToken);
     }
 
     if (entry is null)
