@@ -360,7 +360,13 @@ static async Task<ScrapePlan> MaybeSelectMatchAsync(ScrapeOrchestrator orchestra
 
 static StreamLink? PickBestStream(IReadOnlyCollection<StreamLink> streams)
 {
-    var m3u8Preferred = streams
+    var pool = streams.Where(s => !IsBadHost(s)).ToArray();
+    if (pool.Length == 0)
+    {
+        pool = streams.ToArray();
+    }
+
+    var m3u8Preferred = pool
         .Where(s => s.Url.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase))
         .OrderByDescending(ScoreStream)
         .ToArray();
@@ -369,18 +375,18 @@ static StreamLink? PickBestStream(IReadOnlyCollection<StreamLink> streams)
         return m3u8Preferred.First();
     }
 
-    var playlists = streams.Where(IsPlaylist).ToArray();
+    var playlists = pool.Where(IsPlaylist).ToArray();
     if (playlists.Length > 0)
     {
         return playlists.OrderByDescending(ScoreStream).FirstOrDefault();
     }
 
-    var candidates = streams.Where(s => !IsJsonStream(s)).ToArray();
+    var candidates = pool.Where(s => !IsJsonStream(s)).ToArray();
     var best = candidates
         .OrderByDescending(ScoreStream)
         .FirstOrDefault();
 
-    return best ?? streams.OrderByDescending(ScoreStream).FirstOrDefault();
+    return best ?? pool.OrderByDescending(ScoreStream).FirstOrDefault();
 }
 
 static int ScoreStream(StreamLink stream)
@@ -388,6 +394,7 @@ static int ScoreStream(StreamLink stream)
     var score = 0;
     var url = stream.Url.ToString();
     var host = stream.Url.Host;
+    var provider = stream.Provider ?? string.Empty;
     var quality = stream.Quality ?? string.Empty;
 
     if (url.Contains(".m3u8", StringComparison.OrdinalIgnoreCase) || quality.Contains("hls", StringComparison.OrdinalIgnoreCase))
@@ -410,9 +417,16 @@ static int ScoreStream(StreamLink stream)
         score += 20;
     }
 
-    if (host.Contains("sharepoint", StringComparison.OrdinalIgnoreCase) || host.Contains("haildrop", StringComparison.OrdinalIgnoreCase))
+    // Provider-aware tweaks similar to ani-cli
+    if (provider.Contains("hianime", StringComparison.OrdinalIgnoreCase)
+        || provider.Contains("wixmp", StringComparison.OrdinalIgnoreCase))
     {
-        score -= 80;
+        score += 80;
+    }
+
+    if (IsBadHost(stream))
+    {
+        score -= 500;
     }
 
     if (host.Contains("akamaized", StringComparison.OrdinalIgnoreCase) || host.Contains("akamai", StringComparison.OrdinalIgnoreCase))
@@ -431,6 +445,13 @@ static int ScoreStream(StreamLink stream)
     }
 
     return score;
+}
+
+static bool IsBadHost(StreamLink stream)
+{
+    var host = stream.Url.Host;
+    return host.Contains("haildrop", StringComparison.OrdinalIgnoreCase)
+           || host.Contains("sharepoint", StringComparison.OrdinalIgnoreCase);
 }
 
 static bool TryParseQualityNumber(string? quality, out int value)
