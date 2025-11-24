@@ -24,7 +24,7 @@ static IHost BuildHost(string[] args)
     builder.Services.AddApplication();
     builder.Services.AddInfrastructure(builder.Configuration);
     builder.Services.Configure<PlayerOptions>(builder.Configuration.GetSection("Player"));
-    builder.Services.AddSingleton<IWatchHistoryStore, FileWatchHistoryStore>();
+    builder.Services.AddSingleton<IWatchHistoryStore, SqliteWatchHistoryStore>();
 
     return builder.Build();
 }
