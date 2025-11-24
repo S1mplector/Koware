@@ -1,6 +1,6 @@
 # Koware
 
-Layered C# anime scraper inspired by `ani-cli`, wired against the AllAnime provider with mpv/vlc playback hooks.
+Layered C# Windows native anime scraper TUI application.
 
 ## Layout
 - `Koware.Domain` – core models (`Anime`, `Episode`, `StreamLink`).
