@@ -4,7 +4,6 @@ using Koware.Infrastructure.Scraping;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using System.Net.Http.Headers;
 
 namespace Koware.Infrastructure.DependencyInjection;
 
@@ -14,29 +13,22 @@ public static class InfrastructureServiceCollectionExtensions
     {
         if (configuration is not null)
         {
-            services.Configure<AniCliOptions>(configuration.GetSection("Scraper"));
+            services.Configure<AllAnimeOptions>(configuration.GetSection("AllAnime"));
         }
         else
         {
-            services.Configure<AniCliOptions>(_ => { });
+            services.Configure<AllAnimeOptions>(_ => { });
         }
 
-        services.AddHttpClient<AniCliCatalog>((sp, client) =>
+        services.AddHttpClient<AllAnimeCatalog>((sp, client) =>
         {
-            var options = sp.GetRequiredService<IOptions<AniCliOptions>>().Value;
-            if (!string.IsNullOrWhiteSpace(options.BaseUrl))
-            {
-                client.BaseAddress = new Uri(options.BaseUrl);
-            }
-
-            if (!string.IsNullOrWhiteSpace(options.UserAgent))
-            {
-                client.DefaultRequestHeaders.UserAgent.Clear();
-                client.DefaultRequestHeaders.UserAgent.ParseAdd(options.UserAgent);
-            }
+            var options = sp.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+            client.BaseAddress = new Uri(options.ApiBase);
+            client.DefaultRequestHeaders.Referrer = new Uri(options.Referer);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(options.UserAgent);
         });
 
-        services.AddSingleton<IAnimeCatalog, AniCliCatalog>();
+        services.AddSingleton<IAnimeCatalog, AllAnimeCatalog>();
         return services;
     }
 }

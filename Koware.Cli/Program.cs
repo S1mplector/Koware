@@ -1,13 +1,16 @@
+using System.Diagnostics;
 using System.Linq;
 using Koware.Application.DependencyInjection;
 using Koware.Application.Models;
 using Koware.Application.UseCases;
 using Koware.Domain.Models;
 using Koware.Infrastructure.DependencyInjection;
+using Koware.Cli.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 using var host = BuildHost(args);
 var exitCode = await RunAsync(host, args);
@@ -19,6 +22,7 @@ static IHost BuildHost(string[] args)
     builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.json"), optional: true, reloadOnChange: true);
     builder.Services.AddApplication();
     builder.Services.AddInfrastructure(builder.Configuration);
+    builder.Services.Configure<PlayerOptions>(builder.Configuration.GetSection("Player"));
 
     return builder.Build();
 }
@@ -55,6 +59,8 @@ static async Task<int> RunAsync(IHost host, string[] args)
             case "plan":
             case "stream":
                 return await HandlePlanAsync(orchestrator, args, logger, cts.Token);
+            case "play":
+                return await HandlePlayAsync(orchestrator, args, services, logger, cts.Token);
             default:
                 logger.LogWarning("Unknown command: {Command}", command);
                 PrintUsage();
@@ -105,6 +111,65 @@ static async Task<int> HandlePlanAsync(ScrapeOrchestrator orchestrator, string[]
     var result = await orchestrator.ExecuteAsync(plan, cancellationToken);
     RenderPlan(plan, result);
     return 0;
+}
+
+static async Task<int> HandlePlayAsync(ScrapeOrchestrator orchestrator, string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+{
+    ScrapePlan plan;
+    try
+    {
+        plan = ParsePlan(args);
+    }
+    catch (ArgumentException ex)
+    {
+        logger.LogWarning(ex, "Invalid arguments for play command");
+        PrintUsage();
+        return 1;
+    }
+
+    var result = await orchestrator.ExecuteAsync(plan, cancellationToken);
+    if (result.SelectedEpisode is null || result.Streams is null || result.Streams.Count == 0)
+    {
+        logger.LogWarning("No streams found for the query/episode.");
+        RenderPlan(plan, result);
+        return 1;
+    }
+
+    var stream = result.Streams.First();
+    var options = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
+    return LaunchPlayer(options, stream, logger);
+}
+
+static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger)
+{
+    var command = string.IsNullOrWhiteSpace(options.Command) ? "mpv" : options.Command;
+    var arguments = string.IsNullOrWhiteSpace(options.Args)
+        ? $"\"{stream.Url}\""
+        : $"{options.Args} \"{stream.Url}\"";
+
+    try
+    {
+        var start = new ProcessStartInfo
+        {
+            FileName = command,
+            Arguments = arguments,
+            UseShellExecute = false
+        };
+
+        using var proc = Process.Start(start);
+        if (proc is null)
+        {
+            logger.LogError("Failed to start player process.");
+            return 1;
+        }
+
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Unable to launch player {Command}", command);
+        return 1;
+    }
 }
 
 static ScrapePlan ParsePlan(string[] args)
@@ -212,4 +277,5 @@ static void PrintUsage()
     Console.WriteLine("Usage:");
     Console.WriteLine("  search <query>");
     Console.WriteLine("  stream <query> [--episode <number>] [--quality <label>]");
+    Console.WriteLine("  play <query> [--episode <number>] [--quality <label>]");
 }
