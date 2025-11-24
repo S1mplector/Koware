@@ -129,6 +129,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         await Task.WhenAll(tasks);
 
         return streams
+            .Where(s => s.Url.Scheme.StartsWith("http", StringComparison.OrdinalIgnoreCase))
             .GroupBy(s => s.Url)
             .Select(g => g.First())
             .OrderByDescending(s => ParseQualityScore(s.Quality))

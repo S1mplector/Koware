@@ -6,6 +6,7 @@ using Koware.Application.Models;
 using Koware.Application.UseCases;
 using Koware.Domain.Models;
 using Koware.Infrastructure.DependencyInjection;
+using Koware.Infrastructure.Configuration;
 using Koware.Cli.Configuration;
 using Koware.Cli.History;
 using Microsoft.Extensions.Configuration;
@@ -112,9 +113,11 @@ static async Task<int> ExecuteAndPlayAsync(
         logger.LogWarning("No playable streams found.");
         return 1;
     }
+    logger.LogInformation("Selected stream {Quality} from host {Host}", stream.Quality ?? "unknown", stream.Url.Host);
 
-    var options = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
-    var exitCode = LaunchPlayer(options, stream, logger);
+    var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
+    var allAnimeOptions = services.GetService<IOptions<AllAnimeOptions>>()?.Value;
+    var exitCode = LaunchPlayer(playerOptions, stream, logger, allAnimeOptions?.Referer, allAnimeOptions?.UserAgent);
 
     if (result.SelectedAnime is not null && result.SelectedEpisode is not null)
     {
@@ -357,9 +360,27 @@ static async Task<ScrapePlan> MaybeSelectMatchAsync(ScrapeOrchestrator orchestra
 
 static StreamLink? PickBestStream(IReadOnlyCollection<StreamLink> streams)
 {
-    return streams
+    var m3u8Preferred = streams
+        .Where(s => s.Url.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase))
+        .OrderByDescending(ScoreStream)
+        .ToArray();
+    if (m3u8Preferred.Length > 0)
+    {
+        return m3u8Preferred.First();
+    }
+
+    var playlists = streams.Where(IsPlaylist).ToArray();
+    if (playlists.Length > 0)
+    {
+        return playlists.OrderByDescending(ScoreStream).FirstOrDefault();
+    }
+
+    var candidates = streams.Where(s => !IsJsonStream(s)).ToArray();
+    var best = candidates
         .OrderByDescending(ScoreStream)
         .FirstOrDefault();
+
+    return best ?? streams.OrderByDescending(ScoreStream).FirstOrDefault();
 }
 
 static int ScoreStream(StreamLink stream)
@@ -389,14 +410,24 @@ static int ScoreStream(StreamLink stream)
         score += 20;
     }
 
-    if (host.Contains("sharepoint", StringComparison.OrdinalIgnoreCase))
+    if (host.Contains("sharepoint", StringComparison.OrdinalIgnoreCase) || host.Contains("haildrop", StringComparison.OrdinalIgnoreCase))
     {
-        score -= 150;
+        score -= 80;
     }
 
-    if (host.Contains("akamaized", StringComparison.OrdinalIgnoreCase) || host.Contains("haildrop", StringComparison.OrdinalIgnoreCase))
+    if (host.Contains("akamaized", StringComparison.OrdinalIgnoreCase) || host.Contains("akamai", StringComparison.OrdinalIgnoreCase))
     {
-        score += 30;
+        score += 50;
+    }
+
+    if (IsJsonStream(stream))
+    {
+        score -= 300;
+    }
+
+    if (IsSegment(stream))
+    {
+        score -= 80;
     }
 
     return score;
@@ -417,6 +448,27 @@ static bool TryParseQualityNumber(string? quality, out int value)
     }
 
     return int.TryParse(digits, out value);
+}
+
+static bool IsPlaylist(StreamLink stream)
+{
+    var path = stream.Url.AbsolutePath;
+    return path.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase)
+           || path.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase)
+           || path.Contains("manifest", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsSegment(StreamLink stream)
+{
+    var path = stream.Url.AbsolutePath;
+    return path.EndsWith(".m4s", StringComparison.OrdinalIgnoreCase)
+           || path.EndsWith(".ts", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsJsonStream(StreamLink stream)
+{
+    var path = stream.Url.AbsolutePath;
+    return path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
 }
 
 static string? ResolveExecutablePath(string command)
@@ -467,7 +519,7 @@ static string? ResolveExecutablePath(string command)
     return null;
 }
 
-static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger)
+static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger, string? httpReferrer, string? httpUserAgent)
 {
     var candidates = new List<string>();
     if (!string.IsNullOrWhiteSpace(options.Command))
@@ -499,12 +551,46 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
     }
 
     var argsPrefix = string.IsNullOrWhiteSpace(options.Args) ? defaultArgs : options.Args;
-    var arguments = string.IsNullOrWhiteSpace(argsPrefix)
+
+    var headerArgs = new List<string>();
+    if (!string.IsNullOrWhiteSpace(httpReferrer))
+    {
+        if (string.Equals(playerName, "vlc", StringComparison.OrdinalIgnoreCase))
+        {
+            headerArgs.Add($"--http-referrer=\"{httpReferrer}\"");
+        }
+        else if (string.Equals(playerName, "mpv", StringComparison.OrdinalIgnoreCase))
+        {
+            headerArgs.Add($"--referrer=\"{httpReferrer}\"");
+        }
+    }
+
+    if (!string.IsNullOrWhiteSpace(httpUserAgent))
+    {
+        if (string.Equals(playerName, "vlc", StringComparison.OrdinalIgnoreCase))
+        {
+            headerArgs.Add($"--http-user-agent=\"{httpUserAgent}\"");
+        }
+        else if (string.Equals(playerName, "mpv", StringComparison.OrdinalIgnoreCase))
+        {
+            headerArgs.Add($"--user-agent=\"{httpUserAgent}\"");
+        }
+    }
+
+    var argParts = new List<string>();
+    if (!string.IsNullOrWhiteSpace(argsPrefix))
+    {
+        argParts.Add(argsPrefix);
+    }
+    argParts.AddRange(headerArgs);
+
+    var arguments = argParts.Count == 0
         ? $"\"{stream.Url}\""
-        : $"{argsPrefix} \"{stream.Url}\"";
+        : $"{string.Join(" ", argParts)} \"{stream.Url}\"";
 
     try
     {
+        logger.LogInformation("Launching player: {Player} {Args}", resolvedCommand, arguments);
         var start = new ProcessStartInfo
         {
             FileName = resolvedCommand,
@@ -520,6 +606,11 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
         }
 
         proc.WaitForExit();
+        if (proc.ExitCode != 0)
+        {
+            logger.LogWarning("Player exited with code {ExitCode}.", proc.ExitCode);
+        }
+
         return proc.ExitCode;
     }
     catch (Exception ex)
