@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
@@ -146,10 +147,10 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
         }
     }
 
-    private async Task InsertAsync(SqliteConnection connection, WatchHistoryEntry entry, SqliteTransaction? transaction, CancellationToken cancellationToken)
+    private async Task InsertAsync(SqliteConnection connection, WatchHistoryEntry entry, DbTransaction? transaction, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
+        command.Transaction = transaction as SqliteTransaction;
         command.CommandText = $"""
             INSERT INTO {TableName} (provider, anime_id, anime_title, episode_number, episode_title, quality, watched_at_utc)
             VALUES ($provider, $animeId, $animeTitle, $episodeNumber, $episodeTitle, $quality, $watchedAt);

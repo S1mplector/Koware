@@ -24,13 +24,13 @@ Configuration defaults live in `Koware.Cli/appsettings.json` (`AllAnime` provide
 Watch history now lives in `%APPDATA%\koware\history.db` (SQLite). If you had an older `history.json`, it is imported on first run and renamed to `history.bak`.
 
 ## Global command
-`koware.cmd` (root) is a tiny shim so you can invoke `koware` from anywhere. Add the repo root to your `PATH` or copy the shim into a directory already on `PATH`. For faster startup, publish once and let the shim pick up the built exe:
+`koware.cmd` (root) is a tiny shim so you can invoke `koware` from anywhere. Run the helper script once to install it onto your PATH (optionally publishing a Release build for speed):
 ```powershell
-dotnet publish .\Koware.Cli -c Release -o "$env:LOCALAPPDATA\koware"
-Copy-Item .\koware.cmd "$env:LOCALAPPDATA\koware\koware.cmd" -Force
-setx PATH "$($env:PATH);$env:LOCALAPPDATA\koware"   # once
+# From repo root
+.\install-koware.ps1 -Publish   # publish to %LOCALAPPDATA%\koware and add to PATH
+# or skip -Publish to keep running via dotnet run when no exe is found
 ```
-After that, `koware search "bleach"` or `koware watch "haikyuu" --episode 1` will work from any PowerShell prompt.
+Then in a new PowerShell session, `koware search "bleach"` or `koware watch "haikyuu" --episode 1` will work from any directory.
 
 ## Notes / next steps
 - AllAnime endpoints are consumed with the same decode flow ani-cli uses; if the provider changes, update `AllAnimeCatalog`.

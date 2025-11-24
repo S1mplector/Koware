@@ -1,13 +1,17 @@
 @echo off
 setlocal
 
-set "KOWARE_ROOT=%~dp0"
-set "PROJECT=%KOWARE_ROOT%Koware.Cli"
+set "SCRIPT_DIR=%~dp0"
+set "PUBLISHED_EXE=%SCRIPT_DIR%Koware.Cli.exe"
+set "PROJECT_DIR=%SCRIPT_DIR%Koware.Cli"
 
-if exist "%PROJECT%\\bin\\Release\\net10.0\\publish\\Koware.Cli.exe" (
-    "%PROJECT%\\bin\\Release\\net10.0\\publish\\Koware.Cli.exe" %*
+if exist "%PUBLISHED_EXE%" (
+    "%PUBLISHED_EXE%" %*
+) else if exist "%PROJECT_DIR%" (
+    dotnet run --project "%PROJECT_DIR%" -- %*
 ) else (
-    dotnet run --project "%PROJECT%" -- %*
+    echo Could not find Koware binaries. Expected "%PUBLISHED_EXE%" or project at "%PROJECT_DIR%".
+    exit /b 1
 )
 
 exit /b %errorlevel%

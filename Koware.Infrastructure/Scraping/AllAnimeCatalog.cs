@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -325,6 +328,34 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         request.Headers.Accept.ParseAdd("application/json, */*");
         request.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
         return request;
+    }
+
+    private async Task<HttpResponseMessage> SendWithRetryAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 3;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            using var request = BuildRequest(uri);
+            try
+            {
+                var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                if (response.IsSuccessStatusCode || attempt == maxAttempts)
+                {
+                    return response;
+                }
+
+                response.Dispose();
+            }
+            catch (HttpRequestException ex) when (attempt < maxAttempts)
+            {
+                _logger.LogWarning(ex, "Request to {Uri} failed on attempt {Attempt}/{MaxAttempts}. Retrying...", uri, attempt, maxAttempts);
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt), cancellationToken);
+        }
+
+        // Should never hit because we return on maxAttempts
+        throw new InvalidOperationException("Retry handler failed unexpectedly.");
     }
 
     private sealed record ProviderSource(string Name, string Url);
