@@ -59,6 +59,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
             case "plan":
             case "stream":
                 return await HandlePlanAsync(orchestrator, args, logger, cts.Token);
+            case "watch":
             case "play":
                 return await HandlePlayAsync(orchestrator, args, services, logger, cts.Token);
             default:
@@ -203,6 +204,12 @@ static ScrapePlan ParsePlan(string[] args)
         queryParts.Add(arg);
     }
 
+    if (episodeNumber is null && queryParts.Count > 1 && int.TryParse(queryParts[^1], out var positionalEpisode))
+    {
+        episodeNumber = positionalEpisode;
+        queryParts.RemoveAt(queryParts.Count - 1);
+    }
+
     var query = string.Join(' ', queryParts).Trim();
     if (string.IsNullOrWhiteSpace(query))
     {
@@ -273,9 +280,10 @@ static void RenderPlan(ScrapePlan plan, ScrapeResult result)
 
 static void PrintUsage()
 {
-    Console.WriteLine("Koware CLI - early scaffold");
+    Console.WriteLine("Koware CLI");
     Console.WriteLine("Usage:");
     Console.WriteLine("  search <query>");
     Console.WriteLine("  stream <query> [--episode <number>] [--quality <label>]");
-    Console.WriteLine("  play <query> [--episode <number>] [--quality <label>]");
+    Console.WriteLine("  watch <query> [--episode <number>] [--quality <label>]");
+    Console.WriteLine("  play  <query> [--episode <number>] [--quality <label>] (alias for 'watch')");
 }
