@@ -1,0 +1,30 @@
+# Build artifacts
+bin/
+obj/
+**/bin/
+**/obj/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+
+# User-specific
+*.user
+*.suo
+*.userprefs
+
+# Logs / temp
+*.log
+*.tmp
+.DS_Store
+
+# Dotnet tooling
+project.lock.json
+artifacts/
+
+# Rider / JetBrains
+.idea/
+
+# Coverage
+coverage*/
+*.coverage*
