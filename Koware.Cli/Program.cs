@@ -118,7 +118,10 @@ static async Task<int> ExecuteAndPlayAsync(
     var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
     var allAnimeOptions = services.GetService<IOptions<AllAnimeOptions>>()?.Value;
     var displayTitle = BuildPlayerTitle(result, stream);
-    var exitCode = LaunchPlayer(playerOptions, stream, logger, allAnimeOptions?.Referer, allAnimeOptions?.UserAgent, displayTitle);
+    var httpReferrer = !string.IsNullOrWhiteSpace(stream.Referrer)
+        ? stream.Referrer
+        : allAnimeOptions?.Referer;
+    var exitCode = LaunchPlayer(playerOptions, stream, logger, httpReferrer, allAnimeOptions?.UserAgent, displayTitle);
 
     if (result.SelectedAnime is not null && result.SelectedEpisode is not null)
     {

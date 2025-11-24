@@ -169,27 +169,28 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
     private async Task<IReadOnlyCollection<StreamLink>> ExtractLinksAsync(string payload, string sourceUrl, string provider, CancellationToken cancellationToken)
     {
         var links = new List<StreamLink>();
+        string? referrer = null;
         try
         {
             using var doc = JsonDocument.Parse(payload);
-            Walk(doc.RootElement, provider, links);
+            referrer = TryFindReferer(doc.RootElement);
+            Walk(doc.RootElement, provider, links, referrer);
         }
         catch (JsonException)
         {
             _logger.LogDebug("Source payload for {Provider} was not JSON, attempting raw scan.", provider);
         }
 
-        // If payload was m3u8 URL only, try that
         if (links.Count == 0 && sourceUrl.Contains(".m3u8", StringComparison.OrdinalIgnoreCase))
         {
-            var m3u8Links = await ParseM3U8Async(sourceUrl, provider, cancellationToken);
+            var m3u8Links = await ParseM3U8Async(sourceUrl, provider, referrer, cancellationToken);
             links.AddRange(m3u8Links);
         }
 
         return links;
     }
 
-    private void Walk(JsonElement element, string provider, List<StreamLink> links)
+    private void Walk(JsonElement element, string provider, List<StreamLink> links, string? referrer)
     {
         switch (element.ValueKind)
         {
@@ -201,29 +202,67 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
                         ? res.GetString() ?? "auto"
                         : "auto";
 
-                    AddLinkIfValid(links, link, quality, provider);
+                    AddLinkIfValid(links, link, quality, provider, referrer);
                 }
 
                 if (element.TryGetProperty("url", out var urlProp) && urlProp.ValueKind == JsonValueKind.String)
                 {
-                    AddLinkIfValid(links, urlProp.GetString()!, "hls", provider);
+                    AddLinkIfValid(links, urlProp.GetString()!, "hls", provider, referrer);
                 }
 
                 foreach (var prop in element.EnumerateObject())
                 {
-                    Walk(prop.Value, provider, links);
+                    Walk(prop.Value, provider, links, referrer);
                 }
                 break;
             case JsonValueKind.Array:
                 foreach (var item in element.EnumerateArray())
                 {
-                    Walk(item, provider, links);
+                    Walk(item, provider, links, referrer);
                 }
                 break;
         }
     }
 
-    private void AddLinkIfValid(List<StreamLink> links, string url, string quality, string provider)
+    private static string? TryFindReferer(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                if (element.TryGetProperty("Referer", out var refererProp) && refererProp.ValueKind == JsonValueKind.String)
+                {
+                    var value = refererProp.GetString();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        return value;
+                    }
+                }
+
+                foreach (var prop in element.EnumerateObject())
+                {
+                    var nested = TryFindReferer(prop.Value);
+                    if (!string.IsNullOrWhiteSpace(nested))
+                    {
+                        return nested;
+                    }
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    var nested = TryFindReferer(item);
+                    if (!string.IsNullOrWhiteSpace(nested))
+                    {
+                        return nested;
+                    }
+                }
+                break;
+        }
+
+        return null;
+    }
+
+    private void AddLinkIfValid(List<StreamLink> links, string url, string quality, string provider, string? referrer)
     {
         if (string.IsNullOrWhiteSpace(url))
         {
@@ -232,23 +271,27 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
 
         if (Uri.TryCreate(url, UriKind.Absolute, out var abs))
         {
-            links.Add(new StreamLink(abs, quality, provider));
+            links.Add(new StreamLink(abs, quality, provider, referrer));
             return;
         }
 
-        // handle relative URLs from playlists
         if (Uri.TryCreate(new Uri(_options.Referer), url, out var resolved))
         {
-            links.Add(new StreamLink(resolved, quality, provider));
+            links.Add(new StreamLink(resolved, quality, provider, referrer));
         }
     }
 
-    private async Task<IReadOnlyCollection<StreamLink>> ParseM3U8Async(string m3u8Url, string provider, CancellationToken cancellationToken)
+    private async Task<IReadOnlyCollection<StreamLink>> ParseM3U8Async(string m3u8Url, string provider, string? referrer, CancellationToken cancellationToken)
     {
         var links = new List<StreamLink>();
 
         using var request = new HttpRequestMessage(HttpMethod.Get, m3u8Url);
-        request.Headers.Referrer = new Uri(_options.Referer);
+        var effectiveReferrer = string.IsNullOrWhiteSpace(referrer) ? _options.Referer : referrer;
+        if (!Uri.TryCreate(effectiveReferrer, UriKind.Absolute, out var refUri))
+        {
+            refUri = new Uri(_options.Referer);
+        }
+        request.Headers.Referrer = refUri;
         request.Headers.UserAgent.ParseAdd(_options.UserAgent);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -282,14 +325,14 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
                     url = resolved.ToString();
                 }
 
-                AddLinkIfValid(links, url, $"{currentResolution}p", provider);
+                AddLinkIfValid(links, url, $"{currentResolution}p", provider, effectiveReferrer);
                 currentResolution = null;
             }
         }
 
         if (links.Count == 0)
         {
-            AddLinkIfValid(links, m3u8Url, "auto", provider);
+            AddLinkIfValid(links, m3u8Url, "auto", provider, effectiveReferrer);
         }
 
         return links;
