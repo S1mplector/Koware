@@ -26,9 +26,9 @@ static IHost BuildHost(string[] args)
     builder.Services.AddInfrastructure(builder.Configuration);
     builder.Services.Configure<PlayerOptions>(builder.Configuration.GetSection("Player"));
     builder.Services.AddSingleton<IWatchHistoryStore, SqliteWatchHistoryStore>();
-    builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
-    builder.Logging.AddFilter("System.Net.Http.HttpClient.Default", LogLevel.Warning);
-    builder.Logging.AddFilter("Microsoft.Extensions.Http.DefaultHttpClientFactory", LogLevel.Warning);
+    builder.Logging.SetMinimumLevel(LogLevel.Warning);
+    builder.Logging.AddFilter("koware", LogLevel.Information);
+    builder.Logging.AddFilter("Koware", LogLevel.Information);
 
     return builder.Build();
 }
@@ -645,9 +645,16 @@ static void RenderPlan(ScrapePlan plan, ScrapeResult result)
     if (result.Streams is not null)
     {
         Console.WriteLine("Streams:");
-        foreach (var stream in result.Streams)
+        var ordered = result.Streams.OrderByDescending(ScoreStream).ToArray();
+        var toShow = ordered.Take(5).ToArray();
+        foreach (var stream in toShow)
         {
             Console.WriteLine($"  {stream.Quality} -> {stream.Url}");
+        }
+
+        if (ordered.Length > toShow.Length)
+        {
+            Console.WriteLine($"  ...and {ordered.Length - toShow.Length} more");
         }
     }
 }

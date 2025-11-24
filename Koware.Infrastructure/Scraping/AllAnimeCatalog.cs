@@ -161,7 +161,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to resolve source {Source}", source.Name);
+            _logger.LogDebug(ex, "Failed to resolve source {Source}", source.Name);
         }
     }
 
