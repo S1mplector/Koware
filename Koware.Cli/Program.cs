@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Reflection;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Koware.Application.DependencyInjection;
 using Koware.Application.Models;
 using Koware.Application.UseCases;
@@ -24,9 +26,11 @@ static IHost BuildHost(string[] args)
 {
     var builder = Host.CreateApplicationBuilder(args);
     builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.json"), optional: true, reloadOnChange: true);
+    builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.user.json"), optional: true, reloadOnChange: true);
     builder.Services.AddApplication();
     builder.Services.AddInfrastructure(builder.Configuration);
     builder.Services.Configure<PlayerOptions>(builder.Configuration.GetSection("Player"));
+    builder.Services.Configure<DefaultCliOptions>(builder.Configuration.GetSection("Defaults"));
     builder.Services.AddSingleton<IWatchHistoryStore, SqliteWatchHistoryStore>();
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware", LogLevel.Information);
@@ -40,6 +44,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
     using var scope = host.Services.CreateScope();
     var services = scope.ServiceProvider;
     var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("koware.cli");
+    var defaults = services.GetService<IOptions<DefaultCliOptions>>()?.Value ?? new DefaultCliOptions();
     using var cts = new CancellationTokenSource();
 
     Console.CancelKeyPress += (_, e) =>
@@ -66,14 +71,16 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandleSearchAsync(orchestrator, args, logger, cts.Token);
             case "plan":
             case "stream":
-                return await HandlePlanAsync(orchestrator, args, logger, cts.Token);
+                return await HandlePlanAsync(orchestrator, args, logger, defaults, cts.Token);
             case "watch":
             case "play":
-                return await HandlePlayAsync(orchestrator, args, services, logger, cts.Token);
+                return await HandlePlayAsync(orchestrator, args, services, logger, defaults, cts.Token);
             case "last":
                 return await HandleLastAsync(args, services, logger, cts.Token);
             case "continue":
-                return await HandleContinueAsync(args, services, logger, cts.Token);
+                return await HandleContinueAsync(args, services, logger, defaults, cts.Token);
+            case "config":
+                return HandleConfig(args);
             case "help":
             case "--help":
             case "-h":
@@ -206,7 +213,7 @@ static async Task<int> HandleLastAsync(string[] args, IServiceProvider services,
     return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
 }
 
-static async Task<int> HandleContinueAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+static async Task<int> HandleContinueAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
     string? animeQuery;
     int? fromEpisode = null;
@@ -269,6 +276,11 @@ static async Task<int> HandleContinueAsync(string[] args, IServiceProvider servi
     var quality = preferredQuality ?? entry.Quality;
 
     var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
+    if (string.IsNullOrWhiteSpace(quality))
+    {
+        quality = defaults.Quality;
+    }
+
     var plan = new ScrapePlan(entry.AnimeTitle, targetEpisode, quality);
 
     return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
@@ -276,7 +288,10 @@ static async Task<int> HandleContinueAsync(string[] args, IServiceProvider servi
 
 static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string[] args, ILogger logger, CancellationToken cancellationToken)
 {
-    var query = string.Join(' ', args.Skip(1)).Trim();
+    var jsonOutput = args.Skip(1).Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+    var filteredArgs = args.Where((a, idx) => idx == 0 || !a.Equals("--json", StringComparison.OrdinalIgnoreCase)).ToArray();
+
+    var query = string.Join(' ', filteredArgs.Skip(1)).Trim();
     if (string.IsNullOrWhiteSpace(query))
     {
         logger.LogWarning("Query is required for search");
@@ -285,16 +300,39 @@ static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string
     }
 
     var matches = await orchestrator.SearchAsync(query, cancellationToken);
-    RenderSearch(query, matches);
+    if (jsonOutput)
+    {
+        var payload = new
+        {
+            query,
+            count = matches.Count,
+            matches = matches.Select(m => new
+            {
+                id = m.Id.Value,
+                title = m.Title,
+                detail = m.DetailPage.ToString()
+            })
+        };
+
+        Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+    }
+    else
+    {
+        RenderSearch(query, matches);
+    }
+
     return 0;
 }
 
-static async Task<int> HandlePlanAsync(ScrapeOrchestrator orchestrator, string[] args, ILogger logger, CancellationToken cancellationToken)
+static async Task<int> HandlePlanAsync(ScrapeOrchestrator orchestrator, string[] args, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
+    var jsonOutput = args.Skip(1).Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+    var filteredArgs = args.Where((a, idx) => idx == 0 || !a.Equals("--json", StringComparison.OrdinalIgnoreCase)).ToArray();
+
     ScrapePlan plan;
     try
     {
-        plan = ParsePlan(args);
+        plan = ParsePlan(filteredArgs, defaults);
     }
     catch (ArgumentException ex)
     {
@@ -306,16 +344,47 @@ static async Task<int> HandlePlanAsync(ScrapeOrchestrator orchestrator, string[]
     plan = await MaybeSelectMatchAsync(orchestrator, plan, logger, cancellationToken);
 
     var result = await orchestrator.ExecuteAsync(plan, cancellationToken);
-    RenderPlan(plan, result);
+    if (jsonOutput)
+    {
+        var payload = new
+        {
+            query = plan.Query,
+            selectedAnime = result.SelectedAnime is null ? null : new
+            {
+                id = result.SelectedAnime.Id.Value,
+                title = result.SelectedAnime.Title
+            },
+            selectedEpisode = result.SelectedEpisode is null ? null : new
+            {
+                number = result.SelectedEpisode.Number,
+                title = result.SelectedEpisode.Title
+            },
+            streams = result.Streams?.Select(s => new
+            {
+                url = s.Url.ToString(),
+                quality = s.Quality,
+                provider = s.Provider,
+                referer = s.Referrer
+            }) ?? Enumerable.Empty<object>(),
+            matches = result.Matches.Select(m => new { id = m.Id.Value, title = m.Title })
+        };
+
+        Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+    }
+    else
+    {
+        RenderPlan(plan, result);
+    }
+
     return 0;
 }
 
-static async Task<int> HandlePlayAsync(ScrapeOrchestrator orchestrator, string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+static async Task<int> HandlePlayAsync(ScrapeOrchestrator orchestrator, string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
     ScrapePlan plan;
     try
     {
-        plan = ParsePlan(args);
+        plan = ParsePlan(args, defaults);
     }
     catch (ArgumentException ex)
     {
@@ -766,7 +835,7 @@ static int StartProcessAndWait(ILogger logger, ProcessStartInfo start, string co
     }
 }
 
-static ScrapePlan ParsePlan(string[] args)
+static ScrapePlan ParsePlan(string[] args, DefaultCliOptions defaults)
 {
     var queryParts = new List<string>();
     int? episodeNumber = null;
@@ -832,6 +901,16 @@ static ScrapePlan ParsePlan(string[] args)
     if (string.IsNullOrWhiteSpace(query))
     {
         throw new ArgumentException("Query is required", nameof(args));
+    }
+
+    if (string.IsNullOrWhiteSpace(preferredQuality))
+    {
+        preferredQuality = defaults.Quality;
+    }
+
+    if (!preferredIndex.HasValue && defaults.PreferredMatchIndex.HasValue && defaults.PreferredMatchIndex.Value > 0)
+    {
+        preferredIndex = defaults.PreferredMatchIndex;
     }
 
     return new ScrapePlan(query, episodeNumber, preferredQuality, preferredIndex, nonInteractive);
@@ -921,6 +1000,7 @@ static void PrintUsage()
     WriteCommand("last [--play] [--json]", "Show or replay your most recent watch.");
     WriteCommand("continue [<anime>] [--from <episode>] [--quality <label>]", "Resume from history (auto next episode).");
     WriteCommand("help [command]", "Show this guide or a command-specific help page.");
+    WriteCommand("config [options]", "Persist defaults (quality/index/player) to appsettings.user.json.");
 }
 
 static int HandleHelp(string[] args)
@@ -930,7 +1010,7 @@ static int HandleHelp(string[] args)
         PrintUsage();
         Console.WriteLine();
         Console.WriteLine("For detailed help: koware help <command>");
-        Console.WriteLine("Commands: search, stream, watch, play, last, continue");
+        Console.WriteLine("Commands: search, stream, watch, play, last, continue, config");
         return 0;
     }
 
@@ -965,10 +1045,18 @@ static int HandleHelp(string[] args)
             Console.WriteLine("Usage: koware continue [<anime name>] [--from <episode>] [--quality <label>]");
             Console.WriteLine("Defaults: if no anime is given, continues the most recent watch; episode auto-increments.");
             break;
+        case "config":
+            PrintTopicHeader("config", "Persist preferred defaults to appsettings.user.json.");
+            Console.WriteLine("Usage: koware config [--quality <label>] [--index <n>] [--player <exe>] [--args <string>] [--show]");
+            Console.WriteLine("Examples:");
+            Console.WriteLine("  koware config --quality 1080p --index 1");
+            Console.WriteLine("  koware config --player vlc --args \"--play-and-exit\"");
+            Console.WriteLine("  koware config --show");
+            break;
         default:
             PrintUsage();
             Console.WriteLine();
-            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: search, stream, watch, play, last, continue.");
+            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: search, stream, watch, play, last, continue, config.");
             return 1;
     }
 
@@ -1012,4 +1100,105 @@ static string GetVersionLabel()
     var parts = version.ToString().Split('.');
     var trimmed = parts.Length >= 3 ? string.Join('.', parts.Take(3)) : version.ToString();
     return $"v{trimmed}";
+}
+
+static int HandleConfig(string[] args)
+{
+    var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.user.json");
+    var root = File.Exists(configPath)
+        ? (JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? new JsonObject())
+        : new JsonObject();
+
+    var player = root["Player"] as JsonObject ?? new JsonObject();
+    var defaults = root["Defaults"] as JsonObject ?? new JsonObject();
+
+    var showOnly = false;
+    var changed = false;
+
+    for (var i = 1; i < args.Length; i++)
+    {
+        var arg = args[i];
+        switch (arg.ToLowerInvariant())
+        {
+            case "--quality":
+                if (i + 1 >= args.Length)
+                {
+                    Console.WriteLine("Missing value for --quality.");
+                    return 1;
+                }
+                defaults["Quality"] = args[++i];
+                changed = true;
+                break;
+            case "--index":
+                if (i + 1 >= args.Length || !int.TryParse(args[i + 1], out var idx) || idx < 1)
+                {
+                    Console.WriteLine("Value for --index must be a positive integer.");
+                    return 1;
+                }
+                defaults["PreferredMatchIndex"] = idx;
+                i++;
+                changed = true;
+                break;
+            case "--player":
+                if (i + 1 >= args.Length)
+                {
+                    Console.WriteLine("Missing value for --player.");
+                    return 1;
+                }
+                player["Command"] = args[++i];
+                changed = true;
+                break;
+            case "--args":
+                if (i + 1 >= args.Length)
+                {
+                    Console.WriteLine("Missing value for --args.");
+                    return 1;
+                }
+                player["Args"] = args[++i];
+                changed = true;
+                break;
+            case "--show":
+                showOnly = true;
+                break;
+            default:
+                Console.WriteLine($"Unknown option '{arg}'.");
+                PrintConfigUsage();
+                return 1;
+        }
+    }
+
+    root["Player"] = player;
+    root["Defaults"] = defaults;
+
+    if (changed)
+    {
+        var json = JsonSerializer.Serialize(root, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(configPath, json);
+        Console.WriteLine($"Saved preferences to {configPath}");
+    }
+
+    if (showOnly || !changed)
+    {
+        var summary = new
+        {
+            Player = new
+            {
+                Command = player["Command"]?.ToString() ?? "(default)",
+                Args = player["Args"]?.ToString()
+            },
+            Defaults = new
+            {
+                Quality = defaults["Quality"]?.ToString(),
+                PreferredMatchIndex = defaults["PreferredMatchIndex"]?.ToString()
+            }
+        };
+        Console.WriteLine(JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    return 0;
+}
+
+static void PrintConfigUsage()
+{
+    Console.WriteLine("Usage: koware config [--quality <label>] [--index <n>] [--player <exe>] [--args <string>] [--show]");
 }

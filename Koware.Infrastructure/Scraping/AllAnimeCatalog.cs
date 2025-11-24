@@ -129,26 +129,42 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             .ToArray();
 
         var streams = new ConcurrentBag<StreamLink>();
-        var tasks = sources.Select(src => ResolveSourceAsync(src, streams, cancellationToken));
+        var attempts = new ConcurrentBag<string>();
+        var tasks = sources.Select(src => ResolveSourceAsync(src, streams, attempts, cancellationToken));
         await Task.WhenAll(tasks);
 
-        return streams
+        var resolved = streams
             .Where(s => s.Url.Scheme.StartsWith("http", StringComparison.OrdinalIgnoreCase))
             .GroupBy(s => s.Url)
             .Select(g => g.First())
             .OrderByDescending(s => ParseQualityScore(s.Quality))
             .ToArray();
+
+        var summary = attempts.ToArray();
+        if (summary.Length > 0)
+        {
+            _logger.LogInformation("Stream resolution summary: {Summary}", string.Join("; ", summary));
+        }
+
+        if (resolved.Length == 0 && summary.Length > 0)
+        {
+            _logger.LogWarning("No playable streams resolved. Tried: {Summary}", string.Join("; ", summary));
+        }
+
+        return resolved;
     }
 
-    private async Task ResolveSourceAsync(ProviderSource source, ConcurrentBag<StreamLink> collector, CancellationToken cancellationToken)
+    private async Task ResolveSourceAsync(ProviderSource source, ConcurrentBag<StreamLink> collector, ConcurrentBag<string> attempts, CancellationToken cancellationToken)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+        var host = "unknown";
 
         try
         {
             var decodedPath = AllAnimeSourceDecoder.Decode(source.Url);
             var absoluteUrl = EnsureAbsolute(decodedPath);
+            host = Uri.TryCreate(absoluteUrl, UriKind.Absolute, out var absUri) ? absUri.Host : "unknown";
 
             using var response = await SendWithRetryAsync(new Uri(absoluteUrl), timeoutCts.Token);
             response.EnsureSuccessStatusCode();
@@ -159,14 +175,23 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             {
                 collector.Add(link);
             }
+            attempts.Add($"{source.Name}@{host}: ok ({links.Count} links)");
         }
         catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
         {
             _logger.LogDebug("Source {Source} returned 404; skipping.", source.Name);
+            attempts.Add($"{source.Name}@{host}: http 404");
+        }
+        catch (HttpRequestException ex)
+        {
+            var code = ex.StatusCode.HasValue ? ((int)ex.StatusCode.Value).ToString() : "http-error";
+            attempts.Add($"{source.Name}@{host}: http {code}");
+            _logger.LogDebug(ex, "HTTP error resolving source {Source}", source.Name);
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to resolve source {Source}", source.Name);
+            attempts.Add($"{source.Name}@{host}: error {ex.GetType().Name}");
         }
     }
 
