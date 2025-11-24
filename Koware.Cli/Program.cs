@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.IO;
 using System.Linq;
 using Koware.Application.DependencyInjection;
@@ -911,7 +912,7 @@ static void RenderPlan(ScrapePlan plan, ScrapeResult result)
 
 static void PrintUsage()
 {
-    WriteHeader("Koware CLI");
+    WriteHeader($"Koware CLI {GetVersionLabel()}");
     Console.WriteLine("Usage:");
     WriteCommand("search <query>", "Find anime and list matches.");
     WriteCommand("stream <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Show plan + streams, no player.");
@@ -998,4 +999,17 @@ static void WriteCommand(string signature, string description)
     Console.ForegroundColor = ConsoleColor.Gray;
     Console.WriteLine(description);
     Console.ForegroundColor = prev;
+}
+
+static string GetVersionLabel()
+{
+    var version = Assembly.GetEntryAssembly()?.GetName().Version;
+    if (version is null)
+    {
+        return string.Empty;
+    }
+
+    var parts = version.ToString().Split('.');
+    var trimmed = parts.Length >= 3 ? string.Join('.', parts.Take(3)) : version.ToString();
+    return $"v{trimmed}";
 }
