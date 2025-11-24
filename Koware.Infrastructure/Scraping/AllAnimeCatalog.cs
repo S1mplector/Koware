@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -41,7 +42,8 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         };
 
         var uri = BuildApiUri(gql, variables);
-        using var response = await _httpClient.GetAsync(uri, cancellationToken);
+        using var request = BuildRequest(uri);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -72,7 +74,8 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         var variables = new { showId = anime.Id.Value };
         var uri = BuildApiUri(gql, variables);
 
-        using var response = await _httpClient.GetAsync(uri, cancellationToken);
+        using var request = BuildRequest(uri);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -107,7 +110,8 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         };
 
         var uri = BuildApiUri(gql, variables);
-        using var response = await _httpClient.GetAsync(uri, cancellationToken);
+        using var request = BuildRequest(uri);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -135,10 +139,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             var decodedPath = AllAnimeSourceDecoder.Decode(source.Url);
             var absoluteUrl = EnsureAbsolute(decodedPath);
 
-            using var request = new HttpRequestMessage(HttpMethod.Get, absoluteUrl);
-            request.Headers.Referrer = new Uri(_options.Referer);
-            request.Headers.UserAgent.ParseAdd(_options.UserAgent);
-
+            using var request = BuildRequest(new Uri(absoluteUrl));
             using var response = await _httpClient.SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
             var payload = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -316,6 +317,17 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
 
         var baseUrl = $"https://{_options.BaseHost}";
         return path.StartsWith('/') ? $"{baseUrl}{path}" : $"{baseUrl}/{path}";
+    }
+
+    private HttpRequestMessage BuildRequest(Uri uri)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        request.Headers.Referrer = new Uri(_options.Referer);
+        request.Headers.TryAddWithoutValidation("Origin", _options.Referer.TrimEnd('/'));
+        request.Headers.UserAgent.ParseAdd(_options.UserAgent);
+        request.Headers.Accept.ParseAdd("application/json, */*");
+        request.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+        return request;
     }
 
     private sealed record ProviderSource(string Name, string Url);

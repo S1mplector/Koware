@@ -4,6 +4,7 @@ using Koware.Infrastructure.Scraping;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using System.Net;
 
 namespace Koware.Infrastructure.DependencyInjection;
 
@@ -26,6 +27,13 @@ public static class InfrastructureServiceCollectionExtensions
             client.BaseAddress = new Uri(options.ApiBase);
             client.DefaultRequestHeaders.Referrer = new Uri(options.Referer);
             client.DefaultRequestHeaders.UserAgent.ParseAdd(options.UserAgent);
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/json, */*");
+            client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+            client.DefaultRequestVersion = HttpVersion.Version11;
+            client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate
         });
 
         services.AddSingleton<IAnimeCatalog, AllAnimeCatalog>();
