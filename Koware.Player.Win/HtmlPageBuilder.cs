@@ -20,69 +20,62 @@ internal static class HtmlPageBuilder
     <title>{{TITLE}}</title>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.11/dist/hls.min.js"></script>
     <style>
-        :root {{
+        :root {
             color-scheme: dark;
             --bg: #0f172a;
-            --panel: rgba(15, 23, 42, 0.75);
+            --panel: #0f172a;
             --border: rgba(226, 232, 240, 0.1);
             --text: #e2e8f0;
             --muted: #94a3b8;
             --accent: #38bdf8;
             --error: #f97066;
-        }}
+        }
 
-        * {{
-            box-sizing: border-box;
-        }}
+        * { box-sizing: border-box; }
 
-        body {{
+        body {
             margin: 0;
-            padding: 24px;
-            background: radial-gradient(circle at 25% 25%, rgba(56, 189, 248, 0.1), transparent 30%),
-                        radial-gradient(circle at 80% 20%, rgba(248, 113, 113, 0.07), transparent 25%),
+            padding: 16px;
+            background: radial-gradient(circle at 25% 25%, rgba(56, 189, 248, 0.08), transparent 26%),
+                        radial-gradient(circle at 80% 20%, rgba(248, 113, 113, 0.06), transparent 22%),
                         var(--bg);
             color: var(--text);
-            font-family: "Segoe UI", "Inter", system-ui, -apple-system, sans-serif;
-            display: grid;
-            place-items: center;
+            font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
             min-height: 100vh;
-        }}
+        }
 
-        #chrome {{
+        #chrome {
             width: min(1100px, 100%);
+            margin: 0 auto;
             background: var(--panel);
             border: 1px solid var(--border);
-            border-radius: 18px;
-            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.02);
-            backdrop-filter: blur(20px);
-            padding: 18px;
+            border-radius: 14px;
+            padding: 14px;
             display: grid;
-            gap: 12px;
-        }}
+            gap: 10px;
+        }
 
-        #title {{
+        #title {
             font-weight: 700;
-            letter-spacing: 0.02em;
+            letter-spacing: 0.01em;
             color: var(--text);
-            opacity: 0.9;
-            text-shadow: 0 2px 16px rgba(56, 189, 248, 0.25);
-        }}
+        }
 
-        #player-wrapper {{
+        #player-wrapper {
             position: relative;
             overflow: hidden;
-            border-radius: 14px;
+            border-radius: 12px;
             border: 1px solid var(--border);
-        }}
+        }
 
-        video {{
+        video {
             width: 100%;
             height: 62vh;
-            max-height: 720px;
+            max-height: 760px;
             background: #0b1221;
-        }}
+        }
 
-        #status {{
+        #status {
             position: absolute;
             inset: 0;
             display: grid;
@@ -92,7 +85,18 @@ internal static class HtmlPageBuilder
             pointer-events: none;
             text-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
             transition: opacity 0.25s ease;
-        }}
+        }
+
+        #log {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px;
+            color: var(--muted);
+        }
     </style>
 </head>
 <body>
@@ -102,78 +106,176 @@ internal static class HtmlPageBuilder
             <video id="video" controls autoplay playsinline></video>
             <div id="status">Loading stream…</div>
         </div>
+        <div id="log"></div>
     </div>
     <script>
         const source = {{URL_JSON}};
         const title = {{TITLE_JSON}};
         const video = document.getElementById("video");
         const statusEl = document.getElementById("status");
+        const logEl = document.getElementById("log");
+        let hlsInstance = null;
+        let fallbackUsed = false;
 
         video.playsInline = true;
+        video.muted = true;
 
-        function setStatus(text, isError = false) {{
+        function setStatus(text, isError = false) {
             statusEl.textContent = text || "";
             statusEl.style.opacity = text ? 1 : 0;
             statusEl.style.color = isError ? "var(--error)" : "var(--muted)";
-        }}
+        }
 
-        function attachNativeHls() {{
-            if (!video.canPlayType("application/vnd.apple.mpegurl")) {{
+        function log(line) {
+            const stamp = new Date().toISOString().substring(11, 19);
+            logEl.textContent += `[${stamp}] ${line}\n`;
+            if (window.chrome?.webview?.postMessage) {
+                try { window.chrome.webview.postMessage(line); } catch {}
+            }
+        }
+
+        // Expose logging for the host (C#) to call.
+        window.__log = log;
+        if (window.chrome?.webview?.addEventListener) {
+            window.chrome.webview.addEventListener("message", (e) => {
+                log(e.data);
+            });
+        }
+
+        // Quick HEAD to surface HTTP status even when hls.js dies early.
+        (async () => {
+            try {
+                const res = await fetch(source, { method: "HEAD", mode: "cors" });
+                log(`HEAD ${res.status} ${res.statusText} - ${source}`);
+            } catch (err) {
+                log(`HEAD failed: ${err?.message || err}`);
+            }
+        })();
+
+        function logHlsResponse(data) {
+            const code = data?.response?.code ?? data?.response?.status;
+            const text = data?.response?.text ?? data?.response?.statusText;
+            const url = data?.response?.url;
+            if (code || url) {
+                log(`HLS response: ${code || "?"} ${text || ""} ${url || ""}`.trim());
+            }
+        }
+
+        function describeVideoError(err) {
+            if (!err) return "Unknown video error";
+            const codes = {
+                1: "Aborted",
+                2: "Network",
+                3: "Decode",
+                4: "Src not supported"
+            };
+            return `${codes[err.code] || "Error"} (${err.code})`;
+        }
+
+        function attachNativeHls() {
+            if (!video.canPlayType("application/vnd.apple.mpegurl")) {
                 return false;
-            }}
+            }
 
             video.src = source;
-            video.addEventListener("loadedmetadata", () => video.play().catch(() => {{}}), {{ once: true }});
+            video.addEventListener("loadedmetadata", () => video.play().catch(() => {}), { once: true });
+            log("Using native HLS");
             return true;
-        }}
+        }
 
-        function attachWithHlsJs() {{
-            if (!window.Hls || !Hls.isSupported()) {{
+        function attachWithHlsJs() {
+            if (!window.Hls || !Hls.isSupported()) {
                 return false;
-            }}
+            }
 
-            const hls = new Hls({{
+            const hls = new Hls({
                 lowLatencyMode: true,
                 enableWorker: true,
                 backBufferLength: 120,
                 progressive: true,
-            }});
+                manifestLoadingTimeOut: 10000,
+                manifestLoadingRetryDelay: 1000,
+            });
+            hlsInstance = hls;
 
-            hls.on(Hls.Events.ERROR, (_event, data) => {{
-                if (data?.fatal) {{
-                    setStatus("Playback error. Try another stream.", true);
-                }}
-            }});
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                log("Manifest parsed");
+                setStatus("Starting playback…");
+            });
+
+            hls.on(Hls.Events.ERROR, (_event, data) => {
+                const detail = `${data?.type || ""}/${data?.details || ""}`.trim();
+                logHlsResponse(data);
+                log(`HLS error: ${detail} (fatal=${data?.fatal})`);
+                if (data?.fatal && !fallbackUsed && data?.details === "manifestLoadError") {
+                    fallbackUsed = true;
+                    setStatus(`Retrying with native player…`, true);
+                    log("Retrying with native HLS after manifest load error.");
+                    hls.destroy();
+                    hlsInstance = null;
+                    const fallbackAttached = attachNativeHls();
+                    if (fallbackAttached) {
+                        video.play().catch((err) => log(`Native play failed: ${err?.message || err}`));
+                    }
+                    return;
+                }
+                if (data?.fatal) {
+                    setStatus(`Playback error (${detail}).`, true);
+                }
+            });
 
             hls.loadSource(source);
             hls.attachMedia(video);
+            log("Using hls.js");
             return true;
-        }}
+        }
 
-        function attachStandard() {{
+        function attachStandard() {
             video.src = source;
+            log("Using direct src (non-HLS)");
             return true;
-        }}
+        }
 
-        (function start() {{
+        (function start() {
             const lower = source.toLowerCase();
             const isHls = lower.includes(".m3u8") || lower.includes("master.m3u8");
             const attached = isHls
                 ? (attachWithHlsJs() || attachNativeHls())
                 : attachStandard();
 
-            if (!attached) {{
+            if (!attached) {
                 setStatus("Your browser cannot play this stream.", true);
+                log("Failed to attach any playback pipeline.");
                 return;
-            }}
+            }
 
-            video.addEventListener("error", () => setStatus("Failed to load video.", true));
-            video.addEventListener("playing", () => setStatus(""));
-            video.addEventListener("waiting", () => setStatus("Buffering…"));
-            video.addEventListener("ended", () => setStatus("Playback finished."));
+            video.addEventListener("error", () => {
+                const desc = describeVideoError(video.error);
+                setStatus(`Failed to load video: ${desc}`, true);
+                log(`Video error: ${desc}`);
+            });
+            video.addEventListener("playing", () => {
+                setStatus("");
+                log("Playing");
+            });
+            video.addEventListener("waiting", () => {
+                setStatus("Buffering…");
+                log("Buffering");
+            });
+            video.addEventListener("ended", () => {
+                setStatus("Playback finished.");
+                log("Ended");
+            });
+            video.addEventListener("stalled", () => {
+                setStatus("Network stalled…", true);
+                log("Stalled");
+            });
 
-            video.play().catch(() => setStatus("Press play to start.", false));
-        }})();
+            video.play().catch((err) => {
+                setStatus("Press play to start.", false);
+                log(`Autoplay blocked or failed: ${err?.message || err}`);
+            });
+        })();
     </script>
 </body>
 </html>
