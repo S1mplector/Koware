@@ -73,6 +73,10 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandleLastAsync(args, services, logger, cts.Token);
             case "continue":
                 return await HandleContinueAsync(args, services, logger, cts.Token);
+            case "help":
+            case "--help":
+            case "-h":
+                return HandleHelp(args);
             default:
                 logger.LogWarning("Unknown command: {Command}", command);
                 PrintUsage();
@@ -113,7 +117,7 @@ static async Task<int> ExecuteAndPlayAsync(
         logger.LogWarning("No playable streams found.");
         return 1;
     }
-    logger.LogInformation("Selected stream {Quality} from host {Host}", stream.Quality ?? "unknown", stream.Url.Host);
+    logger.LogDebug("Selected stream {Quality} from host {Host}", stream.Quality ?? "unknown", stream.Url.Host);
 
     var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
     var allAnimeOptions = services.GetService<IOptions<AllAnimeOptions>>()?.Value;
@@ -121,7 +125,10 @@ static async Task<int> ExecuteAndPlayAsync(
     var httpReferrer = !string.IsNullOrWhiteSpace(stream.Referrer)
         ? stream.Referrer
         : allAnimeOptions?.Referer;
-    var exitCode = LaunchPlayer(playerOptions, stream, logger, httpReferrer, allAnimeOptions?.UserAgent, displayTitle);
+    var prettyTitle = string.IsNullOrWhiteSpace(displayTitle) ? stream.Url.ToString() : displayTitle!;
+    logger.LogInformation("Playing {Title} via {Host} [{Quality}]", prettyTitle, stream.Url.Host, stream.Quality ?? "auto");
+
+    var exitCode = LaunchPlayer(playerOptions, stream, logger, httpReferrer, allAnimeOptions?.UserAgent, prettyTitle);
 
     if (result.SelectedAnime is not null && result.SelectedEpisode is not null)
     {
@@ -734,7 +741,7 @@ static int StartProcessAndWait(ILogger logger, ProcessStartInfo start, string co
 
     try
     {
-        logger.LogInformation("Launching player: {Player} {Args}", command, formattedArgs);
+        logger.LogDebug("Launching player: {Player} {Args}", command, formattedArgs);
 
         using var proc = Process.Start(start);
         if (proc is null)
@@ -914,4 +921,65 @@ static void PrintUsage()
     Console.WriteLine("  play  <query> [--episode <number>] [--quality <label>] [--index <n>] [--non-interactive] (alias for 'watch')");
     Console.WriteLine("  last  [--play] [--json]");
     Console.WriteLine("  continue [<anime name>] [--from <episode>] [--quality <label>]");
+    Console.WriteLine("  help [command]");
+}
+
+static int HandleHelp(string[] args)
+{
+    if (args.Length == 1)
+    {
+        PrintUsage();
+        Console.WriteLine();
+        Console.WriteLine("For detailed help: koware help <command>");
+        Console.WriteLine("Commands: search, stream, watch, play, last, continue");
+        return 0;
+    }
+
+    var topic = args[1].ToLowerInvariant();
+    switch (topic)
+    {
+        case "search":
+            PrintTopicHeader("search", "Find anime and show a numbered list of matches.");
+            Console.WriteLine("Usage: koware search <query>");
+            Console.WriteLine("Tips : use quotes for multi-word queries (e.g., \"demon slayer\").");
+            break;
+        case "stream":
+        case "plan":
+            PrintTopicHeader("stream", "Plan stream selection and print the resolved streams.");
+            Console.WriteLine("Usage: koware stream <query> [--episode <n>] [--quality <label>] [--index <match>] [--non-interactive]");
+            Console.WriteLine("Notes: does not launch a player; useful for inspecting streams.");
+            break;
+        case "watch":
+        case "play":
+            PrintTopicHeader("watch", "Pick a stream and launch the configured player.");
+            Console.WriteLine("Usage: koware watch <query> [--episode <n>] [--quality <label>] [--index <match>] [--non-interactive]");
+            Console.WriteLine("Alias: 'play' is the same as 'watch'.");
+            Console.WriteLine("Example: koware watch \"one piece\" --episode 1010 --quality 1080p");
+            break;
+        case "last":
+            PrintTopicHeader("last", "Show or replay the most recent watched entry.");
+            Console.WriteLine("Usage: koware last [--play] [--json]");
+            Console.WriteLine("Flags: --play launches the last stream; --json prints structured data.");
+            break;
+        case "continue":
+            PrintTopicHeader("continue", "Resume from history, optionally for a specific anime.");
+            Console.WriteLine("Usage: koware continue [<anime name>] [--from <episode>] [--quality <label>]");
+            Console.WriteLine("Defaults: if no anime is given, continues the most recent watch; episode auto-increments.");
+            break;
+        default:
+            PrintUsage();
+            Console.WriteLine();
+            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: search, stream, watch, play, last, continue.");
+            return 1;
+    }
+
+    return 0;
+}
+
+static void PrintTopicHeader(string name, string description)
+{
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine($"Help: {name}");
+    Console.ResetColor();
+    Console.WriteLine(description);
 }
