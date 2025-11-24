@@ -6,6 +6,7 @@ using Koware.Application.UseCases;
 using Koware.Domain.Models;
 using Koware.Infrastructure.DependencyInjection;
 using Koware.Cli.Configuration;
+using Koware.Cli.History;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -23,6 +24,7 @@ static IHost BuildHost(string[] args)
     builder.Services.AddApplication();
     builder.Services.AddInfrastructure(builder.Configuration);
     builder.Services.Configure<PlayerOptions>(builder.Configuration.GetSection("Player"));
+    builder.Services.AddSingleton<IWatchHistoryStore, FileWatchHistoryStore>();
 
     return builder.Build();
 }
@@ -62,6 +64,8 @@ static async Task<int> RunAsync(IHost host, string[] args)
             case "watch":
             case "play":
                 return await HandlePlayAsync(orchestrator, args, services, logger, cts.Token);
+            case "last":
+                return await HandleLastAsync(args, services, logger, cts.Token);
             default:
                 logger.LogWarning("Unknown command: {Command}", command);
                 PrintUsage();
@@ -78,6 +82,97 @@ static async Task<int> RunAsync(IHost host, string[] args)
         logger.LogError(ex, "Unhandled exception during command execution.");
         return 1;
     }
+}
+
+static async Task<int> ExecuteAndPlayAsync(
+    ScrapeOrchestrator orchestrator,
+    ScrapePlan plan,
+    IServiceProvider services,
+    IWatchHistoryStore history,
+    ILogger logger,
+    CancellationToken cancellationToken)
+{
+    var result = await orchestrator.ExecuteAsync(plan, cancellationToken);
+    if (result.SelectedEpisode is null || result.Streams is null || result.Streams.Count == 0)
+    {
+        logger.LogWarning("No streams found for the query/episode.");
+        RenderPlan(plan, result);
+        return 1;
+    }
+
+    var stream = result.Streams.First();
+    var options = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
+    var exitCode = LaunchPlayer(options, stream, logger);
+
+    if (exitCode == 0 && result.SelectedAnime is not null && result.SelectedEpisode is not null)
+    {
+        var entry = new WatchHistoryEntry
+        {
+            Provider = "allanime",
+            AnimeId = result.SelectedAnime.Id.Value,
+            AnimeTitle = result.SelectedAnime.Title,
+            EpisodeNumber = result.SelectedEpisode.Number,
+            EpisodeTitle = result.SelectedEpisode.Title,
+            Quality = stream.Quality,
+            WatchedAt = DateTimeOffset.UtcNow
+        };
+
+        try
+        {
+            await history.AddAsync(entry, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to update watch history.");
+        }
+    }
+
+    return exitCode;
+}
+
+static async Task<int> HandleLastAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+{
+    var history = services.GetRequiredService<IWatchHistoryStore>();
+    var entry = await history.GetLastAsync(cancellationToken);
+    if (entry is null)
+    {
+        logger.LogWarning("No watch history found.");
+        return 1;
+    }
+
+    var play = args.Any(a => string.Equals(a, "--play", StringComparison.OrdinalIgnoreCase));
+    var json = args.Any(a => string.Equals(a, "--json", StringComparison.OrdinalIgnoreCase));
+
+    if (!play)
+    {
+        if (json)
+        {
+            var jsonText = System.Text.Json.JsonSerializer.Serialize(entry, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+            Console.WriteLine(jsonText);
+        }
+        else
+        {
+            Console.WriteLine("Last watched:");
+            Console.WriteLine($"  Anime   : {entry.AnimeTitle} ({entry.AnimeId})");
+            Console.WriteLine($"  Episode : {entry.EpisodeNumber}{(string.IsNullOrWhiteSpace(entry.EpisodeTitle) ? string.Empty : $" - {entry.EpisodeTitle}")}");
+            Console.WriteLine($"  Provider: {entry.Provider}");
+            if (!string.IsNullOrWhiteSpace(entry.Quality))
+            {
+                Console.WriteLine($"  Quality : {entry.Quality}");
+            }
+            Console.WriteLine($"  Watched : {entry.WatchedAt:u}");
+        }
+
+        return 0;
+    }
+
+    var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
+    var plan = new ScrapePlan(entry.AnimeTitle, entry.EpisodeNumber, entry.Quality);
+
+    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
 }
 
 static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string[] args, ILogger logger, CancellationToken cancellationToken)
@@ -128,17 +223,8 @@ static async Task<int> HandlePlayAsync(ScrapeOrchestrator orchestrator, string[]
         return 1;
     }
 
-    var result = await orchestrator.ExecuteAsync(plan, cancellationToken);
-    if (result.SelectedEpisode is null || result.Streams is null || result.Streams.Count == 0)
-    {
-        logger.LogWarning("No streams found for the query/episode.");
-        RenderPlan(plan, result);
-        return 1;
-    }
-
-    var stream = result.Streams.First();
-    var options = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
-    return LaunchPlayer(options, stream, logger);
+    var history = services.GetRequiredService<IWatchHistoryStore>();
+    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
 }
 
 static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger)
