@@ -116,7 +116,15 @@ public sealed class GogoAnimeCatalog : IAnimeCatalog
                     continue;
                 }
 
-                list.Add(new StreamLink(uri, quality, "gogoanime", referrer));
+                list.Add(new StreamLink(
+                    uri,
+                    quality,
+                    "gogoanime",
+                    referrer,
+                    Subtitles: null,
+                    RequiresSoftSubSupport: false,
+                    HostPriority: ComputeHostPriority(uri),
+                    SourceTag: "gogoanime"));
             }
         }
 
@@ -146,5 +154,21 @@ public sealed class GogoAnimeCatalog : IAnimeCatalog
     {
         var trimmed = path.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? path : _options.SiteBase.TrimEnd('/') + path;
         return new Uri(trimmed);
+    }
+
+    private static int ComputeHostPriority(Uri uri)
+    {
+        var host = uri.Host.ToLowerInvariant();
+        if (host.Contains("akamaized") || host.Contains("akamai"))
+        {
+            return 5;
+        }
+
+        if (host.Contains("m3u8") || host.Contains("hls"))
+        {
+            return 2;
+        }
+
+        return 0;
     }
 }

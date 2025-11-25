@@ -147,7 +147,11 @@ static async Task<int> ExecuteAndPlayAsync(
         return 1;
     }
 
-    var stream = PickBestStream(result.Streams);
+    var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
+    var playerResolution = ResolvePlayerExecutable(playerOptions);
+    var filteredStreams = FilterStreamsForPlayer(result.Streams, playerResolution.Name, logger);
+
+    var stream = PickBestStream(filteredStreams);
     if (stream is null)
     {
         logger.LogWarning("No playable streams found.");
@@ -155,7 +159,6 @@ static async Task<int> ExecuteAndPlayAsync(
     }
     logger.LogDebug("Selected stream {Quality} from host {Host}", stream.Quality ?? "unknown", stream.Url.Host);
 
-    var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
     var allAnimeOptions = services.GetService<IOptions<AllAnimeOptions>>()?.Value;
     var displayTitle = BuildPlayerTitle(result, stream);
     var httpReferrer = !string.IsNullOrWhiteSpace(stream.Referrer)
@@ -164,13 +167,18 @@ static async Task<int> ExecuteAndPlayAsync(
     var prettyTitle = string.IsNullOrWhiteSpace(displayTitle) ? stream.Url.ToString() : displayTitle!;
     logger.LogInformation("Playing {Title} via {Host} [{Quality}]", prettyTitle, stream.Url.Host, stream.Quality ?? "auto");
 
-    var exitCode = LaunchPlayer(playerOptions, stream, logger, httpReferrer, allAnimeOptions?.UserAgent, prettyTitle);
+    var exitCode = LaunchPlayer(playerOptions, stream, logger, httpReferrer, allAnimeOptions?.UserAgent, prettyTitle, playerResolution);
+
+    if (!plan.NonInteractive && filteredStreams.Count > 1)
+    {
+        exitCode = ReplayWithDifferentQuality(filteredStreams, playerOptions, playerResolution, logger, httpReferrer, allAnimeOptions?.UserAgent, prettyTitle, exitCode);
+    }
 
     if (result.SelectedAnime is not null && result.SelectedEpisode is not null)
     {
         var entry = new WatchHistoryEntry
         {
-            Provider = "allanime",
+            Provider = stream.SourceTag ?? stream.Provider,
             AnimeId = result.SelectedAnime.Id.Value,
             AnimeTitle = result.SelectedAnime.Title,
             EpisodeNumber = result.SelectedEpisode.Number,
@@ -297,6 +305,18 @@ static async Task<int> HandleDoctorAsync(IServiceProvider services, ILogger logg
         Console.ResetColor();
         return 1;
     }
+
+    Console.WriteLine("Player / toolchain:");
+    var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
+    var playerResolution = ResolvePlayerExecutable(playerOptions);
+    WriteStatus("Player", playerResolution.Path is not null, playerResolution.Path ?? $"Not found (tried: {string.Join(", ", playerResolution.Candidates)})");
+
+    foreach (var tool in new[] { "ffmpeg", "yt-dlp", "aria2c" })
+    {
+        var resolved = ResolveExecutablePath(tool);
+        WriteStatus(tool, !string.IsNullOrWhiteSpace(resolved), resolved ?? "Not found");
+    }
+    Console.WriteLine();
 
     Console.ForegroundColor = ConsoleColor.Green;
     Console.WriteLine("All providers reachable.");
@@ -893,6 +913,28 @@ static StreamLink? PickBestStream(IReadOnlyCollection<StreamLink> streams)
     return best ?? pool.OrderByDescending(ScoreStream).FirstOrDefault();
 }
 
+static IReadOnlyCollection<StreamLink> FilterStreamsForPlayer(IReadOnlyCollection<StreamLink> streams, string playerName, ILogger logger)
+{
+    var supportsSoftSubs = SupportsSoftSubtitles(playerName);
+    var filtered = supportsSoftSubs
+        ? streams
+        : streams.Where(s => !s.RequiresSoftSubSupport).ToArray();
+
+    if (!supportsSoftSubs && filtered.Count == 0)
+    {
+        logger.LogWarning("Player {Player} may not support external subtitles; using soft-sub streams anyway.", playerName);
+        filtered = streams;
+    }
+
+    return filtered
+        .OrderByDescending(s => s.HostPriority)
+        .ThenByDescending(s => TryParseQualityNumber(s.Quality))
+        .ToArray();
+}
+
+static bool SupportsSoftSubtitles(string playerName) =>
+    !playerName.Contains("vlc", StringComparison.OrdinalIgnoreCase);
+
 static int ScoreStream(StreamLink stream)
 {
     var score = 0;
@@ -915,6 +957,8 @@ static int ScoreStream(StreamLink stream)
     {
         score += q / 10;
     }
+
+    score += stream.HostPriority * 5;
 
     if (stream.Url.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
     {
@@ -1116,7 +1160,9 @@ static string? ResolveExecutablePath(string command)
     return null;
 }
 
-static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger, string? httpReferrer, string? httpUserAgent, string? displayTitle)
+private sealed record PlayerResolution(string? Path, string Name, IReadOnlyList<string> Candidates);
+
+static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
 {
     var candidates = new List<string>();
     if (!string.IsNullOrWhiteSpace(options.Command))
@@ -1133,14 +1179,25 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
         .Select(c => new { Command = c, Path = ResolveExecutablePath(c) })
         .FirstOrDefault(x => x.Path is not null);
 
-    if (resolved?.Path is null)
+    var playerName = resolved?.Path is null
+        ? (candidates.FirstOrDefault() ?? "unknown")
+        : Path.GetFileNameWithoutExtension(resolved.Path);
+
+    return new PlayerResolution(resolved?.Path, playerName, candidates);
+}
+
+static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger, string? httpReferrer, string? httpUserAgent, string? displayTitle, PlayerResolution? resolution = null)
+{
+    resolution ??= ResolvePlayerExecutable(options);
+
+    if (resolution.Path is null)
     {
-        logger.LogError("No supported player found (tried {Candidates}). Build Koware.Player.Win or set Player:Command in appsettings.json.", string.Join(", ", candidates));
+        logger.LogError("No supported player found (tried {Candidates}). Build Koware.Player.Win or set Player:Command in appsettings.json.", string.Join(", ", resolution.Candidates));
         return 1;
     }
 
-    var playerPath = resolved.Path;
-    var playerName = Path.GetFileNameWithoutExtension(playerPath);
+    var playerPath = resolution.Path;
+    var playerName = resolution.Name;
     var subtitle = stream.Subtitles.FirstOrDefault();
 
     if (string.Equals(playerName, "Koware.Player.Win", StringComparison.OrdinalIgnoreCase))
@@ -1236,6 +1293,48 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
     };
 
     return StartProcessAndWait(logger, startInfo, playerPath, arguments);
+}
+
+static int ReplayWithDifferentQuality(
+    IReadOnlyCollection<StreamLink> streams,
+    PlayerOptions options,
+    PlayerResolution player,
+    ILogger logger,
+    string? httpReferrer,
+    string? httpUserAgent,
+    string? displayTitle,
+    int lastExitCode)
+{
+    var ordered = streams.ToArray();
+    if (ordered.Length <= 1)
+    {
+        return lastExitCode;
+    }
+
+    while (true)
+    {
+        Console.WriteLine();
+        Console.WriteLine("Available qualities:");
+        Console.WriteLine(string.Join(", ", ordered.Select(s => s.Quality).Distinct()));
+        Console.Write("Press Enter to exit, or type a quality to replay: ");
+        var input = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return lastExitCode;
+        }
+
+        var next = ordered.FirstOrDefault(s => string.Equals(s.Quality, input, StringComparison.OrdinalIgnoreCase))
+                   ?? ordered.FirstOrDefault(s => s.Quality.Contains(input, StringComparison.OrdinalIgnoreCase));
+
+        if (next is null)
+        {
+            Console.WriteLine("Quality not found. Try one of the listed labels.");
+            continue;
+        }
+
+        logger.LogInformation("Replaying with quality {Quality} ({Provider})", next.Quality, next.Provider);
+        lastExitCode = LaunchPlayer(options, next, logger, next.Referrer ?? httpReferrer, httpUserAgent, displayTitle, player);
+    }
 }
 
 static int StartProcessAndWait(ILogger logger, ProcessStartInfo start, string command, string? arguments = null)

@@ -90,7 +90,7 @@ public sealed class ScrapeOrchestrator
         return matches.ElementAt(index - 1);
     }
 
-    private static Episode? TryPickEpisode(IReadOnlyCollection<Episode>? episodes, int? requestedNumber)
+    private Episode? TryPickEpisode(IReadOnlyCollection<Episode>? episodes, int? requestedNumber)
     {
         if (episodes is null || episodes.Count == 0)
         {
@@ -102,7 +102,24 @@ public sealed class ScrapeOrchestrator
             return episodes.FirstOrDefault();
         }
 
-        return episodes.FirstOrDefault(ep => ep.Number == requestedNumber);
+        var exact = episodes.FirstOrDefault(ep => ep.Number == requestedNumber);
+        if (exact is not null)
+        {
+            return exact;
+        }
+
+        var maxEpisode = episodes.Max(ep => ep.Number);
+        if (requestedNumber > maxEpisode)
+        {
+            _logger.LogWarning("Requested episode {Requested} exceeds available episodes ({Max}). Using latest episode.", requestedNumber, maxEpisode);
+            return episodes.OrderByDescending(ep => ep.Number).FirstOrDefault();
+        }
+
+        _logger.LogWarning("Requested episode {Requested} not found. Using closest available episode instead.", requestedNumber);
+
+        return episodes
+            .OrderBy(ep => Math.Abs(ep.Number - requestedNumber.Value))
+            .FirstOrDefault();
     }
 
     private IReadOnlyCollection<StreamLink>? ApplyQualityPreference(IReadOnlyCollection<StreamLink>? streams, string? preferredQuality)
@@ -112,13 +129,41 @@ public sealed class ScrapeOrchestrator
             return streams;
         }
 
-        var preferred = streams.FirstOrDefault(link => string.Equals(link.Quality, preferredQuality, StringComparison.OrdinalIgnoreCase));
-        if (preferred is null)
+        var allStreams = streams.ToList();
+
+        var preferred = allStreams
+            .Where(link => string.Equals(link.Quality, preferredQuality, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (preferred.Length == 0)
         {
-            _logger.LogWarning("Requested quality {Quality} not found. Using available streams.", preferredQuality);
-            return streams;
+            var available = string.Join(", ", allStreams.Select(s => s.Quality).Where(q => !string.IsNullOrWhiteSpace(q)).Distinct());
+            _logger.LogWarning("Requested quality {Quality} not found. Using available streams. Available: {Available}", preferredQuality, available);
+
+            return allStreams
+                .OrderByDescending(s => TryParseQualityNumber(s.Quality))
+                .ThenByDescending(s => s.HostPriority)
+                .ToArray();
         }
 
-        return new[] { preferred };
+        return preferred
+            .Concat(allStreams.Where(s => !preferred.Contains(s)))
+            .ToArray();
+    }
+
+    private static int TryParseQualityNumber(string? quality)
+    {
+        if (string.IsNullOrWhiteSpace(quality))
+        {
+            return 0;
+        }
+
+        var digits = new string(quality.Where(char.IsDigit).ToArray());
+        if (int.TryParse(digits, out var value))
+        {
+            return value;
+        }
+
+        return 0;
     }
 }

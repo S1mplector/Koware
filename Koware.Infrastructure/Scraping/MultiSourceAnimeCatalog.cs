@@ -10,12 +10,12 @@ namespace Koware.Infrastructure.Scraping;
 
 public sealed class MultiSourceAnimeCatalog : IAnimeCatalog
 {
-    private readonly AllAnimeCatalog _primary;
-    private readonly GogoAnimeCatalog _secondary;
+    private readonly IAnimeCatalog _primary;
+    private readonly IAnimeCatalog _secondary;
     private readonly ProviderToggleOptions _toggles;
     private readonly ILogger<MultiSourceAnimeCatalog> _logger;
 
-    public MultiSourceAnimeCatalog(AllAnimeCatalog primary, GogoAnimeCatalog secondary, IOptions<ProviderToggleOptions> toggles, ILogger<MultiSourceAnimeCatalog> logger)
+    public MultiSourceAnimeCatalog(IAnimeCatalog primary, IAnimeCatalog secondary, IOptions<ProviderToggleOptions> toggles, ILogger<MultiSourceAnimeCatalog> logger)
     {
         _primary = primary;
         _secondary = secondary;
@@ -25,23 +25,31 @@ public sealed class MultiSourceAnimeCatalog : IAnimeCatalog
 
     public async Task<IReadOnlyCollection<Anime>> SearchAsync(string query, CancellationToken cancellationToken = default)
     {
-        if (_toggles.IsEnabled("allanime"))
+        var primaryEnabled = _toggles.IsEnabled("allanime");
+        var secondaryEnabled = _toggles.IsEnabled("gogoanime");
+
+        if (!primaryEnabled && !secondaryEnabled)
         {
-            var primaryResults = await TryProvider(() => _primary.SearchAsync(query, cancellationToken), "allanime", "search");
-            if (primaryResults is { Count: > 0 })
-            {
-                return primaryResults;
-            }
+            _logger.LogWarning("All providers disabled. Enable at least one provider to search.");
+            return Array.Empty<Anime>();
         }
 
-        if (_toggles.IsEnabled("gogoanime"))
+        var primaryTask = primaryEnabled ? TryProvider(() => _primary.SearchAsync(query, cancellationToken), "allanime", "search") : null;
+        var secondaryTask = secondaryEnabled ? TryProvider(() => _secondary.SearchAsync(query, cancellationToken), "gogoanime", "search") : null;
+
+        var primaryResults = primaryTask is null ? null : await primaryTask;
+        if (primaryResults is { Count: > 0 })
         {
-            var secondary = await _secondary.SearchAsync(query, cancellationToken);
-            return secondary;
+            return primaryResults;
         }
 
-        _logger.LogWarning("All providers disabled. Enable at least one provider to search.");
-        return Array.Empty<Anime>();
+        var secondaryResults = secondaryTask is null ? null : await secondaryTask;
+        if (secondaryResults is { Count: > 0 })
+        {
+            return secondaryResults;
+        }
+
+        return primaryResults ?? secondaryResults ?? Array.Empty<Anime>();
     }
 
     public async Task<IReadOnlyCollection<Episode>> GetEpisodesAsync(Anime anime, CancellationToken cancellationToken = default)
@@ -49,25 +57,23 @@ public sealed class MultiSourceAnimeCatalog : IAnimeCatalog
         if (IsGogo(anime.Id))
         {
             return _toggles.IsEnabled("gogoanime")
-                ? await _secondary.GetEpisodesAsync(anime, cancellationToken)
+                ? await TryProvider(() => _secondary.GetEpisodesAsync(anime, cancellationToken), "gogoanime", "episodes") ?? Array.Empty<Episode>()
                 : Array.Empty<Episode>();
         }
 
-        if (_toggles.IsEnabled("allanime"))
+        if (!_toggles.IsEnabled("allanime"))
         {
-            var primaryEpisodes = await TryProvider(() => _primary.GetEpisodesAsync(anime, cancellationToken), "allanime", "episodes");
-            if (primaryEpisodes is { Count: > 0 })
-            {
-                return primaryEpisodes;
-            }
+            _logger.LogWarning("AllAnime provider disabled while requesting episodes for {AnimeId}.", anime.Id.Value);
+            return Array.Empty<Episode>();
         }
 
-        if (_toggles.IsEnabled("gogoanime"))
+        var primaryEpisodes = await TryProvider(() => _primary.GetEpisodesAsync(anime, cancellationToken), "allanime", "episodes");
+        if (primaryEpisodes is { Count: > 0 })
         {
-            return await _secondary.GetEpisodesAsync(anime, cancellationToken);
+            return primaryEpisodes;
         }
 
-        return Array.Empty<Episode>();
+        return primaryEpisodes ?? Array.Empty<Episode>();
     }
 
     public async Task<IReadOnlyCollection<StreamLink>> GetStreamsAsync(Episode episode, CancellationToken cancellationToken = default)
@@ -75,25 +81,23 @@ public sealed class MultiSourceAnimeCatalog : IAnimeCatalog
         if (IsGogo(episode.Id))
         {
             return _toggles.IsEnabled("gogoanime")
-                ? await _secondary.GetStreamsAsync(episode, cancellationToken)
+                ? await TryProvider(() => _secondary.GetStreamsAsync(episode, cancellationToken), "gogoanime", "streams") ?? Array.Empty<StreamLink>()
                 : Array.Empty<StreamLink>();
         }
 
-        if (_toggles.IsEnabled("allanime"))
+        if (!_toggles.IsEnabled("allanime"))
         {
-            var primaryStreams = await TryProvider(() => _primary.GetStreamsAsync(episode, cancellationToken), "allanime", "streams");
-            if (primaryStreams is { Count: > 0 })
-            {
-                return primaryStreams;
-            }
+            _logger.LogWarning("AllAnime provider disabled while requesting streams for {EpisodeId}.", episode.Id.Value);
+            return Array.Empty<StreamLink>();
         }
 
-        if (_toggles.IsEnabled("gogoanime"))
+        var primaryStreams = await TryProvider(() => _primary.GetStreamsAsync(episode, cancellationToken), "allanime", "streams");
+        if (primaryStreams is { Count: > 0 })
         {
-            return await _secondary.GetStreamsAsync(episode, cancellationToken);
+            return primaryStreams;
         }
 
-        return Array.Empty<StreamLink>();
+        return primaryStreams ?? Array.Empty<StreamLink>();
     }
 
     private async Task<IReadOnlyCollection<T>?> TryProvider<T>(Func<Task<IReadOnlyCollection<T>>> action, string provider, string stage)

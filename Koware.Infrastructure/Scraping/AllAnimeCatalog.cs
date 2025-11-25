@@ -392,16 +392,56 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             return;
         }
 
+        var requiresSoftSubs = subtitles is { Count: > 0 };
+
         if (Uri.TryCreate(url, UriKind.Absolute, out var abs))
         {
-            links.Add(new StreamLink(abs, quality, provider, referrer, subtitles));
+            links.Add(new StreamLink(
+                abs,
+                quality,
+                provider,
+                referrer,
+                subtitles,
+                requiresSoftSubs,
+                ComputeHostPriority(abs),
+                provider));
             return;
         }
 
         if (Uri.TryCreate(new Uri(_options.Referer), url, out var resolved))
         {
-            links.Add(new StreamLink(resolved, quality, provider, referrer, subtitles));
+            links.Add(new StreamLink(
+                resolved,
+                quality,
+                provider,
+                referrer,
+                subtitles,
+                requiresSoftSubs,
+                ComputeHostPriority(resolved),
+                provider));
         }
+    }
+
+    private static int ComputeHostPriority(Uri uri)
+    {
+        var host = uri.Host.ToLowerInvariant();
+
+        if (host.Contains("wixmp") || host.Contains("hianime"))
+        {
+            return 20;
+        }
+
+        if (host.Contains("akamaized") || host.Contains("akamai"))
+        {
+            return 10;
+        }
+
+        if (host.Contains("sharepoint") || host.Contains("haildrop"))
+        {
+            return -20;
+        }
+
+        return 0;
     }
 
     private async Task<IReadOnlyCollection<StreamLink>> ParseM3U8Async(string m3u8Url, string provider, string? referrer, CancellationToken cancellationToken)
