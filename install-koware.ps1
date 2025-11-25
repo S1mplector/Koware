@@ -66,7 +66,7 @@ function Publish-Project {
     $process.WaitForExit()
 
     if ($process.ExitCode -ne 0) {
-        Write-Err "dotnet publish failed for $Name:`n$stderr"
+        Write-Err "dotnet publish failed for ${Name}:`n$stderr"
         exit $process.ExitCode
     }
 
