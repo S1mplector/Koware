@@ -218,11 +218,13 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
     {
         var links = new List<StreamLink>();
         string? referrer = null;
+        IReadOnlyList<SubtitleTrack>? subtitles = null;
         try
         {
             using var doc = JsonDocument.Parse(payload);
             referrer = TryFindReferer(doc.RootElement);
-            Walk(doc.RootElement, provider, links, referrer);
+            subtitles = ExtractSubtitleTracks(doc.RootElement, sourceUrl);
+            Walk(doc.RootElement, provider, links, referrer, subtitles);
         }
         catch (JsonException)
         {
@@ -238,7 +240,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         return links;
     }
 
-    private void Walk(JsonElement element, string provider, List<StreamLink> links, string? referrer)
+    private void Walk(JsonElement element, string provider, List<StreamLink> links, string? referrer, IReadOnlyList<SubtitleTrack>? subtitles)
     {
         switch (element.ValueKind)
         {
@@ -250,26 +252,99 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
                         ? res.GetString() ?? "auto"
                         : "auto";
 
-                    AddLinkIfValid(links, link, quality, provider, referrer);
+                    AddLinkIfValid(links, link, quality, provider, referrer, subtitles);
                 }
 
                 if (element.TryGetProperty("url", out var urlProp) && urlProp.ValueKind == JsonValueKind.String)
                 {
-                    AddLinkIfValid(links, urlProp.GetString()!, "hls", provider, referrer);
+                    AddLinkIfValid(links, urlProp.GetString()!, "hls", provider, referrer, subtitles);
                 }
 
                 foreach (var prop in element.EnumerateObject())
                 {
-                    Walk(prop.Value, provider, links, referrer);
+                    Walk(prop.Value, provider, links, referrer, subtitles);
                 }
                 break;
             case JsonValueKind.Array:
                 foreach (var item in element.EnumerateArray())
                 {
-                    Walk(item, provider, links, referrer);
+                    Walk(item, provider, links, referrer, subtitles);
                 }
                 break;
         }
+    }
+
+    private static IReadOnlyList<SubtitleTrack>? ExtractSubtitleTracks(JsonElement root, string sourceUrl)
+    {
+        // AllAnime payloads often include subtitles alongside source links:
+        // "subtitles": [ { "lang": "en", "label": "English", "src": "https://..." } ]
+        // Grab the first subtitles array we can find and resolve relative URLs against the source.
+        if (root.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in root.EnumerateObject())
+            {
+                if (prop.NameEquals("subtitles") && prop.Value.ValueKind == JsonValueKind.Array)
+                {
+                    var tracks = new List<SubtitleTrack>();
+                    foreach (var item in prop.Value.EnumerateArray())
+                    {
+                        if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("src", out var srcProp) || srcProp.ValueKind != JsonValueKind.String)
+                        {
+                            continue;
+                        }
+
+                        var src = srcProp.GetString();
+                        if (string.IsNullOrWhiteSpace(src))
+                        {
+                            continue;
+                        }
+
+                        if (!Uri.IsWellFormedUriString(src, UriKind.Absolute) && Uri.TryCreate(new Uri(sourceUrl), src, out var resolved))
+                        {
+                            src = resolved.ToString();
+                        }
+
+                        if (!Uri.TryCreate(src, UriKind.Absolute, out var srcUri))
+                        {
+                            continue;
+                        }
+
+                        var label = item.TryGetProperty("label", out var labelProp) && labelProp.ValueKind == JsonValueKind.String
+                            ? labelProp.GetString()
+                            : "Subtitles";
+                        var lang = item.TryGetProperty("lang", out var langProp) && langProp.ValueKind == JsonValueKind.String
+                            ? langProp.GetString()
+                            : null;
+
+                        tracks.Add(new SubtitleTrack(label ?? "Subtitles", srcUri, lang));
+                    }
+
+                    if (tracks.Count > 0)
+                    {
+                        return tracks;
+                    }
+                }
+
+                var nested = ExtractSubtitleTracks(prop.Value, sourceUrl);
+                if (nested is { Count: > 0 })
+                {
+                    return nested;
+                }
+            }
+        }
+        else if (root.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in root.EnumerateArray())
+            {
+                var nested = ExtractSubtitleTracks(item, sourceUrl);
+                if (nested is { Count: > 0 })
+                {
+                    return nested;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static string? TryFindReferer(JsonElement element)
