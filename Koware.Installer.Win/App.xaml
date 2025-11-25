@@ -1,0 +1,9 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ WPF application definition for the Koware GUI installer. -->
+<Application x:Class="Koware.Installer.Win.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="UI/MainWindow.xaml">
+    <Application.Resources>
+    </Application.Resources>
+</Application>

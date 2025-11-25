@@ -1,0 +1,55 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Installer UI for selecting options and running Koware installation. -->
+<Window x:Class="Koware.Installer.Win.UI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Koware Installer"
+        Height="420"
+        Width="640"
+        MinHeight="380"
+        MinWidth="560"
+        Background="#0F172A"
+        Foreground="#E2E8F0">
+    <Window.Resources>
+        <Style TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,0,0,6"/>
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Margin" Value="0,4,0,0"/>
+            <Setter Property="Padding" Value="10,6"/>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock FontSize="18" FontWeight="Bold" Text="Koware Installer" />
+
+        <StackPanel Grid.Row="1" Margin="0,12,0,8">
+            <TextBlock Text="Install directory"/>
+            <DockPanel>
+                <TextBox x:Name="InstallPathBox" DockPanel.Dock="Left" MinWidth="360" />
+                <Button x:Name="BrowseButton" Content="Browse..." Width="90" Margin="8,0,0,0" Click="OnBrowse"/>
+            </DockPanel>
+
+            <CheckBox x:Name="PublishCheckbox" Content="Publish fresh Release builds (recommended)" Margin="0,8,0,0" IsChecked="True"/>
+            <CheckBox x:Name="IncludePlayerCheckbox" Content="Include Koware.Player.Win" IsChecked="True"/>
+            <CheckBox x:Name="AddToPathCheckbox" Content="Add install directory to user PATH" IsChecked="True"/>
+            <CheckBox x:Name="CleanCheckbox" Content="Clean install directory before copying" IsChecked="False"/>
+        </StackPanel>
+
+        <GroupBox Grid.Row="2" Header="Log" Margin="0,8,0,8" Foreground="#E2E8F0" BorderBrush="#334155">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <TextBlock x:Name="LogBlock" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" />
+            </ScrollViewer>
+        </GroupBox>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" >
+            <Button x:Name="InstallButton" Content="Install" Width="100" Click="OnInstall"/>
+            <Button Content="Close" Width="80" Margin="8,0,0,0" Click="OnClose"/>
+        </StackPanel>
+    </Grid>
+</Window>
