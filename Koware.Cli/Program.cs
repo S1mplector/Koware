@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Koware.Application.DependencyInjection;
@@ -15,6 +16,7 @@ using Koware.Infrastructure.Configuration;
 using Koware.Cli.Configuration;
 using Koware.Cli.History;
 using Koware.Cli.Console;
+using Koware.Cli.Health;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -86,6 +88,8 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandleHistoryAsync(args, services, logger, defaults, cts.Token);
             case "config":
                 return HandleConfig(args);
+            case "doctor":
+                return await HandleDoctorAsync(services, logger, cts.Token);
             case "help":
             case "--help":
             case "-h":
@@ -244,6 +248,64 @@ static void LogNetworkHint(HttpRequestException ex)
     Console.WriteLine("  - Check your internet connection and VPN/proxy settings.");
     Console.WriteLine("  - Ensure api.allanime.day resolves (DNS) and isn't blocked by a firewall.");
     Console.WriteLine("  - Retry in a minute; the host may be temporarily down.");
+}
+
+static async Task<int> HandleDoctorAsync(IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+{
+    var options = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+    var diagnostics = new ProviderDiagnostics(new HttpClient());
+    var step = ConsoleStep.Start("Checking provider reachability");
+    ProviderCheckResult result;
+    try
+    {
+        result = await diagnostics.CheckAsync(options, cancellationToken);
+        step.Succeed("Check complete");
+    }
+    catch (Exception ex)
+    {
+        step.Fail("Check failed");
+        logger.LogError(ex, "Doctor check failed.");
+        return 1;
+    }
+
+    Console.WriteLine();
+    Console.WriteLine($"Provider: {options.ApiBase}");
+    WriteStatus("DNS", result.DnsResolved, result.DnsError);
+    if (result.HttpStatus.HasValue || result.HttpError is not null)
+    {
+        var detail = result.HttpError ?? $"HTTP {(result.HttpStatus ?? 0)}";
+        WriteStatus("HTTP", result.HttpSuccess, detail);
+    }
+    else
+    {
+        WriteStatus("HTTP", false, "No response");
+    }
+
+    if (!result.Success)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("Hint: check your connection, DNS, or try again later.");
+        Console.ResetColor();
+        return 1;
+    }
+
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine("Everything looks reachable.");
+    Console.ResetColor();
+    return 0;
+}
+
+static void WriteStatus(string label, bool success, string? detail = null)
+{
+    Console.ForegroundColor = success ? ConsoleColor.Green : ConsoleColor.Red;
+    var status = success ? "OK" : "FAIL";
+    Console.Write($"{label,-5}: {status}");
+    Console.ResetColor();
+    if (!string.IsNullOrWhiteSpace(detail))
+    {
+        Console.Write($" - {detail}");
+    }
+    Console.WriteLine();
 }
 
 static async Task<int> HandleContinueAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
@@ -1305,15 +1367,16 @@ static void PrintUsage()
 {
     WriteHeader($"Koware CLI {GetVersionLabel()}");
     Console.WriteLine("Usage:");
-    WriteCommand("search <query>", "Find anime and list matches.");
-    WriteCommand("stream <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Show plan + streams, no player.");
-    WriteCommand("watch <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Pick a stream and play (alias: play).");
-    WriteCommand("play <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Same as watch.");
-    WriteCommand("last [--play] [--json]", "Show or replay your most recent watch.");
-    WriteCommand("continue [<anime>] [--from <episode>] [--quality <label>]", "Resume from history (auto next episode).");
-    WriteCommand("history [options]", "Browse/search history; play entries or show stats.");
-    WriteCommand("help [command]", "Show this guide or a command-specific help page.");
-    WriteCommand("config [options]", "Persist defaults (quality/index/player) to appsettings.user.json.");
+    WriteCommand("search <query>", "Find anime and list matches.", ConsoleColor.Cyan);
+    WriteCommand("stream <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Show plan + streams, no player.", ConsoleColor.Cyan);
+    WriteCommand("watch <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Pick a stream and play (alias: play).", ConsoleColor.Green);
+    WriteCommand("play <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Same as watch.", ConsoleColor.Green);
+    WriteCommand("last [--play] [--json]", "Show or replay your most recent watch.", ConsoleColor.Yellow);
+    WriteCommand("continue [<anime>] [--from <episode>] [--quality <label>]", "Resume from history (auto next episode).", ConsoleColor.Yellow);
+    WriteCommand("history [options]", "Browse/search history; play entries or show stats.", ConsoleColor.Yellow);
+    WriteCommand("help [command]", "Show this guide or a command-specific help page.", ConsoleColor.Magenta);
+    WriteCommand("config [options]", "Persist defaults (quality/index/player) to appsettings.user.json.", ConsoleColor.Magenta);
+    WriteCommand("doctor", "Check provider connectivity (DNS/HTTP).", ConsoleColor.Magenta);
 }
 
 static int HandleHelp(string[] args)
@@ -1323,7 +1386,7 @@ static int HandleHelp(string[] args)
         PrintUsage();
         Console.WriteLine();
         Console.WriteLine("For detailed help: koware help <command>");
-        Console.WriteLine("Commands: search, stream, watch, play, last, continue, config");
+        Console.WriteLine("Commands: search, stream, watch, play, last, continue, config, doctor");
         return 0;
     }
 
@@ -1377,10 +1440,15 @@ static int HandleHelp(string[] args)
             Console.WriteLine("  koware config --player vlc --args \"--play-and-exit\"");
             Console.WriteLine("  koware config --show");
             break;
+        case "doctor":
+            PrintTopicHeader("doctor", "Check connectivity to the anime provider.");
+            Console.WriteLine("Usage: koware doctor");
+            Console.WriteLine("Behavior: pings api host, reports DNS + HTTP reachability.");
+            break;
         default:
             PrintUsage();
             Console.WriteLine();
-            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: search, stream, watch, play, last, continue, config.");
+            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: search, stream, watch, play, last, continue, config, doctor.");
             return 1;
     }
 
@@ -1409,10 +1477,10 @@ static void WriteColoredLine(string text, ConsoleColor color)
     Console.ForegroundColor = prev;
 }
 
-static void WriteCommand(string signature, string description)
+static void WriteCommand(string signature, string description, ConsoleColor color = ConsoleColor.Green)
 {
     var prev = Console.ForegroundColor;
-    Console.ForegroundColor = ConsoleColor.Green;
+    Console.ForegroundColor = color;
     Console.Write($"  {signature,-14}");
     Console.ForegroundColor = ConsoleColor.DarkGray;
     Console.Write(" - ");

@@ -15,6 +15,7 @@ internal sealed class ConsoleStep : IDisposable
     private readonly object _gate = new();
     private bool _completed;
     private ConsoleColor _originalColor;
+    private int _lastRenderLength;
 
     private ConsoleStep(string message)
     {
@@ -41,7 +42,9 @@ internal sealed class ConsoleStep : IDisposable
             {
                 if (_completed) break;
                 System.Console.ForegroundColor = ConsoleColor.DarkYellow;
-                System.Console.Write($"\r{Spinner[i % Spinner.Length]} {_message}");
+                var text = $"{Spinner[i % Spinner.Length]} {_message}";
+                _lastRenderLength = text.Length;
+                System.Console.Write($"\r{text}");
                 System.Console.ForegroundColor = _originalColor;
             }
 
@@ -81,8 +84,12 @@ internal sealed class ConsoleStep : IDisposable
 
         lock (_gate)
         {
+            var clear = new string(' ', Math.Max(_lastRenderLength, symbol.Length + 1 + text.Length));
+            System.Console.Write($"\r{clear}\r");
             System.Console.ForegroundColor = color;
-            System.Console.Write($"\r{symbol} {text}");
+            var line = $"{symbol} {text}";
+            System.Console.Write(line);
+            _lastRenderLength = line.Length;
             System.Console.ForegroundColor = _originalColor;
             System.Console.WriteLine();
         }
