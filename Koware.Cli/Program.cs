@@ -101,6 +101,12 @@ static async Task<int> RunAsync(IHost host, string[] args)
         logger.LogWarning("Operation canceled by user.");
         return 2;
     }
+    catch (HttpRequestException ex)
+    {
+        logger.LogError("Network error while reaching the anime provider: {Message}", ex.Message);
+        LogNetworkHint(ex);
+        return 1;
+    }
     catch (Exception ex)
     {
         logger.LogError(ex, "Unhandled exception during command execution.");
@@ -220,13 +226,24 @@ static async Task<int> HandleLastAsync(string[] args, IServiceProvider services,
             Console.WriteLine($"  Watched : {entry.WatchedAt:u}");
         }
 
-        return 0;
+            return 0;
     }
 
-    var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
-    var plan = new ScrapePlan(entry.AnimeTitle, entry.EpisodeNumber, entry.Quality);
+    return 0;
+}
 
-    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
+static void LogNetworkHint(HttpRequestException ex)
+{
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.DarkYellow;
+    Console.WriteLine("Network issue: could not reach the anime provider.");
+    Console.ResetColor();
+    var msg = string.IsNullOrWhiteSpace(ex.Message) ? ex.GetType().Name : ex.Message;
+    Console.WriteLine($"Details: {msg}");
+    Console.WriteLine("Tips:");
+    Console.WriteLine("  - Check your internet connection and VPN/proxy settings.");
+    Console.WriteLine("  - Ensure api.allanime.day resolves (DNS) and isn't blocked by a firewall.");
+    Console.WriteLine("  - Retry in a minute; the host may be temporarily down.");
 }
 
 static async Task<int> HandleContinueAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
