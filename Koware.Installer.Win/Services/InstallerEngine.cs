@@ -31,7 +31,6 @@ public sealed class InstallerEngine
         var installDir = Path.GetFullPath(options.InstallDir);
         var cliProject = Path.Combine(_repoRoot, "Koware.Cli");
         var playerProject = Path.Combine(_repoRoot, "Koware.Player.Win");
-        var cmdShim = Path.Combine(_repoRoot, "koware.cmd");
 
         EnsureDirectory(installDir, options.CleanTarget, progress);
 
@@ -60,11 +59,7 @@ public sealed class InstallerEngine
             }
         }
 
-        if (File.Exists(cmdShim))
-        {
-            File.Copy(cmdShim, Path.Combine(installDir, "koware.cmd"), overwrite: true);
-            progress?.Report($"Copied shim to {installDir}");
-        }
+        CreateShims(installDir, progress);
 
         if (options.AddToPath)
         {
@@ -176,6 +171,27 @@ public sealed class InstallerEngine
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Copy(file, target, overwrite: true);
         }
+    }
+
+    private static void CreateShims(string installDir, IProgress<string>? progress)
+    {
+        var cliExe = Path.Combine(installDir, "Koware.Cli.exe");
+        if (!File.Exists(cliExe))
+        {
+            progress?.Report("Warning: Koware.Cli.exe not found in install directory; command shims not created.");
+            return;
+        }
+
+        var cmdShimPath = Path.Combine(installDir, "koware.cmd");
+        var psShimPath = Path.Combine(installDir, "koware.ps1");
+
+        var cmdContent = "@echo off\r\n\"%~dp0Koware.Cli.exe\" %*\r\n";
+        File.WriteAllText(cmdShimPath, cmdContent);
+
+        var psContent = "$here = Split-Path -Parent $MyInvocation.MyCommand.Path\r\n& \"$here\\Koware.Cli.exe\" @args\r\n";
+        File.WriteAllText(psShimPath, psContent);
+
+        progress?.Report("Created command shims (koware.cmd, koware.ps1).");
     }
 
     private bool TryExtractEmbedded(string resourceName, string destinationDir, IProgress<string>? progress)

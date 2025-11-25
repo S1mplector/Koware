@@ -108,7 +108,8 @@ public sealed class MultiSourceAnimeCatalog : IAnimeCatalog
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "{Provider} provider failed during {Stage}, attempting fallback.", provider, stage);
+            _logger.LogWarning("{Provider} provider failed during {Stage}: {Message}. Attempting fallback.", provider, stage, ex.Message);
+            _logger.LogDebug(ex, "{Provider} provider exception during {Stage}.", provider, stage);
             return null;
         }
     }

@@ -1,7 +1,7 @@
 <!-- Author: Ilgaz Mehmetoğlu | Project file for unit tests covering Koware components. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <Version>0.1.0-beta</Version>
   </PropertyGroup>

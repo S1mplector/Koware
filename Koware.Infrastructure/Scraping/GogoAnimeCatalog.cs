@@ -25,28 +25,37 @@ public sealed class GogoAnimeCatalog : IAnimeCatalog
     public async Task<IReadOnlyCollection<Anime>> SearchAsync(string query, CancellationToken cancellationToken = default)
     {
         var url = $"{_options.ApiBase.TrimEnd('/')}/anime/gogoanime/{Uri.EscapeDataString(query)}?page=1";
-        using var response = await _httpClient.GetAsync(url, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-
-        if (!json.RootElement.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
+        try
         {
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+            if (!json.RootElement.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
+            {
+                _logger.LogWarning("GogoAnime returned an unexpected payload for query {Query}.", query);
+                return Array.Empty<Anime>();
+            }
+
+            var list = new List<Anime>();
+            foreach (var item in results.EnumerateArray())
+            {
+                var id = item.GetProperty("id").GetString() ?? string.Empty;
+                var title = item.GetProperty("title").GetString() ?? id;
+                var urlSlug = item.TryGetProperty("url", out var urlProp) ? urlProp.GetString() : null;
+                var detailUrl = BuildSiteUrl(urlSlug ?? $"/category/{id}");
+                list.Add(new Anime(new AnimeId($"gogo:{id}"), title, null, detailUrl, Array.Empty<Episode>()));
+            }
+
+            return list;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "GogoAnime returned malformed JSON for query {Query}. Skipping this provider.", query);
             return Array.Empty<Anime>();
         }
-
-        var list = new List<Anime>();
-        foreach (var item in results.EnumerateArray())
-        {
-            var id = item.GetProperty("id").GetString() ?? string.Empty;
-            var title = item.GetProperty("title").GetString() ?? id;
-            var urlSlug = item.TryGetProperty("url", out var urlProp) ? urlProp.GetString() : null;
-            var detailUrl = BuildSiteUrl(urlSlug ?? $"/category/{id}");
-            list.Add(new Anime(new AnimeId($"gogo:{id}"), title, null, detailUrl, Array.Empty<Episode>()));
-        }
-
-        return list;
     }
 
     public async Task<IReadOnlyCollection<Episode>> GetEpisodesAsync(Anime anime, CancellationToken cancellationToken = default)

@@ -7,7 +7,7 @@
   "targets": {
     ".NETCoreApp,Version=v8.0": {},
     ".NETCoreApp,Version=v8.0/win-x64": {
-      "Koware.Player.Win/1.0.0": {
+      "Koware.Player.Win/0.1.0-beta": {
         "dependencies": {
           "Microsoft.Web.WebView2": "1.0.2849.39",
           "Microsoft.Web.WebView2.Core": "1.0.2849.39",
@@ -1012,7 +1012,7 @@
     }
   },
   "libraries": {
-    "Koware.Player.Win/1.0.0": {
+    "Koware.Player.Win/0.1.0-beta": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

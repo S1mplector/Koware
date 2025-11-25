@@ -35,7 +35,7 @@
   <ItemGroup>
     <EmbeddedResource Include="$(CliPayloadZip)" LogicalName="Payload.KowareCli" />
     <EmbeddedResource Include="$(PlayerPayloadZip)" LogicalName="Payload.KowarePlayer" />
-    <Resource Include="..\Assets\Logo\logo (2).ico" Link="Assets\Logo\logo.ico" />
+    <Resource Include="..\Assets\Logo\logo.ico" Link="Assets\Logo\logo.ico" />
   </ItemGroup>
 
 </Project>
