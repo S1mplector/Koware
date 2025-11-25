@@ -14,6 +14,7 @@ using Koware.Infrastructure.DependencyInjection;
 using Koware.Infrastructure.Configuration;
 using Koware.Cli.Configuration;
 using Koware.Cli.History;
+using Koware.Cli.Console;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -115,7 +116,18 @@ static async Task<int> ExecuteAndPlayAsync(
     ILogger logger,
     CancellationToken cancellationToken)
 {
-    var result = await orchestrator.ExecuteAsync(plan, cancellationToken);
+    var step = ConsoleStep.Start("Resolving streams");
+    ScrapeResult result;
+    try
+    {
+        result = await orchestrator.ExecuteAsync(plan, cancellationToken);
+        step.Succeed("Streams ready");
+    }
+    catch (Exception)
+    {
+        step.Fail("Failed to resolve streams");
+        throw;
+    }
     if (result.SelectedEpisode is null || result.Streams is null || result.Streams.Count == 0)
     {
         logger.LogWarning("No streams found for the query/episode.");
@@ -543,7 +555,18 @@ static async Task<int> HandlePlanAsync(ScrapeOrchestrator orchestrator, string[]
 
     plan = await MaybeSelectMatchAsync(orchestrator, plan, logger, cancellationToken);
 
-    var result = await orchestrator.ExecuteAsync(plan, cancellationToken);
+    ScrapeResult result;
+    var step = ConsoleStep.Start("Resolving streams");
+    try
+    {
+        result = await orchestrator.ExecuteAsync(plan, cancellationToken);
+        step.Succeed("Streams ready");
+    }
+    catch
+    {
+        step.Fail("Failed to resolve streams");
+        throw;
+    }
     if (jsonOutput)
     {
         var payload = new
