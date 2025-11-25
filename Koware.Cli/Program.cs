@@ -928,7 +928,7 @@ static IReadOnlyCollection<StreamLink> FilterStreamsForPlayer(IReadOnlyCollectio
 
     return filtered
         .OrderByDescending(s => s.HostPriority)
-        .ThenByDescending(s => TryParseQualityNumber(s.Quality))
+        .ThenByDescending(s => ParseQualityScore(s.Quality))
         .ToArray();
 }
 
@@ -1018,6 +1018,9 @@ static bool TryParseQualityNumber(string? quality, out int value)
 
     return int.TryParse(digits, out value);
 }
+
+static int ParseQualityScore(string? quality) =>
+    TryParseQualityNumber(quality, out var q) ? q : 0;
 
 static bool IsPlaylist(StreamLink stream)
 {
@@ -1159,8 +1162,6 @@ static string? ResolveExecutablePath(string command)
 
     return null;
 }
-
-private sealed record PlayerResolution(string? Path, string Name, IReadOnlyList<string> Candidates);
 
 static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
 {

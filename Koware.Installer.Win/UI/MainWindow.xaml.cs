@@ -3,7 +3,8 @@
 using System;
 using System.Threading;
 using System.Windows;
-using System.Windows.Forms;
+using WinForms = System.Windows.Forms;
+using WpfMessageBox = System.Windows.MessageBox;
 using Koware.Installer.Win.Models;
 using Koware.Installer.Win.Services;
 
@@ -19,6 +20,22 @@ public partial class MainWindow : Window
         InitializeComponent();
         _engine = new InstallerEngine();
         InstallPathBox.Text = new InstallOptions().InstallDir;
+        PublishCheckbox.IsChecked = true;
+        IncludePlayerCheckbox.IsChecked = true;
+        AddToPathCheckbox.IsChecked = true;
+        CleanCheckbox.IsChecked = true;
+    }
+
+    private void OnContinue(object sender, RoutedEventArgs e)
+    {
+        // enforce full install defaults
+        PublishCheckbox.IsChecked = true;
+        IncludePlayerCheckbox.IsChecked = true;
+        AddToPathCheckbox.IsChecked = true;
+        CleanCheckbox.IsChecked ??= true;
+
+        WelcomeScreen.Visibility = Visibility.Collapsed;
+        InstallerScreen.Visibility = Visibility.Visible;
     }
 
     private async void OnInstall(object sender, RoutedEventArgs e)
@@ -39,7 +56,7 @@ public partial class MainWindow : Window
         {
             await _engine.InstallAsync(options, new Progress<string>(AppendLog), _cts.Token);
             AppendLog("Install completed.");
-            MessageBox.Show(this, "Koware installed successfully.", "Koware Installer", MessageBoxButton.OK, MessageBoxImage.Information);
+            WpfMessageBox.Show(this, "Koware installed successfully.", "Koware Installer", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (OperationCanceledException)
         {
@@ -48,7 +65,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             AppendLog($"Error: {ex.Message}");
-            MessageBox.Show(this, ex.Message, "Install failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            WpfMessageBox.Show(this, ex.Message, "Install failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -63,13 +80,13 @@ public partial class MainWindow : Window
 
     private void OnBrowse(object sender, RoutedEventArgs e)
     {
-        using var dialog = new FolderBrowserDialog
+        using var dialog = new WinForms.FolderBrowserDialog
         {
             Description = "Select install directory",
             SelectedPath = InstallPathBox.Text
         };
 
-        if (dialog.ShowDialog() == DialogResult.OK)
+        if (dialog.ShowDialog() == WinForms.DialogResult.OK)
         {
             InstallPathBox.Text = dialog.SelectedPath;
         }

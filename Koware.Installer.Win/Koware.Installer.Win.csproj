@@ -9,6 +9,30 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
+
+  <PropertyGroup>
+    <IntermediatePayloadDir>$(IntermediateOutputPath)payload\</IntermediatePayloadDir>
+    <CliPublishDir>$(IntermediatePayloadDir)cli\</CliPublishDir>
+    <PlayerPublishDir>$(IntermediatePayloadDir)player\</PlayerPublishDir>
+    <CliPayloadZip>$(IntermediatePayloadDir)koware-cli.zip</CliPayloadZip>
+    <PlayerPayloadZip>$(IntermediatePayloadDir)koware-player.zip</PlayerPayloadZip>
+  </PropertyGroup>
+
+  <Target Name="PublishPayload" BeforeTargets="PrepareResources">
+    <MakeDir Directories="$(IntermediatePayloadDir)" />
+    <MakeDir Directories="$(CliPublishDir)" />
+    <MakeDir Directories="$(PlayerPublishDir)" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\Koware.Cli\Koware.Cli.csproj&quot; -c Release -r $(RuntimeIdentifier) --self-contained true -o &quot;$(CliPublishDir)&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\Koware.Player.Win\Koware.Player.Win.csproj&quot; -c Release -r $(RuntimeIdentifier) --self-contained true -o &quot;$(PlayerPublishDir)&quot;" />
+    <ZipDirectory SourceDirectory="$(CliPublishDir)" DestinationFile="$(CliPayloadZip)" Overwrite="true" />
+    <ZipDirectory SourceDirectory="$(PlayerPublishDir)" DestinationFile="$(PlayerPayloadZip)" Overwrite="true" />
+  </Target>
+
+  <ItemGroup>
+    <EmbeddedResource Include="$(CliPayloadZip)" LogicalName="Payload.KowareCli" />
+    <EmbeddedResource Include="$(PlayerPayloadZip)" LogicalName="Payload.KowarePlayer" />
+  </ItemGroup>
 
 </Project>

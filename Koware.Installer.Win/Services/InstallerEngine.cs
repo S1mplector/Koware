@@ -3,7 +3,9 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Koware.Installer.Win.Models;
@@ -33,7 +35,15 @@ public sealed class InstallerEngine
 
         EnsureDirectory(installDir, options.CleanTarget, progress);
 
-        if (options.Publish)
+        var embeddedUsed = TryExtractEmbedded("Payload.KowareCli", installDir, progress);
+        var embeddedPlayerUsed = false;
+
+        if (options.IncludePlayer)
+        {
+            embeddedPlayerUsed = TryExtractEmbedded("Payload.KowarePlayer", installDir, progress);
+        }
+
+        if (!embeddedUsed && options.Publish)
         {
             await PublishAsync("Koware CLI", cliProject, installDir, progress, cancellationToken);
             if (options.IncludePlayer && Directory.Exists(playerProject))
@@ -41,7 +51,7 @@ public sealed class InstallerEngine
                 await PublishAsync("Koware Player", playerProject, installDir, progress, cancellationToken);
             }
         }
-        else
+        else if (!embeddedUsed)
         {
             CopyLatestBuild(cliProject, installDir, progress);
             if (options.IncludePlayer && Directory.Exists(playerProject))
@@ -166,5 +176,31 @@ public sealed class InstallerEngine
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Copy(file, target, overwrite: true);
         }
+    }
+
+    private bool TryExtractEmbedded(string resourceName, string destinationDir, IProgress<string>? progress)
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        var fullName = assembly
+            .GetManifestResourceNames()
+            .FirstOrDefault(n =>
+                n.Equals(resourceName, StringComparison.OrdinalIgnoreCase) ||
+                n.EndsWith("." + resourceName, StringComparison.OrdinalIgnoreCase));
+
+        if (fullName is null)
+        {
+            return false;
+        }
+
+        using var stream = assembly.GetManifestResourceStream(fullName);
+        if (stream is null)
+        {
+            return false;
+        }
+
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+        archive.ExtractToDirectory(destinationDir, overwriteFiles: true);
+        progress?.Report($"Extracted embedded payload: {resourceName}");
+        return true;
     }
 }
