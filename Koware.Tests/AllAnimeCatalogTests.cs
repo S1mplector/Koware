@@ -150,6 +150,91 @@ index-f1.m3u8
         Assert.Equal("en", sub.Language);
     }
 
+    [Fact]
+    public async Task GetEpisodesAsync_MissingTranslationKey_DoesNotThrow_ReturnsEmpty()
+    {
+        var handler = new StubHttpMessageHandler();
+        var httpClient = new HttpClient(handler);
+        var options = Options.Create(DefaultOptions());
+
+        handler.SetResponse(_ => true, () =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+{
+  "data": {
+    "show": {
+      "availableEpisodesDetail": {
+        "dub": ["1", "2"]
+      }
+    }
+  }
+}
+""")
+            });
+
+        var catalog = new AllAnimeCatalog(httpClient, options, NullLogger<AllAnimeCatalog>.Instance);
+        var episodes = await catalog.GetEpisodesAsync(new Anime(new AnimeId("abc"), "demo", null, new Uri("https://test"), Array.Empty<Episode>()), CancellationToken.None);
+
+        Assert.Empty(episodes);
+    }
+
+    [Fact]
+    public async Task GetStreamsAsync_UsesFullShowIdFromEpisodeId()
+    {
+        var handler = new StubHttpMessageHandler();
+        var httpClient = new HttpClient(handler);
+        var options = Options.Create(DefaultOptions());
+
+        var encodedMaster = EncodeForAllAnime("https://media.example.com/master.m3u8");
+
+        handler.SetResponse(uri => uri.AbsoluteUri.Contains("episodeString"), () =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent($$"""
+{
+  "data": {
+    "episode": {
+      "episodeString": "5",
+      "sourceUrls": [
+        { "sourceName": "demo", "sourceUrl": "{{encodedMaster}}" }
+      ]
+    }
+  }
+}
+""")
+            });
+
+        handler.SetResponse(uri => uri.AbsoluteUri.Contains("master.m3u8"), () =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=640x360
+index.m3u8
+""")
+            });
+
+        var catalog = new AllAnimeCatalog(httpClient, options, NullLogger<AllAnimeCatalog>.Instance);
+        var episode = new Episode(new EpisodeId("demo:123:ep-5"), "Episode 5", 5, new Uri("https://example.com"));
+
+        var streams = await catalog.GetStreamsAsync(episode, CancellationToken.None);
+        var stream = Assert.Single(streams);
+        Assert.Equal("360p", stream.Quality);
+
+        var firstRequest = handler.Requests.First(r => r.RequestUri!.AbsoluteUri.Contains("episodeString", StringComparison.OrdinalIgnoreCase));
+        var variablesParam = firstRequest.RequestUri?.Query
+            ?.Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            ?.FirstOrDefault(p => p.StartsWith("variables=", StringComparison.OrdinalIgnoreCase))
+            ?.Split('=', 2, StringSplitOptions.TrimEntries)[1];
+
+        Assert.NotNull(variablesParam);
+        var variablesJson = Uri.UnescapeDataString(variablesParam!);
+        using var doc = JsonDocument.Parse(variablesJson);
+        Assert.Equal("demo:123", doc.RootElement.GetProperty("showId").GetString());
+        Assert.Equal("5", doc.RootElement.GetProperty("episodeString").GetString());
+    }
+
     private static AllAnimeOptions DefaultOptions() => new()
     {
         ApiBase = "https://api.allanime.day",
@@ -196,6 +281,7 @@ index-f1.m3u8
     {
         private readonly List<(Func<Uri, bool> predicate, Func<HttpResponseMessage> responseFactory)> _responses = new();
         public HttpRequestMessage? LastRequest { get; private set; }
+        public List<HttpRequestMessage> Requests { get; } = new();
 
         public void SetResponse(Func<Uri, bool> match, Func<HttpResponseMessage> responseFactory) =>
             _responses.Add((match, responseFactory));
@@ -203,6 +289,7 @@ index-f1.m3u8
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastRequest = request;
+            Requests.Add(request);
             foreach (var (predicate, factory) in _responses)
             {
                 if (predicate(request.RequestUri!))
