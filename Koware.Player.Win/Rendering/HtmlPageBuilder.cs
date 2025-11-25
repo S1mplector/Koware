@@ -24,6 +24,7 @@ internal static class HtmlPageBuilder
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>{{TITLE}}</title>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.11/dist/hls.min.js"></script>
+    <style id="subtitle-style"></style>
     <style>
         :root {
             color-scheme: dark;
@@ -138,6 +139,90 @@ internal static class HtmlPageBuilder
             border-color: rgba(226, 232, 240, 0.15);
         }
 
+        #settings-toggle {
+            border: 1px solid rgba(226, 232, 240, 0.15);
+            background: rgba(226, 232, 240, 0.08);
+            color: var(--text);
+            border-radius: 12px;
+            padding: 8px;
+            cursor: pointer;
+            transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+        }
+
+        #settings-toggle:hover {
+            background: rgba(226, 232, 240, 0.14);
+            border-color: rgba(226, 232, 240, 0.25);
+        }
+
+        #settings-panel {
+            position: absolute;
+            top: 52px;
+            right: 12px;
+            width: 260px;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+            display: none;
+            gap: 10px;
+            z-index: 3;
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+        }
+
+        #settings-panel[data-open="true"] {
+            display: grid;
+        }
+
+        #settings-panel h3 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            letter-spacing: 0.01em;
+            color: var(--text);
+        }
+
+        .setting {
+            display: grid;
+            gap: 4px;
+        }
+
+        .setting label {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .setting .value {
+            font-size: 12px;
+            color: var(--text);
+            justify-self: end;
+        }
+
+        .setting-row {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            gap: 6px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+        }
+
+        select,
+        input[type="color"] {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 8px;
+            padding: 6px 8px;
+        }
+
         #log {
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
             font-size: 12px;
@@ -157,6 +242,46 @@ internal static class HtmlPageBuilder
         <div id="player-wrapper">
             <div id="controls" aria-label="Player controls">
                 <button id="cc-toggle" type="button" aria-pressed="false">CC</button>
+                <button id="settings-toggle" type="button" aria-expanded="false" aria-label="Subtitle settings">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <rect x="8" y="2" width="8" height="6" rx="2" ry="2" stroke="currentColor" stroke-width="1.6" />
+                        <rect x="6.5" y="8" width="11" height="10" rx="2.5" ry="2.5" fill="currentColor" opacity="0.1" />
+                        <rect x="6.5" y="8" width="11" height="10" rx="2.5" ry="2.5" stroke="currentColor" stroke-width="1.6" />
+                        <rect x="7.75" y="12" width="8.5" height="1.6" rx="0.8" fill="currentColor" />
+                        <rect x="10" y="14.5" width="4" height="1.5" rx="0.75" fill="currentColor" />
+                    </svg>
+                </button>
+            </div>
+            <div id="settings-panel" role="dialog" aria-label="Subtitle settings" data-open="false">
+                <h3>Subtitles</h3>
+                <div class="setting">
+                    <div class="setting-row">
+                        <label for="font-size">Font size</label>
+                        <span id="font-size-value" class="value"></span>
+                    </div>
+                    <input id="font-size" type="range" min="14" max="38" step="1" />
+                </div>
+                <div class="setting">
+                    <label for="font-family">Font family</label>
+                    <select id="font-family">
+                        <option value="Segoe UI">Segoe UI</option>
+                        <option value="Arial">Arial</option>
+                        <option value="Verdana">Verdana</option>
+                        <option value="Tahoma">Tahoma</option>
+                        <option value="Calibri">Calibri</option>
+                    </select>
+                </div>
+                <div class="setting">
+                    <label for="font-color">Text color</label>
+                    <input id="font-color" type="color" />
+                </div>
+                <div class="setting">
+                    <div class="setting-row">
+                        <label for="bg-opacity">Background opacity</label>
+                        <span id="bg-opacity-value" class="value"></span>
+                    </div>
+                    <input id="bg-opacity" type="range" min="0" max="0.9" step="0.05" />
+                </div>
             </div>
             <video id="video" controls autoplay playsinline></video>
             <div id="status">Loading stream...</div>
@@ -175,11 +300,27 @@ internal static class HtmlPageBuilder
         const subtitleUrl = {{SUB_JSON}};
         const subtitleLabel = {{SUB_LABEL_JSON}};
         const ccToggle = document.getElementById("cc-toggle");
+        const settingsToggle = document.getElementById("settings-toggle");
+        const settingsPanel = document.getElementById("settings-panel");
+        const subtitleStyleEl = document.getElementById("subtitle-style");
+        const fontSizeInput = document.getElementById("font-size");
+        const fontSizeValue = document.getElementById("font-size-value");
+        const fontFamilySelect = document.getElementById("font-family");
+        const fontColorInput = document.getElementById("font-color");
+        const bgOpacityInput = document.getElementById("bg-opacity");
+        const bgOpacityValue = document.getElementById("bg-opacity-value");
         let hlsInstance = null;
         let fallbackUsed = false;
         let subtitleTrackEl = null;
         let subtitlesEnabled = true;
         const hasSubtitles = !!subtitleUrl;
+        const subtitleDefaults = {
+            fontSize: 22,
+            fontFamily: "Segoe UI",
+            color: "#ffffff",
+            bgOpacity: 0.45
+        };
+        let subtitlePrefs = loadSubtitlePrefs();
 
         video.playsInline = true;
         video.muted = true;
@@ -321,6 +462,50 @@ internal static class HtmlPageBuilder
             updateCcToggle(true, false);
         }
 
+        function applySubtitleStyles() {
+            if (!subtitleStyleEl) return;
+            const { fontSize, fontFamily, color, bgOpacity } = subtitlePrefs;
+            const clampedOpacity = Math.max(0, Math.min(0.9, Number(bgOpacity) || 0));
+            subtitleStyleEl.textContent = `
+video::cue {
+  color: ${color};
+  font-size: ${fontSize}px;
+  font-family: "${fontFamily}", "Segoe UI", sans-serif;
+  background: rgba(0, 0, 0, ${clampedOpacity});
+  padding: 2px 6px;
+  line-height: 1.4;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+}`;
+            updateSettingsUi();
+            persistSubtitlePrefs();
+        }
+
+        function updateSettingsUi() {
+            if (fontSizeInput) fontSizeInput.value = subtitlePrefs.fontSize;
+            if (fontSizeValue) fontSizeValue.textContent = `${subtitlePrefs.fontSize}px`;
+            if (fontFamilySelect) fontFamilySelect.value = subtitlePrefs.fontFamily;
+            if (fontColorInput) fontColorInput.value = subtitlePrefs.color;
+            if (bgOpacityInput) bgOpacityInput.value = subtitlePrefs.bgOpacity;
+            if (bgOpacityValue) bgOpacityValue.textContent = `${Math.round(subtitlePrefs.bgOpacity * 100)}%`;
+        }
+
+        function loadSubtitlePrefs() {
+            try {
+                const raw = localStorage.getItem("koware.subtitle.prefs");
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    return { ...subtitleDefaults, ...parsed };
+                }
+            } catch {}
+            return { ...subtitleDefaults };
+        }
+
+        function persistSubtitlePrefs() {
+            try {
+                localStorage.setItem("koware.subtitle.prefs", JSON.stringify(subtitlePrefs));
+            } catch {}
+        }
+
         function syncSubtitleToggle(on) {
             if (!subtitleTrackEl) return;
             const tracks = video.textTracks;
@@ -349,6 +534,43 @@ internal static class HtmlPageBuilder
             };
         }
 
+        function wireSettingsPanel() {
+            if (!settingsToggle || !settingsPanel) return;
+            const toggle = (state) => {
+                const open = typeof state === "boolean" ? state : settingsPanel.dataset.open !== "true";
+                settingsPanel.dataset.open = open ? "true" : "false";
+                settingsToggle.setAttribute("aria-expanded", open ? "true" : "false");
+            };
+
+            settingsToggle.onclick = () => toggle();
+            document.addEventListener("keydown", (e) => {
+                if (e.key === "Escape") toggle(false);
+            });
+
+            fontSizeInput?.addEventListener("input", (e) => {
+                subtitlePrefs.fontSize = Number(e.target.value) || subtitleDefaults.fontSize;
+                applySubtitleStyles();
+            });
+
+            fontFamilySelect?.addEventListener("change", (e) => {
+                subtitlePrefs.fontFamily = e.target.value || subtitleDefaults.fontFamily;
+                applySubtitleStyles();
+            });
+
+            fontColorInput?.addEventListener("input", (e) => {
+                subtitlePrefs.color = e.target.value || subtitleDefaults.color;
+                applySubtitleStyles();
+            });
+
+            bgOpacityInput?.addEventListener("input", (e) => {
+                const parsed = Number(e.target.value);
+                subtitlePrefs.bgOpacity = Number.isFinite(parsed) ? parsed : subtitleDefaults.bgOpacity;
+                applySubtitleStyles();
+            });
+
+            updateSettingsUi();
+        }
+
         (function start() {
             const lower = source.toLowerCase();
             const isHls = lower.includes(".m3u8") || lower.includes("master.m3u8");
@@ -361,6 +583,9 @@ internal static class HtmlPageBuilder
                 log("Failed to attach any playback pipeline.");
                 return;
             }
+
+            wireSettingsPanel();
+            applySubtitleStyles();
 
             video.addEventListener("error", () => {
                 const desc = describeVideoError(video.error);
