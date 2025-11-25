@@ -1,5 +1,7 @@
 using System.Windows;
 
+using Koware.Player.Win.Startup;
+
 namespace Koware.Player.Win;
 
 public partial class App : Application

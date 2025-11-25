@@ -1,7 +1,8 @@
 using System.Net;
 using System.Text.Json;
+using Koware.Player.Win.Startup;
 
-namespace Koware.Player.Win;
+namespace Koware.Player.Win.Rendering;
 
 internal static class HtmlPageBuilder
 {

@@ -1,6 +1,6 @@
 using System;
 
-namespace Koware.Player.Win;
+namespace Koware.Player.Win.Startup;
 
 public sealed class PlayerArguments
 {
