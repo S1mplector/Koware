@@ -1060,9 +1060,12 @@ static int HandleHelp(string[] args)
             Console.WriteLine("Flags: --play launches the last stream; --json prints structured data.");
             break;
         case "continue":
-            PrintTopicHeader("continue", "Resume from history, optionally for a specific anime.");
+            PrintTopicHeader("continue", "Resume from history (fuzzy match by title) and play the next episode.");
             Console.WriteLine("Usage: koware continue [<anime name>] [--from <episode>] [--quality <label>]");
-            Console.WriteLine("Defaults: if no anime is given, continues the most recent watch; episode auto-increments.");
+            Console.WriteLine("Behavior:");
+            Console.WriteLine("  • No name: resumes the most recent entry and advances to the next episode.");
+            Console.WriteLine("  • With name: fuzzy-matches history by title (case-insensitive contains) and resumes that show.");
+            Console.WriteLine("  • --from overrides the episode number; --quality overrides quality (else defaults/history).");
             break;
         case "config":
             PrintTopicHeader("config", "Persist preferred defaults to appsettings.user.json.");
