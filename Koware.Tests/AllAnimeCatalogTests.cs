@@ -153,6 +153,71 @@ index-f1.m3u8
     }
 
     [Fact]
+    public async Task GetStreamsAsync_AttachesJsonSubtitlesToResolvedLinks()
+    {
+        var handler = new StubHttpMessageHandler();
+        var httpClient = new HttpClient(handler);
+        var options = Options.Create(DefaultOptions());
+
+        var encodedJsonSource = EncodeForAllAnime("https://media.example.com/source.json");
+
+        handler.SetResponse(uri => uri.AbsoluteUri.Contains("episodeString"), () =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent($$"""
+{
+  "data": {
+    "episode": {
+      "episodeString": "1",
+      "sourceUrls": [
+        { "sourceName": "demo", "sourceUrl": "{{encodedJsonSource}}" }
+      ]
+    }
+  }
+}
+""")
+            });
+
+        handler.SetResponse(uri => uri.AbsoluteUri.Contains("source.json"), () =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+{
+  "link": "https://media.example.com/video-720.m3u8",
+  "resolutionStr": "720p",
+  "subtitles": [
+    { "lang": "en", "label": "English", "src": "subs/en.vtt" },
+    { "lang": "es", "label": "Spanish", "src": "https://media.example.com/subs/es.vtt" }
+  ]
+}
+""")
+            });
+
+        var catalog = new AllAnimeCatalog(httpClient, options, NullLogger<AllAnimeCatalog>.Instance);
+        var episode = new Episode(new EpisodeId("show:ep-1"), "Episode 1", 1, new Uri("https://example.com"));
+
+        var streams = await catalog.GetStreamsAsync(episode, CancellationToken.None);
+
+        var stream = Assert.Single(streams);
+        Assert.Equal("720p", stream.Quality);
+        Assert.Equal("https://media.example.com/video-720.m3u8", stream.Url.ToString());
+
+        Assert.Collection(stream.Subtitles,
+            s =>
+            {
+                Assert.Equal("English", s.Label);
+                Assert.Equal("en", s.Language);
+                Assert.Equal("https://media.example.com/subs/en.vtt", s.Url.ToString());
+            },
+            s =>
+            {
+                Assert.Equal("Spanish", s.Label);
+                Assert.Equal("es", s.Language);
+                Assert.Equal("https://media.example.com/subs/es.vtt", s.Url.ToString());
+            });
+    }
+
+    [Fact]
     public async Task GetEpisodesAsync_MissingTranslationKey_DoesNotThrow_ReturnsEmpty()
     {
         var handler = new StubHttpMessageHandler();
