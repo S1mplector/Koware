@@ -53,7 +53,14 @@ public sealed class GogoAnimeCatalog : IAnimeCatalog
         }
         catch (JsonException ex)
         {
-            _logger.LogWarning(ex, "GogoAnime returned malformed JSON for query {Query}. Skipping this provider.", query);
+            _logger.LogWarning("GogoAnime returned malformed JSON for query {Query}. Skipping this provider.", query);
+            _logger.LogDebug(ex, "GogoAnime JSON parse error for query {Query}.", query);
+            return Array.Empty<Anime>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("GogoAnime search failed for query {Query}: {Message}", query, ex.Message);
+            _logger.LogDebug(ex, "GogoAnime search exception for query {Query}.", query);
             return Array.Empty<Anime>();
         }
     }

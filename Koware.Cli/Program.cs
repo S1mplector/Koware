@@ -40,6 +40,7 @@ static IHost BuildHost(string[] args)
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware", LogLevel.Information);
     builder.Logging.AddFilter("Koware", LogLevel.Information);
+    builder.Logging.AddFilter("Koware.Infrastructure.Scraping.GogoAnimeCatalog", LogLevel.Error);
 
     return builder.Build();
 }

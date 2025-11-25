@@ -23,6 +23,9 @@
   </PropertyGroup>
 
   <Target Name="PublishPayload" BeforeTargets="PrepareResources">
+    <RemoveDir Directories="$(CliPublishDir)" />
+    <RemoveDir Directories="$(PlayerPublishDir)" />
+    <Delete Files="$(CliPayloadZip);$(PlayerPayloadZip)" ContinueOnError="true" />
     <MakeDir Directories="$(IntermediatePayloadDir)" />
     <MakeDir Directories="$(CliPublishDir)" />
     <MakeDir Directories="$(PlayerPublishDir)" />

@@ -28,3 +28,18 @@ artifacts/
 # Coverage
 coverage*/
 *.coverage*
+Koware.Installer.Win/payload/koware-cli.zip
+Koware.Installer.Win/payload/koware-player.zip
+Koware.Installer.Win/payload/cli/Koware.Application.dll
+Koware.Installer.Win/payload/cli/Koware.Application.pdb
+Koware.Installer.Win/payload/cli/Koware.Cli.dll
+Koware.Installer.Win/payload/cli/Koware.Cli.exe
+Koware.Installer.Win/payload/cli/Koware.Cli.pdb
+Koware.Installer.Win/payload/cli/Koware.Domain.dll
+Koware.Installer.Win/payload/cli/Koware.Domain.pdb
+Koware.Installer.Win/payload/cli/Koware.Infrastructure.dll
+Koware.Installer.Win/payload/cli/Koware.Infrastructure.pdb
+Koware.Installer.Win/payload/cli/mscordaccore_amd64_amd64_8.0.2225.52707.dll
+Koware.Installer.Win/payload/player/Koware.Player.Win.dll
+Koware.Installer.Win/payload/player/Koware.Player.Win.exe
+Koware.Installer.Win/payload/player/Koware.Player.Win.pdb
