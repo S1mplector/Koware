@@ -81,6 +81,8 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandleLastAsync(args, services, logger, cts.Token);
             case "continue":
                 return await HandleContinueAsync(args, services, logger, defaults, cts.Token);
+            case "history":
+                return await HandleHistoryAsync(args, services, logger, defaults, cts.Token);
             case "config":
                 return HandleConfig(args);
             case "help":
@@ -286,6 +288,203 @@ static async Task<int> HandleContinueAsync(string[] args, IServiceProvider servi
 
     var plan = new ScrapePlan(entry.AnimeTitle, targetEpisode, quality);
 
+    return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
+}
+
+static async Task<int> HandleHistoryAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
+{
+    var history = services.GetRequiredService<IWatchHistoryStore>();
+    var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
+
+    string? search = null;
+    int limit = 10;
+    DateTimeOffset? after = null;
+    DateTimeOffset? before = null;
+    int? fromEpisode = null;
+    int? toEpisode = null;
+    bool json = false;
+    bool stats = false;
+    int? playIndex = null;
+    bool playNext = false;
+
+    var idx = 1;
+    if (args.Length > 1 && args[1].Equals("search", StringComparison.OrdinalIgnoreCase))
+    {
+        idx = 2;
+        if (args.Length > 2)
+        {
+            search = string.Join(' ', args.Skip(2)).Trim();
+        }
+    }
+
+    while (idx < args.Length)
+    {
+        var arg = args[idx];
+        switch (arg.ToLowerInvariant())
+        {
+            case "--anime":
+                if (idx + 1 >= args.Length) return UsageErrorWithReturn("Missing value for --anime");
+                search = args[++idx];
+                break;
+            case "--limit":
+                if (idx + 1 >= args.Length || !int.TryParse(args[idx + 1], out limit))
+                    return UsageErrorWithReturn("Value for --limit must be an integer.");
+                idx++;
+                break;
+            case "--after":
+                if (idx + 1 >= args.Length || !DateTimeOffset.TryParse(args[idx + 1], out var parsedAfter))
+                    return UsageErrorWithReturn("Value for --after must be a date or datetime.");
+                after = parsedAfter;
+                idx++;
+                break;
+            case "--before":
+                if (idx + 1 >= args.Length || !DateTimeOffset.TryParse(args[idx + 1], out var parsedBefore))
+                    return UsageErrorWithReturn("Value for --before must be a date or datetime.");
+                before = parsedBefore;
+                idx++;
+                break;
+            case "--from":
+                if (idx + 1 >= args.Length || !int.TryParse(args[idx + 1], out var f))
+                    return UsageErrorWithReturn("Value for --from must be an integer.");
+                fromEpisode = f;
+                idx++;
+                break;
+            case "--to":
+                if (idx + 1 >= args.Length || !int.TryParse(args[idx + 1], out var t))
+                    return UsageErrorWithReturn("Value for --to must be an integer.");
+                toEpisode = t;
+                idx++;
+                break;
+            case "--json":
+                json = true;
+                break;
+            case "--stats":
+                stats = true;
+                break;
+            case "--play":
+                if (idx + 1 >= args.Length || !int.TryParse(args[idx + 1], out var pi) || pi < 1)
+                    return UsageErrorWithReturn("Value for --play must be a positive integer.");
+                playIndex = pi;
+                idx++;
+                break;
+            case "--next":
+                playNext = true;
+                break;
+        }
+        idx++;
+    }
+
+    if (stats)
+    {
+        var statsResult = await history.GetStatsAsync(search, cancellationToken);
+        if (json)
+        {
+            var payload = new
+            {
+                total = statsResult.Sum(s => s.Count),
+                uniqueAnime = statsResult.Count,
+                top = statsResult.Select(s => new { title = s.AnimeTitle, count = s.Count, lastWatched = s.LastWatched })
+            };
+            Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+            return 0;
+        }
+
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine("History stats");
+        Console.ResetColor();
+        Console.WriteLine($"Total watches: {statsResult.Sum(s => s.Count)}");
+        Console.WriteLine($"Unique anime : {statsResult.Count}");
+        Console.WriteLine("Top shows:");
+        foreach (var s in statsResult.Take(10))
+        {
+            Console.WriteLine($"  {s.AnimeTitle} ({s.Count} entries, last: {s.LastWatched:u})");
+        }
+        return 0;
+    }
+
+    var query = new HistoryQuery(search, after, before, fromEpisode, toEpisode, limit);
+    var entries = await history.QueryAsync(query, cancellationToken);
+
+    if (entries.Count == 0)
+    {
+        Console.WriteLine("No history matches your filters.");
+        return 0;
+    }
+
+    if (json)
+    {
+        var payload = new
+        {
+            total = entries.Count,
+            entries = entries.Select(e => new
+            {
+                animeId = e.AnimeId,
+                animeTitle = e.AnimeTitle,
+                episode = e.EpisodeNumber,
+                episodeTitle = e.EpisodeTitle,
+                quality = e.Quality,
+                watchedAt = e.WatchedAt
+            })
+        };
+        Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        return 0;
+    }
+
+    RenderHistory(entries);
+
+    if (playNext)
+    {
+        var first = entries[0];
+        return await LaunchFromHistory(first, orchestrator, services, history, logger, defaults, first.EpisodeNumber + 1, cancellationToken);
+    }
+
+    if (playIndex.HasValue)
+    {
+        var idxToPlay = playIndex.Value - 1;
+        if (idxToPlay < 0 || idxToPlay >= entries.Count)
+        {
+            Console.WriteLine($"--play value out of range (1-{entries.Count}).");
+            return 1;
+        }
+        var entry = entries[idxToPlay];
+        return await LaunchFromHistory(entry, orchestrator, services, history, logger, defaults, entry.EpisodeNumber, cancellationToken);
+    }
+
+    return 0;
+}
+
+static void RenderHistory(IReadOnlyList<WatchHistoryEntry> entries)
+{
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine("History");
+    Console.ResetColor();
+    Console.WriteLine($"Showing {entries.Count} entr{(entries.Count == 1 ? "y" : "ies")}:");
+
+    Console.WriteLine($"{"#",3} {"Anime",-30} {"Ep",4} {"Quality",-8} {"Watched",-20} Note");
+    var index = 1;
+    foreach (var e in entries)
+    {
+        Console.WriteLine($"{index,3} {Truncate(e.AnimeTitle,30),-30} {e.EpisodeNumber,4} {e.Quality ?? "?",-8} {e.WatchedAt:u,-20} {e.EpisodeTitle ?? string.Empty}");
+        index++;
+    }
+}
+
+static string Truncate(string value, int max)
+{
+    if (string.IsNullOrEmpty(value) || value.Length <= max) return value;
+    return value[..(max - 1)] + "…";
+}
+
+static int UsageErrorWithReturn(string message)
+{
+    Console.WriteLine(message);
+    return 1;
+}
+
+static async Task<int> LaunchFromHistory(WatchHistoryEntry entry, ScrapeOrchestrator orchestrator, IServiceProvider services, IWatchHistoryStore history, ILogger logger, DefaultCliOptions defaults, int episodeNumber, CancellationToken cancellationToken)
+{
+    var quality = entry.Quality ?? defaults.Quality;
+    var plan = new ScrapePlan(entry.AnimeTitle, episodeNumber, quality);
     return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
 }
 
@@ -1030,6 +1229,7 @@ static void PrintUsage()
     WriteCommand("play <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Same as watch.");
     WriteCommand("last [--play] [--json]", "Show or replay your most recent watch.");
     WriteCommand("continue [<anime>] [--from <episode>] [--quality <label>]", "Resume from history (auto next episode).");
+    WriteCommand("history [options]", "Browse/search history; play entries or show stats.");
     WriteCommand("help [command]", "Show this guide or a command-specific help page.");
     WriteCommand("config [options]", "Persist defaults (quality/index/player) to appsettings.user.json.");
 }
@@ -1078,6 +1278,14 @@ static int HandleHelp(string[] args)
             Console.WriteLine("  • No name: resumes the most recent entry and advances to the next episode.");
             Console.WriteLine("  • With name: fuzzy-matches history by title (case-insensitive contains) and resumes that show.");
             Console.WriteLine("  • --from overrides the episode number; --quality overrides quality (else defaults/history).");
+            break;
+        case "history":
+            PrintTopicHeader("history", "Browse and filter watch history (and replay entries).");
+            Console.WriteLine("Usage: koware history [search <query>] [--anime <query>] [--limit <n>] [--after <ISO>] [--before <ISO>] [--from <ep>] [--to <ep>] [--json] [--stats] [--play <n>] [--next]");
+            Console.WriteLine("Notes:");
+            Console.WriteLine("  • search <query> or --anime <query> filters titles (case-insensitive contains).");
+            Console.WriteLine("  • --play <n> plays the nth item in the shown list; --next plays next episode of the first match.");
+            Console.WriteLine("  • --stats shows counts per anime instead of entries.");
             break;
         case "config":
             PrintTopicHeader("config", "Persist preferred defaults to appsettings.user.json.");
