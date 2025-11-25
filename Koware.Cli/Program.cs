@@ -496,8 +496,8 @@ static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string
     var query = string.Join(' ', filteredArgs.Skip(1)).Trim();
     if (string.IsNullOrWhiteSpace(query))
     {
-        logger.LogWarning("Query is required for search");
-        PrintUsage();
+        logger.LogWarning("search command is missing a query.");
+        PrintFriendlyCommandHint("search");
         return 1;
     }
 
@@ -538,9 +538,7 @@ static async Task<int> HandlePlanAsync(ScrapeOrchestrator orchestrator, string[]
     }
     catch (ArgumentException ex)
     {
-        logger.LogWarning(ex, "Invalid arguments for stream/plan command");
-        PrintUsage();
-        return 1;
+        return HandleParseError("stream", ex, logger);
     }
 
     plan = await MaybeSelectMatchAsync(orchestrator, plan, logger, cancellationToken);
@@ -596,15 +594,59 @@ static async Task<int> HandlePlayAsync(ScrapeOrchestrator orchestrator, string[]
     }
     catch (ArgumentException ex)
     {
-        logger.LogWarning(ex, "Invalid arguments for play command");
-        PrintUsage();
-        return 1;
+        return HandleParseError("watch", ex, logger);
     }
 
     plan = await MaybeSelectMatchAsync(orchestrator, plan, logger, cancellationToken);
 
     var history = services.GetRequiredService<IWatchHistoryStore>();
     return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
+}
+
+static int HandleParseError(string command, ArgumentException ex, ILogger logger)
+{
+    var canonical = command.Equals("play", StringComparison.OrdinalIgnoreCase) ? "watch" : command;
+    var missingQuery = ex.Message.Contains("Query is required", StringComparison.OrdinalIgnoreCase);
+
+    if (missingQuery)
+    {
+        logger.LogWarning("{Command} command is missing a search query.", canonical);
+    }
+    else
+    {
+        logger.LogWarning("Invalid arguments for {Command}: {Error}", canonical, ex.Message);
+    }
+
+    PrintFriendlyCommandHint(canonical);
+    return 1;
+}
+
+static void PrintFriendlyCommandHint(string command)
+{
+    switch (command.ToLowerInvariant())
+    {
+        case "watch":
+            WriteColoredLine("Command looks incomplete. Add a search query to watch something.", ConsoleColor.Yellow);
+            WriteColoredLine("Usage:   koware watch <query> [--episode <n>] [--quality <label>] [--index <match>] [--non-interactive]", ConsoleColor.Cyan);
+            WriteColoredLine("Example: koware watch \"one piece\" --episode 1 --quality 1080p", ConsoleColor.Green);
+            break;
+        case "stream":
+        case "plan":
+            WriteColoredLine("Command looks incomplete. Add a search query to plan/stream.", ConsoleColor.Yellow);
+            WriteColoredLine("Usage:   koware stream <query> [--episode <n>] [--quality <label>] [--index <match>] [--non-interactive] [--json]", ConsoleColor.Cyan);
+            WriteColoredLine("Example: koware stream \"bleach\" --episode 1 --non-interactive", ConsoleColor.Green);
+            break;
+        case "search":
+            WriteColoredLine("Command looks incomplete. Add a search query.", ConsoleColor.Yellow);
+            WriteColoredLine("Usage:   koware search <query> [--json]", ConsoleColor.Cyan);
+            WriteColoredLine("Example: koware search \"fullmetal alchemist\"", ConsoleColor.Green);
+            break;
+        default:
+            PrintUsage();
+            break;
+    }
+
+    WriteColoredLine($"Tip: run 'koware help {command.ToLowerInvariant()}' for more details.", ConsoleColor.DarkGray);
 }
 
 static async Task<ScrapePlan> MaybeSelectMatchAsync(ScrapeOrchestrator orchestrator, ScrapePlan plan, ILogger logger, CancellationToken cancellationToken)
@@ -1315,6 +1357,14 @@ static void WriteHeader(string text)
 {
     var prev = Console.ForegroundColor;
     Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine(text);
+    Console.ForegroundColor = prev;
+}
+
+static void WriteColoredLine(string text, ConsoleColor color)
+{
+    var prev = Console.ForegroundColor;
+    Console.ForegroundColor = color;
     Console.WriteLine(text);
     Console.ForegroundColor = prev;
 }
