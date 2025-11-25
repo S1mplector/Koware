@@ -20,20 +20,10 @@ public partial class MainWindow : Window
         InitializeComponent();
         _engine = new InstallerEngine();
         InstallPathBox.Text = new InstallOptions().InstallDir;
-        PublishCheckbox.IsChecked = true;
-        IncludePlayerCheckbox.IsChecked = true;
-        AddToPathCheckbox.IsChecked = true;
-        CleanCheckbox.IsChecked = true;
     }
 
     private void OnContinue(object sender, RoutedEventArgs e)
     {
-        // enforce full install defaults
-        PublishCheckbox.IsChecked = true;
-        IncludePlayerCheckbox.IsChecked = true;
-        AddToPathCheckbox.IsChecked = true;
-        CleanCheckbox.IsChecked ??= true;
-
         WelcomeScreen.Visibility = Visibility.Collapsed;
         InstallerScreen.Visibility = Visibility.Visible;
     }
@@ -46,10 +36,10 @@ public partial class MainWindow : Window
         var options = new InstallOptions
         {
             InstallDir = InstallPathBox.Text.Trim(),
-            Publish = PublishCheckbox.IsChecked == true,
-            IncludePlayer = IncludePlayerCheckbox.IsChecked == true,
-            AddToPath = AddToPathCheckbox.IsChecked == true,
-            CleanTarget = CleanCheckbox.IsChecked == true
+            Publish = true,
+            IncludePlayer = true,
+            AddToPath = true,
+            CleanTarget = true
         };
 
         try
@@ -104,9 +94,5 @@ public partial class MainWindow : Window
     {
         InstallButton.IsEnabled = !isBusy;
         BrowseButton.IsEnabled = !isBusy;
-        PublishCheckbox.IsEnabled = !isBusy;
-        IncludePlayerCheckbox.IsEnabled = !isBusy;
-        AddToPathCheckbox.IsEnabled = !isBusy;
-        CleanCheckbox.IsEnabled = !isBusy;
     }
 }

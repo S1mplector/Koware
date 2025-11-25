@@ -10,6 +10,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Version>0.1.0-beta</Version>
+    <ApplicationIcon>Assets\Logo\logo.ico</ApplicationIcon>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -33,6 +35,7 @@
   <ItemGroup>
     <EmbeddedResource Include="$(CliPayloadZip)" LogicalName="Payload.KowareCli" />
     <EmbeddedResource Include="$(PlayerPayloadZip)" LogicalName="Payload.KowarePlayer" />
+    <Resource Include="..\Assets\Logo\logo (2).ico" Link="Assets\Logo\logo.ico" />
   </ItemGroup>
 
 </Project>

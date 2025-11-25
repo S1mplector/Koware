@@ -9,7 +9,8 @@
         MinHeight="440"
         MinWidth="620"
         Background="#0B1222"
-        Foreground="#E2E8F0">
+        Foreground="#E2E8F0"
+        Icon="pack://application:,,,/Assets/Logo/logo.ico">
     <Window.Resources>
         <SolidColorBrush x:Key="PanelBackground" Color="#111827" />
         <SolidColorBrush x:Key="Accent" Color="#38BDF8" />
@@ -45,26 +46,29 @@
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <StackPanel>
-                <TextBlock FontSize="22" FontWeight="Bold" Text="Welcome to Koware" />
-                <TextBlock FontSize="14" Text="This installer sets up Koware CLI and player with a single click." />
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Image Source="pack://application:,,,/Assets/Logo/logo.ico" Width="56" Height="56" Margin="0,0,12,0"/>
+                <StackPanel>
+                    <TextBlock FontSize="22" FontWeight="Bold" Text="Welcome to Koware" />
+                    <TextBlock FontSize="14" Text="This installer sets up Koware CLI and player with a single click." />
+                </StackPanel>
             </StackPanel>
             <Border Grid.Row="1" Background="{StaticResource PanelBackground}" Padding="16" CornerRadius="6" Margin="0,16,0,16">
                 <StackPanel>
                     <TextBlock FontWeight="Bold" Text="What you'll get:"/>
                     <TextBlock Text="• Fresh Release build of Koware CLI" />
-                    <TextBlock Text="• Koware.Player.Win bundled" />
+                    <TextBlock Text="• Custom Koware video player bundled" />
                     <TextBlock Text="• PATH updated for 'koware' command" />
                     <TextBlock Margin="0,12,0,0" FontWeight="Bold" Text="Copyright &amp; License" />
-                    <TextBlock TextWrapping="Wrap">
+                    <TextBlock TextWrapping="Wrap" Margin="0,0,0,4">
                         <Run Text="Copyright © Ilgaz Mehmetoglu. "/>
-                        <Run Text="Koware is distributed under the license included in the package. Use at your own risk."/>
+                        <Run Text="Koware is distributed under the license bundled with this installer. Use is allowed under the terms of that license; no warranties are provided; you assume all risk and responsibility for complying with local laws and third-party terms."/>
                     </TextBlock>
                 </StackPanel>
             </Border>
             <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="Continue" Width="110" Click="OnContinue"/>
-                <Button Content="Close" Width="90" Margin="8,0,0,0" Click="OnClose"/>
+                <Button Content="Continue" Width="110" Height="36" Click="OnContinue"/>
+                <Button Content="Close" Width="90" Height="36" Margin="8,0,0,0" Click="OnClose"/>
             </StackPanel>
         </Grid>
 
@@ -84,11 +88,6 @@
                     <TextBox x:Name="InstallPathBox" DockPanel.Dock="Left" MinWidth="420" />
                     <Button x:Name="BrowseButton" Content="Browse..." Width="100" Margin="8,0,0,0" Click="OnBrowse"/>
                 </DockPanel>
-
-                <CheckBox x:Name="PublishCheckbox" Content="Publish fresh Release builds (recommended)" IsChecked="True" IsEnabled="False" />
-                <CheckBox x:Name="IncludePlayerCheckbox" Content="Include Koware.Player.Win" IsChecked="True" IsEnabled="False" />
-                <CheckBox x:Name="AddToPathCheckbox" Content="Add install directory to user PATH" IsChecked="True" IsEnabled="False" />
-                <CheckBox x:Name="CleanCheckbox" Content="Clean install directory before copying" IsChecked="True" />
             </StackPanel>
 
             <GroupBox Grid.Row="2" Header="Log" Margin="0,8,0,8">
