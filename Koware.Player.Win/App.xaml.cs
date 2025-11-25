@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// Application bootstrap for the WPF player, parsing arguments and launching the main window.
 using System.Windows;
 
 using Koware.Player.Win.Startup;

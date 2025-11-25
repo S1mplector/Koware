@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// Dependency injection helpers for wiring application-layer services.
 using Koware.Application.UseCases;
 using Microsoft.Extensions.DependencyInjection;
 

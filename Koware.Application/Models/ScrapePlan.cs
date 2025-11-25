@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// Immutable plan describing query, episode, quality, and selection preferences.
 namespace Koware.Application.Models;
 
 public sealed record ScrapePlan(

@@ -1,3 +1,4 @@
+// Author: Ilgaz Mehmetoğlu | Summary: Domain model representing an episode with numbering, title, and page URL.
 namespace Koware.Domain.Models;
 
 public sealed record EpisodeId(string Value)

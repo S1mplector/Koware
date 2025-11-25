@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// Tests for ScrapeOrchestrator match selection and index clamping behavior.
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;

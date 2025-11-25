@@ -1,3 +1,4 @@
+<!-- Author: Ilgaz Mehmetoğlu | Solution manifest listing all Koware project entries. -->
 <Solution>
   <Project Path="Koware.Application/Koware.Application.csproj" />
   <Project Path="Koware.Cli/Koware.Cli.csproj" />

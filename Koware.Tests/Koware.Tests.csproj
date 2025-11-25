@@ -1,3 +1,4 @@
+<!-- Author: Ilgaz Mehmetoğlu | Project file for unit tests covering Koware components. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>

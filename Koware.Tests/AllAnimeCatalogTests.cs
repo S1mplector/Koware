@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// Tests for AllAnime catalog search, episodes, stream parsing, and request handling.
 using System;
 using System.Collections.Generic;
 using System.Net;

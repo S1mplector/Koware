@@ -1,4 +1,5 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+﻿<!-- Author: Ilgaz Mehmetoğlu | Summary: Project file for the Koware command-line interface. -->
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\Koware.Application\Koware.Application.csproj" />

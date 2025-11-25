@@ -1,4 +1,6 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+﻿<!-- Author: Ilgaz Mehmetoğlu
+Project file for infrastructure implementations including AllAnime integration. -->
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\Koware.Domain\Koware.Domain.csproj" />

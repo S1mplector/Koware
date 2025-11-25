@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// Coordinates catalog search, episode/stream selection, and quality preferences.
 using System.Diagnostics.CodeAnalysis;
 using Koware.Application.Abstractions;
 using Koware.Application.Models;

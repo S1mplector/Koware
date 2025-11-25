@@ -1,3 +1,5 @@
+# Author: Ilgaz Mehmetoğlu
+# Summary: PowerShell helper to run the Koware CLI with convenience parameters.
 param(
     [string]$Command = "search",
     [Parameter(Mandatory = $true)][string]$Query,

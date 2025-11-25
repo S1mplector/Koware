@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// Summary: SQLite-backed watch history store with legacy JSON migration and query helpers.
 using System;
 using System.Collections.Generic;
 using System.Data.Common;

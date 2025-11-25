@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// Summary: Entry point and command routing for the Koware CLI, including playback orchestration and configuration handling.
 using System.Diagnostics;
 using System.Reflection;
 using System.IO;

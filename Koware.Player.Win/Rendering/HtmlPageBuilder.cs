@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// Builds the embedded HTML/JS page used inside the WebView player.
 using System.Net;
 using System.Text.Json;
 using Koware.Player.Win.Startup;

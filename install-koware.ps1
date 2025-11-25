@@ -1,3 +1,5 @@
+# Author: Ilgaz Mehmetoğlu
+# PowerShell installer/publisher for Koware CLI and player, and PATH setup.
 param(
     [switch]$Publish
 )

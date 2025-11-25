@@ -1,3 +1,5 @@
+<!-- Author: Ilgaz Mehmetoğlu
+Main window hosting the WebView-based media player UI. -->
 <Window x:Class="Koware.Player.Win.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"

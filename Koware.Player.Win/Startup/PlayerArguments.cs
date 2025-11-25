@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// Parses and stores command-line arguments for the Koware player process.
 using System;
 
 namespace Koware.Player.Win.Startup;

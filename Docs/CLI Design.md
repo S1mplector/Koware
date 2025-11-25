@@ -1,3 +1,4 @@
+<!-- Author: Ilgaz Mehmetoğlu | Summary: Draft CLI design notes and usage examples for koware commands. -->
 # To watch anime
 
 koware watch <anime name> <episode number>
@@ -15,9 +16,6 @@ koware last
 ## To continue from a certain episode
 
 koware continue <anime name> <episode number>
-
-
-
 
 # Koware CLI Reference
 

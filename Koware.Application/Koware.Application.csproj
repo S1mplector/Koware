@@ -1,4 +1,6 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+﻿<!-- Author: Ilgaz Mehmetoğlu
+Project file for application-layer services and orchestrator logic. -->
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\Koware.Domain\Koware.Domain.csproj" />

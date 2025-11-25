@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// Configuration options for the AllAnime provider (hosts, user agent, translation type).
 namespace Koware.Infrastructure.Configuration;
 
 public sealed class AllAnimeOptions

@@ -1,3 +1,4 @@
+// Author: Ilgaz Mehmetoğlu | Summary: Value object describing a stream link with quality, provider, and optional subtitles.
 namespace Koware.Domain.Models;
 
 public sealed record StreamLink(

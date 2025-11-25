@@ -1,4 +1,5 @@
 @echo off
+REM Author: Ilgaz Mehmetoğlu | Windows cmd shim to invoke the Koware CLI or published exe.
 setlocal
 
 set "SCRIPT_DIR=%~dp0"

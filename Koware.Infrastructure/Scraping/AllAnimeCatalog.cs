@@ -1,3 +1,4 @@
+// Author: Ilgaz Mehmetoğlu | Summary: AllAnime implementation of IAnimeCatalog handling search, episodes, streams, and source decoding.
 using System;
 using System.Collections.Concurrent;
 using System.Threading;

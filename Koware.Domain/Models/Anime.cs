@@ -1,3 +1,4 @@
+// Author: Ilgaz Mehmetoğlu | Summary: Domain model for anime entities with immutable identifiers and episode associations.
 namespace Koware.Domain.Models;
 
 public sealed record AnimeId(string Value)

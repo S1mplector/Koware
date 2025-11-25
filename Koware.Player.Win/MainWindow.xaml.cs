@@ -1,3 +1,4 @@
+// Author: Ilgaz Mehmetoğlu | Summary: WPF code-behind that initializes the WebView player host with parsed arguments.
 using System;
 using System.Windows;
 using Koware.Player.Win.Playback;

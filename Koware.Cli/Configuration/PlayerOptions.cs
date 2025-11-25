@@ -1,3 +1,4 @@
+// Author: Ilgaz Mehmetoğlu | Summary: Options for selecting the external player command and arguments used by the CLI.
 namespace Koware.Cli.Configuration;
 
 public sealed class PlayerOptions

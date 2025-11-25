@@ -1,3 +1,4 @@
+<!-- Author: Ilgaz Mehmetoğlu | Project overview and usage instructions for the Koware CLI/player. -->
 # Koware
 
 Layered C# Windows native anime scraper TUI application.

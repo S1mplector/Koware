@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// Summary: DI registration for infrastructure services including AllAnime client configuration.
 using Koware.Application.Abstractions;
 using Koware.Infrastructure.Configuration;
 using Koware.Infrastructure.Scraping;

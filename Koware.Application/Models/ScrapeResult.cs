@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// Result DTO carrying matches, selections, and resolved streams from scraping.
 using Koware.Domain.Models;
 
 namespace Koware.Application.Models;

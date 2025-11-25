@@ -1,3 +1,4 @@
+<!-- Author: Ilgaz Mehmetoğlu | Summary: Project file for the WebView2-based Koware Windows player. -->
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>

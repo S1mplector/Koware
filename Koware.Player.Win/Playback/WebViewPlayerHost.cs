@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// WebView2 host that configures playback, proxies requests, and bridges messages for the player window.
 using System;
 using System.IO;
 using System.Linq;

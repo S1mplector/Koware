@@ -1,3 +1,5 @@
+// Author: Ilgaz Mehmetoğlu
+// Abstraction for anime catalog operations (search, episodes, streams).
 using Koware.Domain.Models;
 
 namespace Koware.Application.Abstractions;
