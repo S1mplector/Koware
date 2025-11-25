@@ -6,6 +6,7 @@ using Koware.Infrastructure.Scraping;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 using System.Net;
 
 namespace Koware.Infrastructure.DependencyInjection;
@@ -17,10 +18,12 @@ public static class InfrastructureServiceCollectionExtensions
         if (configuration is not null)
         {
             services.Configure<AllAnimeOptions>(configuration.GetSection("AllAnime"));
+            services.Configure<GogoAnimeOptions>(configuration.GetSection("GogoAnime"));
         }
         else
         {
             services.Configure<AllAnimeOptions>(_ => { });
+            services.Configure<GogoAnimeOptions>(_ => { });
         }
 
         services.AddHttpClient<AllAnimeCatalog>((sp, client) =>
@@ -38,7 +41,23 @@ public static class InfrastructureServiceCollectionExtensions
             AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate
         });
 
-        services.AddSingleton<IAnimeCatalog, AllAnimeCatalog>();
+        services.AddHttpClient<GogoAnimeCatalog>((sp, client) =>
+        {
+            var options = sp.GetRequiredService<IOptions<GogoAnimeOptions>>().Value;
+            client.BaseAddress = new Uri(options.ApiBase);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(options.UserAgent);
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/json, */*");
+        });
+
+        services.AddSingleton<AllAnimeCatalog>();
+        services.AddSingleton<GogoAnimeCatalog>();
+        services.AddSingleton<IAnimeCatalog>(sp =>
+        {
+            var primary = sp.GetRequiredService<AllAnimeCatalog>();
+            var secondary = sp.GetRequiredService<GogoAnimeCatalog>();
+            var logger = sp.GetRequiredService<ILogger<MultiSourceAnimeCatalog>>();
+            return new MultiSourceAnimeCatalog(primary, secondary, logger);
+        });
         return services;
     }
 }
