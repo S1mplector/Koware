@@ -81,11 +81,29 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         response.EnsureSuccessStatusCode();
 
         using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        var episodesElement = json.RootElement
-            .GetProperty("data")
-            .GetProperty("show")
-            .GetProperty("availableEpisodesDetail")
-            .GetProperty(_options.TranslationType);
+        var root = json.RootElement;
+        if (!root.TryGetProperty("data", out var data) ||
+            !data.TryGetProperty("show", out var show) ||
+            !show.TryGetProperty("availableEpisodesDetail", out var available))
+        {
+            _logger.LogWarning("Episode response missing expected fields for anime {AnimeId}.", anime.Id.Value);
+            return Array.Empty<Episode>();
+        }
+
+        var translationKey = _options.TranslationType ?? "sub";
+        JsonElement episodesElement;
+        if (!available.TryGetProperty(translationKey, out episodesElement))
+        {
+            var matched = available.EnumerateObject()
+                .FirstOrDefault(prop => string.Equals(prop.Name, translationKey, StringComparison.OrdinalIgnoreCase));
+            episodesElement = matched.Value;
+        }
+
+        if (episodesElement.ValueKind == JsonValueKind.Undefined)
+        {
+            _logger.LogWarning("Translation type '{Translation}' not found for anime {AnimeId}.", translationKey, anime.Id.Value);
+            return Array.Empty<Episode>();
+        }
 
         var episodes = new List<Episode>();
         foreach (var ep in episodesElement.EnumerateArray())
@@ -426,9 +444,22 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
 
     private static (string showId, int episodeNumber) ParseEpisodeId(Episode episode)
     {
-        var parts = episode.Id.Value.Split(":ep-");
-        var showId = parts[0];
+        var marker = ":ep-";
+        var idValue = episode.Id.Value;
+        var idx = idValue.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase);
+
+        var showId = idx > 0 ? idValue[..idx] : idValue;
         var number = episode.Number;
+
+        if (idx >= 0 && idx + marker.Length < idValue.Length)
+        {
+            var suffix = idValue[(idx + marker.Length)..];
+            if (int.TryParse(suffix, out var parsed) && parsed > 0)
+            {
+                number = parsed;
+            }
+        }
+
         return (showId, number);
     }
 

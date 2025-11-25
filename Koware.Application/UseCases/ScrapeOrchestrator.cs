@@ -66,19 +66,26 @@ public sealed class ScrapeOrchestrator
         return new ScrapeResult(matches, selectedAnime, episodes, selectedEpisode, streams);
     }
 
-    private static Anime? ChooseMatch(IReadOnlyCollection<Anime> matches, int? preferredIndex)
+    private Anime? ChooseMatch(IReadOnlyCollection<Anime> matches, int? preferredIndex)
     {
         if (matches.Count == 0)
         {
             return null;
         }
 
-        if (preferredIndex.HasValue && preferredIndex.Value > 0 && preferredIndex.Value <= matches.Count)
+        var index = preferredIndex ?? 1;
+        if (index < 1)
         {
-            return matches.ElementAt(preferredIndex.Value - 1);
+            _logger.LogWarning("Preferred match index {Index} is invalid; defaulting to the first match.", index);
+            index = 1;
+        }
+        else if (index > matches.Count)
+        {
+            _logger.LogWarning("Preferred match index {Index} exceeds available matches ({Count}); using the last match.", index, matches.Count);
+            index = matches.Count;
         }
 
-        return matches.First();
+        return matches.ElementAt(index - 1);
     }
 
     private static Episode? TryPickEpisode(IReadOnlyCollection<Episode>? episodes, int? requestedNumber)

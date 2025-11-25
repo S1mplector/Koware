@@ -869,6 +869,11 @@ static ScrapePlan ParsePlan(string[] args, DefaultCliOptions defaults)
         {
             if (int.TryParse(args[i + 1], out var parsedEpisode))
             {
+                if (parsedEpisode <= 0)
+                {
+                    throw new ArgumentException("Episode number must be greater than zero", nameof(args));
+                }
+
                 episodeNumber = parsedEpisode;
                 i++;
                 continue;
@@ -912,6 +917,11 @@ static ScrapePlan ParsePlan(string[] args, DefaultCliOptions defaults)
 
     if (episodeNumber is null && queryParts.Count > 1 && int.TryParse(queryParts[^1], out var positionalEpisode))
     {
+        if (positionalEpisode <= 0)
+        {
+            throw new ArgumentException("Episode number must be greater than zero", nameof(args));
+        }
+
         episodeNumber = positionalEpisode;
         queryParts.RemoveAt(queryParts.Count - 1);
     }
