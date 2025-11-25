@@ -19,11 +19,13 @@ public static class InfrastructureServiceCollectionExtensions
         {
             services.Configure<AllAnimeOptions>(configuration.GetSection("AllAnime"));
             services.Configure<GogoAnimeOptions>(configuration.GetSection("GogoAnime"));
+            services.Configure<ProviderToggleOptions>(configuration.GetSection("Providers"));
         }
         else
         {
             services.Configure<AllAnimeOptions>(_ => { });
             services.Configure<GogoAnimeOptions>(_ => { });
+            services.Configure<ProviderToggleOptions>(_ => { });
         }
 
         services.AddHttpClient<AllAnimeCatalog>((sp, client) =>
@@ -55,8 +57,9 @@ public static class InfrastructureServiceCollectionExtensions
         {
             var primary = sp.GetRequiredService<AllAnimeCatalog>();
             var secondary = sp.GetRequiredService<GogoAnimeCatalog>();
+            var toggles = sp.GetRequiredService<IOptions<ProviderToggleOptions>>();
             var logger = sp.GetRequiredService<ILogger<MultiSourceAnimeCatalog>>();
-            return new MultiSourceAnimeCatalog(primary, secondary, logger);
+            return new MultiSourceAnimeCatalog(primary, secondary, toggles, logger);
         });
         return services;
     }

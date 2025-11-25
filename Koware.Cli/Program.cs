@@ -90,6 +90,8 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return HandleConfig(args);
             case "doctor":
                 return await HandleDoctorAsync(services, logger, cts.Token);
+            case "provider":
+                return await HandleProviderAsync(args, services);
             case "help":
             case "--help":
             case "-h":
@@ -252,45 +254,52 @@ static void LogNetworkHint(HttpRequestException ex)
 
 static async Task<int> HandleDoctorAsync(IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
 {
-    var options = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
-    var diagnostics = new ProviderDiagnostics(new HttpClient());
-    var step = ConsoleStep.Start("Checking provider reachability");
-    ProviderCheckResult result;
-    try
+    var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+    var gogo = services.GetRequiredService<IOptions<GogoAnimeOptions>>().Value;
+    var results = new List<(string name, ProviderCheckResult result)>();
+    foreach (var (name, target) in new[] { ("allanime", allAnime.ApiBase), ("gogoanime", $"{gogo.ApiBase}/anime/gogoanime") })
     {
-        result = await diagnostics.CheckAsync(options, cancellationToken);
-        step.Succeed("Check complete");
-    }
-    catch (Exception ex)
-    {
-        step.Fail("Check failed");
-        logger.LogError(ex, "Doctor check failed.");
-        return 1;
+        var step = ConsoleStep.Start($"Checking {name}");
+        try
+        {
+            var diagnostics = new ProviderDiagnostics(new HttpClient());
+            var options = name == "allanime"
+                ? new AllAnimeOptions { ApiBase = allAnime.ApiBase, Referer = allAnime.Referer, UserAgent = allAnime.UserAgent }
+                : new AllAnimeOptions { ApiBase = gogo.ApiBase, Referer = gogo.SiteBase, UserAgent = gogo.UserAgent };
+
+            var result = await diagnostics.CheckAsync(options, cancellationToken);
+            results.Add((name, result));
+            step.Succeed("Check complete");
+        }
+        catch (Exception ex)
+        {
+            step.Fail("Check failed");
+            logger.LogError(ex, "{Provider} doctor check failed.", name);
+            results.Add((name, new ProviderCheckResult { Target = target, HttpError = ex.Message }));
+        }
     }
 
     Console.WriteLine();
-    Console.WriteLine($"Provider: {options.ApiBase}");
-    WriteStatus("DNS", result.DnsResolved, result.DnsError);
-    if (result.HttpStatus.HasValue || result.HttpError is not null)
+    foreach (var (name, result) in results)
     {
-        var detail = result.HttpError ?? $"HTTP {(result.HttpStatus ?? 0)}";
+        Console.WriteLine($"{name} ({result.Target})");
+        WriteStatus("DNS", result.DnsResolved, result.DnsError);
+        var detail = result.HttpError ?? (result.HttpStatus.HasValue ? $"HTTP {result.HttpStatus}" : "No response");
         WriteStatus("HTTP", result.HttpSuccess, detail);
-    }
-    else
-    {
-        WriteStatus("HTTP", false, "No response");
+        Console.WriteLine();
     }
 
-    if (!result.Success)
+    var allOk = results.All(r => r.result.Success);
+    if (!allOk)
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("Hint: check your connection, DNS, or try again later.");
+        Console.WriteLine("One or more providers are unreachable. Check your connection, DNS, or try again later.");
         Console.ResetColor();
         return 1;
     }
 
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine("Everything looks reachable.");
+    Console.WriteLine("All providers reachable.");
     Console.ResetColor();
     return 0;
 }
@@ -306,6 +315,64 @@ static void WriteStatus(string label, bool success, string? detail = null)
         Console.Write($" - {detail}");
     }
     Console.WriteLine();
+}
+
+static async Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
+{
+    var toggles = services.GetRequiredService<IOptions<ProviderToggleOptions>>().Value;
+    var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.user.json");
+    var json = File.Exists(configPath)
+        ? (JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? new JsonObject())
+        : new JsonObject();
+    var providersNode = json["Providers"] as JsonObject ?? new JsonObject();
+    var disabledNode = providersNode["DisabledProviders"] as JsonArray ?? new JsonArray();
+
+    if (args.Length == 1)
+    {
+        var known = new[]
+        {
+            ("allanime", "Primary (AllAnime)"),
+            ("gogoanime", "Fallback (GogoAnime)")
+        };
+        foreach (var (name, label) in known)
+        {
+            var enabled = toggles.IsEnabled(name);
+            Console.ForegroundColor = enabled ? ConsoleColor.Green : ConsoleColor.Red;
+            Console.Write($"{name,-10}");
+            Console.ResetColor();
+            Console.WriteLine($" - {label}");
+        }
+        return 0;
+    }
+
+    if (args.Length >= 3 && (args[1].Equals("--enable", StringComparison.OrdinalIgnoreCase) || args[1].Equals("--disable", StringComparison.OrdinalIgnoreCase)))
+    {
+        var target = args[2].ToLowerInvariant();
+        var enable = args[1].Equals("--enable", StringComparison.OrdinalIgnoreCase);
+        var set = new HashSet<string>(disabledNode.OfType<JsonNode?>().Select(n => n?.ToString() ?? string.Empty).Where(s => !string.IsNullOrWhiteSpace(s)), StringComparer.OrdinalIgnoreCase);
+        if (enable)
+        {
+            set.Remove(target);
+        }
+        else
+        {
+            set.Add(target);
+        }
+
+        var newArray = new JsonArray(set.Select(v => (JsonNode?)JsonValue.Create(v)).ToArray());
+        providersNode["DisabledProviders"] = newArray;
+        json["Providers"] = providersNode;
+        File.WriteAllText(configPath, JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = true }));
+
+        Console.ForegroundColor = enable ? ConsoleColor.Green : ConsoleColor.Red;
+        Console.WriteLine($"{(enable ? "Enabled" : "Disabled")} provider '{target}'.");
+        Console.ResetColor();
+        Console.WriteLine("Restart your session for changes to take effect.");
+        return 0;
+    }
+
+    Console.WriteLine("Usage: koware provider [--enable <name> | --disable <name>]");
+    return 1;
 }
 
 static async Task<int> HandleContinueAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
@@ -742,6 +809,10 @@ static void PrintFriendlyCommandHint(string command)
             WriteColoredLine("Command looks incomplete. Add a search query.", ConsoleColor.Yellow);
             WriteColoredLine("Usage:   koware search <query> [--json]", ConsoleColor.Cyan);
             WriteColoredLine("Example: koware search \"fullmetal alchemist\"", ConsoleColor.Green);
+            break;
+        case "provider":
+            Console.WriteLine("Usage: koware provider [--enable <name> | --disable <name>]");
+            Console.WriteLine("Shows provider status or toggles a provider on/off.");
             break;
         default:
             PrintUsage();
@@ -1377,6 +1448,7 @@ static void PrintUsage()
     WriteCommand("help [command]", "Show this guide or a command-specific help page.", ConsoleColor.Magenta);
     WriteCommand("config [options]", "Persist defaults (quality/index/player) to appsettings.user.json.", ConsoleColor.Magenta);
     WriteCommand("doctor", "Check provider connectivity (DNS/HTTP).", ConsoleColor.Magenta);
+    WriteCommand("provider [options]", "List/enable/disable providers.", ConsoleColor.Magenta);
 }
 
 static int HandleHelp(string[] args)
@@ -1440,6 +1512,11 @@ static int HandleHelp(string[] args)
             Console.WriteLine("  koware config --player vlc --args \"--play-and-exit\"");
             Console.WriteLine("  koware config --show");
             break;
+        case "provider":
+            PrintTopicHeader("provider", "List or toggle providers.");
+            Console.WriteLine("Usage: koware provider [--enable <name> | --disable <name>]");
+            Console.WriteLine("Behavior: lists providers; with flags, updates enablement.");
+            break;
         case "doctor":
             PrintTopicHeader("doctor", "Check connectivity to the anime provider.");
             Console.WriteLine("Usage: koware doctor");
@@ -1448,7 +1525,7 @@ static int HandleHelp(string[] args)
         default:
             PrintUsage();
             Console.WriteLine();
-            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: search, stream, watch, play, last, continue, config, doctor.");
+            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: search, stream, watch, play, last, continue, config, provider, doctor.");
             return 1;
     }
 
