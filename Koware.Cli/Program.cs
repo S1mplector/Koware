@@ -1474,13 +1474,16 @@ static void RenderSearch(string query, IReadOnlyCollection<Anime> matches)
     }
 
     var index = 1;
+    var isFirst = true;
     foreach (var anime in matches)
     {
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.Write($"  [{index}] ");
+        var color = isFirst ? ConsoleColor.Yellow : ConsoleColor.DarkYellow;
+        Console.ForegroundColor = color;
+        Console.Write($"  [{index}] {anime.Title}");
         Console.ResetColor();
-        Console.WriteLine($"{anime.Title} -> {anime.DetailPage}");
+        Console.WriteLine($" -> {anime.DetailPage}");
         index++;
+        isFirst = false;
     }
 }
 

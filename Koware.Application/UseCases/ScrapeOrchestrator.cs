@@ -19,14 +19,29 @@ public sealed class ScrapeOrchestrator
         _logger = logger;
     }
 
-    public Task<IReadOnlyCollection<Anime>> SearchAsync(string query, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyCollection<Anime>> SearchAsync(string query, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
             throw new ArgumentException("Query is required", nameof(query));
         }
 
-        return _catalog.SearchAsync(query.Trim(), cancellationToken);
+        var trimmed = query.Trim();
+        var normalizedQuery = Normalize(trimmed);
+
+        var matches = await _catalog.SearchAsync(trimmed, cancellationToken);
+
+        if (matches.Count == 0 || string.IsNullOrWhiteSpace(normalizedQuery))
+        {
+            return matches;
+        }
+
+        var ordered = matches
+            .OrderByDescending(anime => ScoreMatch(normalizedQuery, anime.Title))
+            .ThenBy(anime => anime.Title, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ordered;
     }
 
     public Task<ScrapeResult> ExecuteAsync(ScrapePlan plan, CancellationToken cancellationToken = default)
@@ -165,5 +180,77 @@ public sealed class ScrapeOrchestrator
         }
 
         return 0;
+    }
+
+    private static string Normalize(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var cleaned = new string(
+            value
+                .ToLowerInvariant()
+                .Select(c => char.IsLetterOrDigit(c) || char.IsWhiteSpace(c) ? c : ' ')
+                .ToArray());
+
+        return string.Join(' ', cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static int ScoreMatch(string normalizedQuery, string? title)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedQuery) || string.IsNullOrWhiteSpace(title))
+        {
+            return 0;
+        }
+
+        var t = Normalize(title);
+        if (t.Length == 0)
+        {
+            return 0;
+        }
+
+        var q = normalizedQuery;
+        var score = 0;
+
+        if (t.Equals(q, StringComparison.Ordinal))
+        {
+            score += 1000;
+        }
+
+        if (t.StartsWith(q, StringComparison.Ordinal))
+        {
+            score += 500;
+        }
+
+        if (t.Contains(q, StringComparison.Ordinal))
+        {
+            score += 300;
+        }
+
+        var qTokens = q.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var tTokens = t.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (var token in qTokens)
+        {
+            if (tTokens.Contains(token))
+            {
+                score += 80;
+            }
+            else if (tTokens.Any(tt => tt.StartsWith(token, StringComparison.Ordinal)))
+            {
+                score += 40;
+            }
+            else if (t.Contains(token, StringComparison.Ordinal))
+            {
+                score += 20;
+            }
+        }
+
+        var lengthDiff = Math.Abs(t.Length - q.Length);
+        score -= lengthDiff / 2;
+
+        return score < 0 ? 0 : score;
     }
 }
