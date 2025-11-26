@@ -15,12 +15,22 @@ public partial class MainWindow : Window
 {
     private readonly InstallerEngine _engine;
     private readonly CancellationTokenSource _cts = new();
+    private readonly string _defaultInstallDir;
 
     public MainWindow()
     {
         InitializeComponent();
         _engine = new InstallerEngine();
-        InstallPathBox.Text = new InstallOptions().InstallDir;
+
+        _defaultInstallDir = new InstallOptions().InstallDir;
+        InstallPathBox.Text = _defaultInstallDir;
+
+        // Detect existing installation and adjust UI accordingly
+        if (_engine.IsInstalled(_defaultInstallDir))
+        {
+            InstallButton.Content = "Re-install";
+            UninstallButton.Visibility = Visibility.Visible;
+        }
     }
 
     private void OnContinue(object sender, RoutedEventArgs e)
@@ -121,5 +131,45 @@ public partial class MainWindow : Window
     {
         InstallButton.IsEnabled = !isBusy;
         BrowseButton.IsEnabled = !isBusy;
+        UninstallButton.IsEnabled = !isBusy;
+    }
+
+    private async void OnUninstall(object sender, RoutedEventArgs e)
+    {
+        var result = WpfMessageBox.Show(this,
+            "This will remove Koware from this machine, including its files and PATH entry. Do you want to continue?",
+            "Remove Koware",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+
+        if (result != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        SetUiState(isBusy: true);
+        AppendLog("Starting uninstall...");
+
+        var installDir = InstallPathBox.Text.Trim();
+
+        try
+        {
+            await _engine.UninstallAsync(installDir, new Progress<string>(AppendLog), _cts.Token);
+            AppendLog("Uninstall completed.");
+            WpfMessageBox.Show(this, "Koware was removed from this machine.", "Koware Installer", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (OperationCanceledException)
+        {
+            AppendLog("Uninstall canceled.");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Error: {ex.Message}");
+            WpfMessageBox.Show(this, ex.Message, "Uninstall failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetUiState(isBusy: false);
+        }
     }
 }

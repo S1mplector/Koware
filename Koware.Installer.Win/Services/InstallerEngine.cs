@@ -67,6 +67,63 @@ public sealed class InstallerEngine
         }
     }
 
+    public bool IsInstalled(string? installDir = null)
+    {
+        var dir = installDir;
+        if (string.IsNullOrWhiteSpace(dir))
+        {
+            dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "koware");
+        }
+
+        dir = Path.GetFullPath(dir);
+
+        if (!Directory.Exists(dir))
+        {
+            return false;
+        }
+
+        var cliExe = Path.Combine(dir, "Koware.Cli.exe");
+        return File.Exists(cliExe);
+    }
+
+    public Task UninstallAsync(string? installDir = null, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+    {
+        var dir = installDir;
+        if (string.IsNullOrWhiteSpace(dir))
+        {
+            dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "koware");
+        }
+
+        dir = Path.GetFullPath(dir);
+
+        progress?.Report($"Uninstalling from {dir}...");
+
+        if (Directory.Exists(dir))
+        {
+            try
+            {
+                Directory.Delete(dir, recursive: true);
+                progress?.Report($"Removed install directory {dir}.");
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to delete install directory {dir}: {ex.Message}", ex);
+            }
+        }
+        else
+        {
+            progress?.Report($"Install directory not found at {dir}. Nothing to remove.");
+        }
+
+        RemoveFromPath(dir, progress);
+
+        return Task.CompletedTask;
+    }
+
     private static string DetectRepoRoot()
     {
         var baseDir = AppContext.BaseDirectory;
@@ -155,6 +212,24 @@ public sealed class InstallerEngine
         var updated = string.Join(Path.PathSeparator, parts);
         Environment.SetEnvironmentVariable("PATH", updated, EnvironmentVariableTarget.User);
         progress?.Report($"Added {installDir} to user PATH.");
+    }
+
+    private static void RemoveFromPath(string installDir, IProgress<string>? progress)
+    {
+        var current = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User) ?? string.Empty;
+        var parts = current.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+        var removed = parts.RemoveAll(p => string.Equals(p, installDir, StringComparison.OrdinalIgnoreCase));
+        if (removed == 0)
+        {
+            progress?.Report("Install path was not present on user PATH.");
+            return;
+        }
+
+        var updated = string.Join(Path.PathSeparator, parts);
+        Environment.SetEnvironmentVariable("PATH", updated, EnvironmentVariableTarget.User);
+        progress?.Report($"Removed {installDir} from user PATH.");
     }
 
     private static void CopyDirectory(string sourceDir, string destinationDir)
