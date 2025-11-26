@@ -30,6 +30,18 @@ public partial class MainWindow : Window
         {
             InstallButton.Content = "Re-install";
             UninstallButton.Visibility = Visibility.Visible;
+
+            var version = _engine.GetInstalledVersion(_defaultInstallDir);
+            if (!string.IsNullOrWhiteSpace(version))
+            {
+                ExistingInstallInfo.Text = $"Koware is already installed at {_defaultInstallDir} (version {version}).";
+            }
+            else
+            {
+                ExistingInstallInfo.Text = $"Koware is already installed at {_defaultInstallDir}.";
+            }
+
+            ExistingInstallInfo.Visibility = Visibility.Visible;
         }
     }
 

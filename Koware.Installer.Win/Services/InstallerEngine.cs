@@ -65,6 +65,8 @@ public sealed class InstallerEngine
         {
             AddToPath(installDir, progress);
         }
+
+        WriteVersionFile(installDir, progress);
     }
 
     public bool IsInstalled(string? installDir = null)
@@ -86,6 +88,35 @@ public sealed class InstallerEngine
 
         var cliExe = Path.Combine(dir, "Koware.Cli.exe");
         return File.Exists(cliExe);
+    }
+
+    public string? GetInstalledVersion(string? installDir = null)
+    {
+        var dir = installDir;
+        if (string.IsNullOrWhiteSpace(dir))
+        {
+            dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "koware");
+        }
+
+        dir = Path.GetFullPath(dir);
+
+        var versionFile = Path.Combine(dir, "version.txt");
+        if (!File.Exists(versionFile))
+        {
+            return null;
+        }
+
+        try
+        {
+            var text = File.ReadAllText(versionFile).Trim();
+            return string.IsNullOrWhiteSpace(text) ? null : text;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public Task UninstallAsync(string? installDir = null, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
@@ -230,6 +261,36 @@ public sealed class InstallerEngine
         var updated = string.Join(Path.PathSeparator, parts);
         Environment.SetEnvironmentVariable("PATH", updated, EnvironmentVariableTarget.User);
         progress?.Report($"Removed {installDir} from user PATH.");
+    }
+
+    private static void WriteVersionFile(string installDir, IProgress<string>? progress)
+    {
+        var cliExe = Path.Combine(installDir, "Koware.Cli.exe");
+        if (!File.Exists(cliExe))
+        {
+            return;
+        }
+
+        try
+        {
+            var info = FileVersionInfo.GetVersionInfo(cliExe);
+            var version = !string.IsNullOrWhiteSpace(info.ProductVersion)
+                ? info.ProductVersion
+                : info.FileVersion;
+
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                return;
+            }
+
+            var path = Path.Combine(installDir, "version.txt");
+            File.WriteAllText(path, version);
+            progress?.Report($"Recorded installed version {version}.");
+        }
+        catch (Exception ex)
+        {
+            progress?.Report($"Warning: failed to record installed version: {ex.Message}");
+        }
     }
 
     private static void CopyDirectory(string sourceDir, string destinationDir)

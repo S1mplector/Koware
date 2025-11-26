@@ -83,6 +83,7 @@
             <TextBlock FontSize="18" FontWeight="Bold" Text="Koware Installer" />
 
             <StackPanel Grid.Row="1" Margin="0,12,0,8">
+                <TextBlock x:Name="ExistingInstallInfo" Visibility="Collapsed" FontSize="12" Foreground="#A5B4FC" />
                 <TextBlock Text="Install directory"/>
                 <DockPanel>
                     <TextBox x:Name="InstallPathBox" DockPanel.Dock="Left" MinWidth="420" />
