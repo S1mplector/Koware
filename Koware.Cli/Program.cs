@@ -868,8 +868,18 @@ static async Task<ScrapePlan> MaybeSelectMatchAsync(ScrapeOrchestrator orchestra
     }
 
     RenderSearch(plan.Query, matches);
-    Console.Write($"Select anime [1-{matches.Count}] (Enter for 1): ");
+    Console.Write($"Select anime [1-{matches.Count}] (Enter for 1, ");
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.Write("c to cancel");
+    Console.ResetColor();
+    Console.Write("): ");
     var input = Console.ReadLine();
+
+    if (string.Equals(input?.Trim(), "c", StringComparison.OrdinalIgnoreCase))
+    {
+        logger.LogInformation("Selection canceled by user.");
+        throw new OperationCanceledException("Selection canceled by user.");
+    }
     if (int.TryParse(input, out var choice) && choice >= 1 && choice <= matches.Count)
     {
         return plan with { PreferredMatchIndex = choice };
