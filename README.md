@@ -42,3 +42,10 @@ Then in a new PowerShell session, `koware search "bleach"` or `koware watch "hai
 ## CLI selection and history
 - When multiple search results are found, the CLI will prompt you to pick an index (or pass `--index <n>` / `--non-interactive` to skip prompts).
 - Stream selection prefers HLS/DASH and HTTPS hosts; noisy HTTP logging is filtered by default.
+
+## Usage & Legality
+
+- Koware is a locally-hosted and operated tool that aggregates and presents links to content that is already publicly available on the internet. Koware strictly does NOT host or distribute media, and it does NOT include or support bypassing paywalls or DRM.
+
+- Your use must comply with local laws, website terms of service, and third-party rights. Whether your usage is lawful depends on what you access and how you access it.
+- See Usage-Notice.md for more details.
