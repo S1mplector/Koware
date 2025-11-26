@@ -1,6 +1,7 @@
 // Author: Ilgaz Mehmetoğlu 
 // Handles installer UI interactions and invokes InstallerEngine operations.
 using System;
+using System.IO;
 using System.Threading;
 using System.Windows;
 using WinForms = System.Windows.Forms;
@@ -24,6 +25,32 @@ public partial class MainWindow : Window
 
     private void OnContinue(object sender, RoutedEventArgs e)
     {
+        // Load usage notice markdown from the installer output directory
+        var noticePath = Path.Combine(AppContext.BaseDirectory, "Usage-Notice.md");
+        string noticeText;
+        try
+        {
+            noticeText = File.Exists(noticePath)
+                ? File.ReadAllText(noticePath)
+                : "Koware usage notice could not be loaded. Please see the repository for details.";
+        }
+        catch
+        {
+            noticeText = "Koware usage notice could not be loaded. Please see the repository for details.";
+        }
+
+        var dialog = new LegalDialog(noticeText) { Owner = this };
+        var accepted = dialog.ShowDialog() == true && dialog.Accepted;
+        if (!accepted)
+        {
+            WpfMessageBox.Show(this,
+                "You must accept the Usage Notice to install Koware.",
+                "Usage Notice",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
         WelcomeScreen.Visibility = Visibility.Collapsed;
         InstallerScreen.Visibility = Visibility.Visible;
     }

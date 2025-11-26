@@ -41,4 +41,11 @@
     <Resource Include="..\Assets\Logo\logo.ico" Link="Assets\Logo\logo.ico" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\Usage-Notice.md">
+      <Link>Usage-Notice.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

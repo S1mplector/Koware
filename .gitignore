@@ -43,3 +43,12 @@ Koware.Installer.Win/payload/cli/mscordaccore_amd64_amd64_8.0.2225.52707.dll
 Koware.Installer.Win/payload/player/Koware.Player.Win.dll
 Koware.Installer.Win/payload/player/Koware.Player.Win.exe
 Koware.Installer.Win/payload/player/Koware.Player.Win.pdb
+
+# Installer build outputs (broad ignore)
+Koware.Installer.Win/payload/**
+Koware.Installer.Win/bin/
+Koware.Installer.Win/obj/
+
+# Publish bundles (script outputs)
+publish/
+**/publish/

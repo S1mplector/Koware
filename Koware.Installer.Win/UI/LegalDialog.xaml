@@ -1,0 +1,78 @@
+<!-- Author: Ilgaz Mehmetoğlu
+ Modal dialog to display Usage Notice and require acceptance to proceed. -->
+<Window x:Class="Koware.Installer.Win.UI.LegalDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Usage Notice" Height="520" Width="720"
+        WindowStartupLocation="CenterOwner"
+        Background="#0B1222" Foreground="#E2E8F0"
+        ResizeMode="CanResizeWithGrip"
+        Icon="pack://application:,,,/Assets/Logo/logo.ico">
+    <Window.Resources>
+        <SolidColorBrush x:Key="PanelBackground" Color="#111827" />
+        <SolidColorBrush x:Key="Accent" Color="#38BDF8" />
+    </Window.Resources>
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Orientation="Horizontal">
+            <Image Source="pack://application:,,,/Assets/Logo/logo.ico" Width="40" Height="40" Margin="0,0,10,0"/>
+            <StackPanel>
+                <TextBlock FontSize="18" FontWeight="Bold" Text="Usage Notice"/>
+                <TextBlock FontSize="12" Text="Please read carefully and accept to continue installation."/>
+            </StackPanel>
+        </StackPanel>
+
+        <Border Grid.Row="1" Background="{StaticResource PanelBackground}" Padding="12" CornerRadius="6" Margin="0,10,0,10">
+            <FlowDocumentScrollViewer VerticalScrollBarVisibility="Auto" Foreground="#E2E8F0" Background="Transparent">
+                <FlowDocument FontFamily="Segoe UI" FontSize="14" Foreground="#E2E8F0" Background="Transparent">
+                    <Paragraph>
+                        <Run Text="Koware is a locally-hosted tool that aggregates and presents links to content already publicly available on the internet."/>
+                        <LineBreak/>
+                        <Run Text="It does not host or distribute media."/>
+                    </Paragraph>
+
+                    <Paragraph>
+                        <Bold><Run Text="What Koware does NOT do"/></Bold>
+                    </Paragraph>
+                    <List MarkerStyle="Disc">
+                        <ListItem>
+                            <Paragraph>Koware does not include or support bypassing paywalls or DRM.</Paragraph>
+                        </ListItem>
+                        <ListItem>
+                            <Paragraph>Do not use Koware to circumvent technical protection measures (DRM, encryption, access controls) or paywalls.</Paragraph>
+                        </ListItem>
+                        <ListItem>
+                            <Paragraph>Such circumvention may be unlawful (for example, under US DMCA 17 U.S.C. §1201) and similar laws elsewhere.</Paragraph>
+                        </ListItem>
+                    </List>
+
+                    <Paragraph>
+                        <Bold><Run Text="Your responsibilities"/></Bold>
+                    </Paragraph>
+                    <List MarkerStyle="Disc">
+                        <ListItem>
+                            <Paragraph>Your use must comply with local laws, website terms of service, and third‑party rights.</Paragraph>
+                        </ListItem>
+                        <ListItem>
+                            <Paragraph>You assume all risk and responsibility for how you access and use any content discovered via Koware.</Paragraph>
+                        </ListItem>
+                    </List>
+
+                    <Paragraph>
+                        <Italic>This information is provided for awareness only and is not legal advice.</Italic>
+                    </Paragraph>
+                </FlowDocument>
+            </FlowDocumentScrollViewer>
+        </Border>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="DeclineButton" Content="Decline" Width="100" Margin="0,0,8,0" Click="OnDecline"/>
+            <Button x:Name="AcceptButton" Content="I Accept" Width="120" IsDefault="True" Click="OnAccept"/>
+        </StackPanel>
+    </Grid>
+</Window>
