@@ -16,5 +16,6 @@
   <ItemGroup>
     <ProjectReference Include="..\Koware.Infrastructure\Koware.Infrastructure.csproj" />
     <ProjectReference Include="..\Koware.Domain\Koware.Domain.csproj" />
+    <ProjectReference Include="..\Koware.Application\Koware.Application.csproj" />
   </ItemGroup>
 </Project>

@@ -81,6 +81,8 @@ static async Task<int> RunAsync(IHost host, string[] args)
             case "watch":
             case "play":
                 return await HandlePlayAsync(orchestrator, args, services, logger, defaults, cts.Token);
+            case "download":
+                return await HandleDownloadAsync(orchestrator, args, services, logger, defaults, cts.Token);
             case "last":
                 return await HandleLastAsync(args, services, logger, cts.Token);
             case "continue":
@@ -793,6 +795,170 @@ static async Task<int> HandlePlayAsync(ScrapeOrchestrator orchestrator, string[]
     return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
 }
 
+static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
+{
+    string? episodesArg = null;
+    string? outputDir = null;
+
+    var filteredArgs = new List<string> { args[0] };
+    for (var i = 1; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if (arg.Equals("--episodes", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            episodesArg = args[++i];
+            continue;
+        }
+
+        if (arg.Equals("--dir", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            outputDir = args[++i];
+            continue;
+        }
+
+        filteredArgs.Add(arg);
+    }
+
+    ScrapePlan plan;
+    try
+    {
+        plan = ParsePlan(filteredArgs.ToArray(), defaults);
+    }
+    catch (ArgumentException ex)
+    {
+        return HandleParseError("download", ex, logger);
+    }
+
+    plan = await MaybeSelectMatchAsync(orchestrator, plan, logger, cancellationToken);
+
+    var step = ConsoleStep.Start("Resolving episodes");
+    ScrapeResult initial;
+    try
+    {
+        initial = await orchestrator.ExecuteAsync(plan, cancellationToken);
+        step.Succeed("Episodes ready");
+    }
+    catch
+    {
+        step.Fail("Failed to resolve episodes");
+        throw;
+    }
+
+    if (initial.SelectedAnime is null || initial.Episodes is null || initial.Episodes.Count == 0)
+    {
+        logger.LogWarning("No episodes found for the selected anime.");
+        return 1;
+    }
+
+    var episodes = initial.Episodes.OrderBy(ep => ep.Number).ToArray();
+    var targets = DownloadPlanner.ResolveEpisodeSelection(episodesArg, plan.EpisodeNumber, episodes, logger);
+    if (targets.Count == 0)
+    {
+        logger.LogWarning("No episodes match the requested selection.");
+        return 1;
+    }
+
+    var targetDir = string.IsNullOrWhiteSpace(outputDir) ? Environment.CurrentDirectory : outputDir;
+    Directory.CreateDirectory(targetDir);
+
+    var allAnimeOptions = services.GetService<IOptions<AllAnimeOptions>>()?.Value;
+
+    using var httpClient = new HttpClient();
+
+    var total = targets.Count;
+    var index = 0;
+
+    foreach (var episode in targets)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        index++;
+
+        try
+        {
+            ScrapeResult epResult;
+            if (initial.SelectedEpisode is not null && initial.Streams is not null && initial.SelectedEpisode.Number == episode.Number)
+            {
+                epResult = initial;
+            }
+            else
+            {
+                var epStep = ConsoleStep.Start($"Resolving streams for episode {episode.Number} ({index}/{total})");
+                try
+                {
+                    var epPlan = plan with { EpisodeNumber = episode.Number };
+                    epResult = await orchestrator.ExecuteAsync(epPlan, cancellationToken);
+                    epStep.Succeed($"Episode {episode.Number} streams ready");
+                }
+                catch
+                {
+                    epStep.Fail($"Failed to resolve streams for episode {episode.Number}");
+                    throw;
+                }
+            }
+
+            if (epResult.Streams is null || epResult.Streams.Count == 0)
+            {
+                logger.LogWarning("No streams found for episode {Episode}. Skipping.", episode.Number);
+                continue;
+            }
+
+            var stream = PickBestStream(epResult.Streams);
+            if (stream is null)
+            {
+                logger.LogWarning("No suitable stream found for episode {Episode}. Skipping.", episode.Number);
+                continue;
+            }
+
+            var title = epResult.SelectedAnime?.Title ?? initial.SelectedAnime.Title;
+            var fileName = DownloadPlanner.BuildDownloadFileName(title, episode, stream.Quality);
+            var outputPath = Path.Combine(targetDir, fileName);
+
+            var httpReferrer = !string.IsNullOrWhiteSpace(stream.Referrer)
+                ? stream.Referrer
+                : allAnimeOptions?.Referer;
+            var httpUserAgent = allAnimeOptions?.UserAgent;
+
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine($"Downloading {title} - Ep {episode.Number} [{stream.Quality ?? "auto"}] ({index}/{total})");
+            Console.ResetColor();
+
+            var isPlaylist = IsPlaylist(stream);
+            var ffmpegPath = ResolveExecutablePath("ffmpeg");
+
+            if (isPlaylist && string.IsNullOrWhiteSpace(ffmpegPath))
+            {
+                logger.LogError("ffmpeg is required to download streaming playlist URLs. Episode {Episode} will be skipped.", episode.Number);
+                continue;
+            }
+
+            if (isPlaylist && !string.IsNullOrWhiteSpace(ffmpegPath))
+            {
+                await DownloadWithFfmpegAsync(ffmpegPath!, stream, outputPath, httpReferrer, httpUserAgent, logger, cancellationToken);
+            }
+            else
+            {
+                await DownloadWithHttpAsync(httpClient, stream, outputPath, httpReferrer, httpUserAgent, logger, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to download episode {Episode}. Skipping.", episode.Number);
+        }
+    }
+
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine($"Download complete. Saved episodes to \"{targetDir}\".");
+    Console.ResetColor();
+
+    return 0;
+}
+
 static int HandleParseError(string command, ArgumentException ex, ILogger logger)
 {
     var canonical = command.Equals("play", StringComparison.OrdinalIgnoreCase) ? "watch" : command;
@@ -1076,6 +1242,141 @@ static string BuildPlayerTitle(ScrapeResult result, StreamLink stream)
     }
 
     return parts.Count == 0 ? stream.Url.ToString() : string.Join(" — ", parts);
+}
+
+static async Task DownloadWithHttpAsync(HttpClient httpClient, StreamLink stream, string outputPath, string? httpReferrer, string? httpUserAgent, ILogger logger, CancellationToken cancellationToken)
+{
+    var request = new HttpRequestMessage(HttpMethod.Get, stream.Url);
+
+    if (!string.IsNullOrWhiteSpace(httpReferrer) && Uri.TryCreate(httpReferrer, UriKind.Absolute, out var refUri))
+    {
+        request.Headers.Referrer = refUri;
+    }
+
+    if (!string.IsNullOrWhiteSpace(httpUserAgent))
+    {
+        request.Headers.TryAddWithoutValidation("User-Agent", httpUserAgent);
+    }
+
+    using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+    response.EnsureSuccessStatusCode();
+
+    var total = response.Content.Headers.ContentLength;
+
+    await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+    await using var fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+
+    var buffer = new byte[81920];
+    long totalRead = 0;
+    int read;
+    var lastUpdate = DateTimeOffset.UtcNow;
+
+    while ((read = await responseStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
+    {
+        await fileStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        totalRead += read;
+
+        var now = DateTimeOffset.UtcNow;
+        if (now - lastUpdate > TimeSpan.FromMilliseconds(100))
+        {
+            lastUpdate = now;
+            RenderDownloadProgress(totalRead, total);
+        }
+    }
+
+    RenderDownloadProgress(totalRead, total);
+    Console.WriteLine();
+
+    static void RenderDownloadProgress(long bytesRead, long? totalBytes)
+    {
+        var readMb = bytesRead / (1024.0 * 1024.0);
+        string text;
+
+        if (totalBytes.HasValue && totalBytes.Value > 0)
+        {
+            var totalMb = totalBytes.Value / (1024.0 * 1024.0);
+            var progress = Math.Clamp(bytesRead / (double)totalBytes.Value, 0, 1);
+            const int width = 30;
+            var filled = (int)(progress * width);
+            if (filled > width)
+            {
+                filled = width;
+            }
+
+            var bar = new string('#', filled) + new string('-', width - filled);
+            text = $"[{bar}] {progress * 100,5:0.0}% {readMb,6:0.0}/{totalMb,6:0.0} MiB";
+        }
+        else
+        {
+            text = $"Downloaded {readMb:0.0} MiB";
+        }
+
+        if (text.Length > 80)
+        {
+            text = text[..80];
+        }
+
+        Console.Write("\r" + text.PadRight(80));
+    }
+}
+
+static string BuildFfmpegHeaders(string? httpReferrer, string? httpUserAgent)
+{
+    var parts = new List<string>();
+
+    if (!string.IsNullOrWhiteSpace(httpReferrer))
+    {
+        parts.Add($"Referer: {httpReferrer}");
+    }
+
+    if (!string.IsNullOrWhiteSpace(httpUserAgent))
+    {
+        parts.Add($"User-Agent: {httpUserAgent}");
+    }
+
+    if (parts.Count == 0)
+    {
+        return string.Empty;
+    }
+
+    return string.Join("\r\n", parts) + "\r\n";
+}
+
+static Task DownloadWithFfmpegAsync(string ffmpegPath, StreamLink stream, string outputPath, string? httpReferrer, string? httpUserAgent, ILogger logger, CancellationToken cancellationToken)
+{
+    return Task.Run(() =>
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var start = new ProcessStartInfo
+        {
+            FileName = ffmpegPath,
+            UseShellExecute = false
+        };
+
+        start.ArgumentList.Add("-y");
+
+        var headers = BuildFfmpegHeaders(httpReferrer, httpUserAgent);
+        if (!string.IsNullOrWhiteSpace(headers))
+        {
+            start.ArgumentList.Add("-headers");
+            start.ArgumentList.Add(headers);
+        }
+
+        start.ArgumentList.Add("-i");
+        start.ArgumentList.Add(stream.Url.ToString());
+        start.ArgumentList.Add("-c");
+        start.ArgumentList.Add("copy");
+        start.ArgumentList.Add("-bsf:a");
+        start.ArgumentList.Add("aac_adtstoasc");
+        start.ArgumentList.Add(outputPath);
+
+        var exitCode = StartProcessAndWait(logger, start, ffmpegPath);
+        if (exitCode != 0)
+        {
+            throw new InvalidOperationException($"ffmpeg exited with code {exitCode}.");
+        }
+    }, cancellationToken);
 }
 
 static string? ResolveExecutablePath(string command)
@@ -1554,6 +1855,7 @@ static void PrintUsage()
     WriteCommand("stream <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Show plan + streams, no player.", ConsoleColor.Cyan);
     WriteCommand("watch <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Pick a stream and play (alias: play).", ConsoleColor.Green);
     WriteCommand("play <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Same as watch.", ConsoleColor.Green);
+    WriteCommand("download <query>", "Download episodes or full shows to disk.", ConsoleColor.Green);
     WriteCommand("last [--play] [--json]", "Show or replay your most recent watch.", ConsoleColor.Yellow);
     WriteCommand("continue [<anime>] [--from <episode>] [--quality <label>]", "Resume from history (auto next episode).", ConsoleColor.Yellow);
     WriteCommand("history [options]", "Browse/search history; play entries or show stats.", ConsoleColor.Yellow);
@@ -1570,7 +1872,7 @@ static int HandleHelp(string[] args)
         PrintUsage();
         Console.WriteLine();
         Console.WriteLine("For detailed help: koware help <command>");
-        Console.WriteLine("Commands: search, stream, watch, play, last, continue, config, doctor");
+        Console.WriteLine("Commands: search, stream, watch, play, download, last, continue, history, config, provider, doctor");
         return 0;
     }
 
@@ -1594,6 +1896,13 @@ static int HandleHelp(string[] args)
             Console.WriteLine("Usage: koware watch <query> [--episode <n>] [--quality <label>] [--index <match>] [--non-interactive]");
             Console.WriteLine("Alias: 'play' is the same as 'watch'.");
             Console.WriteLine("Example: koware watch \"one piece\" --episode 1010 --quality 1080p");
+            break;
+        case "download":
+            PrintTopicHeader("download", "Download episodes or full shows to files on disk.");
+            Console.WriteLine("Usage: koware download <query> [--episode <n> | --episodes <n-m|all>] [--quality <label>] [--index <match>] [--dir <path>] [--non-interactive]");
+            Console.WriteLine("Examples:");
+            Console.WriteLine("  koware download \"one piece\" --episodes 1-12 --quality 1080p");
+            Console.WriteLine("  koware download \"demon slayer\" --episodes all --dir \"C:\\Anime\\Demon Slayer\"");
             break;
         case "last":
             PrintTopicHeader("last", "Show or replay the most recent watched entry.");
