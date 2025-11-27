@@ -39,8 +39,8 @@ static IHost BuildHost(string[] args)
     builder.Services.AddSingleton<IWatchHistoryStore, SqliteWatchHistoryStore>();
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware", LogLevel.Information);
-    builder.Logging.AddFilter("Koware", LogLevel.Information);
     builder.Logging.AddFilter("Koware.Infrastructure.Scraping.GogoAnimeCatalog", LogLevel.Error);
+    builder.Logging.AddFilter("Koware.Infrastructure.Scraping.AllAnimeCatalog", LogLevel.Error);
 
     return builder.Build();
 }
@@ -918,10 +918,7 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
                 : allAnimeOptions?.Referer;
             var httpUserAgent = allAnimeOptions?.UserAgent;
 
-            Console.WriteLine();
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine($"Downloading {title} - Ep {episode.Number} [{stream.Quality ?? "auto"}] ({index}/{total})");
-            Console.ResetColor();
+            DownloadConsole.PrintEpisodeHeader(title, episode, stream.Quality, index, total, outputPath);
 
             var isPlaylist = IsPlaylist(stream);
             var ffmpegPath = ResolveExecutablePath("ffmpeg");
@@ -940,6 +937,9 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
             {
                 await DownloadWithHttpAsync(httpClient, stream, outputPath, httpReferrer, httpUserAgent, logger, cancellationToken);
             }
+
+            var episodesLeft = total - index;
+            DownloadConsole.PrintEpisodeResult(outputPath, episodesLeft);
         }
         catch (OperationCanceledException)
         {
@@ -1267,56 +1267,11 @@ static async Task DownloadWithHttpAsync(HttpClient httpClient, StreamLink stream
     await using var fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
 
     var buffer = new byte[81920];
-    long totalRead = 0;
     int read;
-    var lastUpdate = DateTimeOffset.UtcNow;
 
     while ((read = await responseStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
     {
         await fileStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-        totalRead += read;
-
-        var now = DateTimeOffset.UtcNow;
-        if (now - lastUpdate > TimeSpan.FromMilliseconds(100))
-        {
-            lastUpdate = now;
-            RenderDownloadProgress(totalRead, total);
-        }
-    }
-
-    RenderDownloadProgress(totalRead, total);
-    Console.WriteLine();
-
-    static void RenderDownloadProgress(long bytesRead, long? totalBytes)
-    {
-        var readMb = bytesRead / (1024.0 * 1024.0);
-        string text;
-
-        if (totalBytes.HasValue && totalBytes.Value > 0)
-        {
-            var totalMb = totalBytes.Value / (1024.0 * 1024.0);
-            var progress = Math.Clamp(bytesRead / (double)totalBytes.Value, 0, 1);
-            const int width = 30;
-            var filled = (int)(progress * width);
-            if (filled > width)
-            {
-                filled = width;
-            }
-
-            var bar = new string('#', filled) + new string('-', width - filled);
-            text = $"[{bar}] {progress * 100,5:0.0}% {readMb,6:0.0}/{totalMb,6:0.0} MiB";
-        }
-        else
-        {
-            text = $"Downloaded {readMb:0.0} MiB";
-        }
-
-        if (text.Length > 80)
-        {
-            text = text[..80];
-        }
-
-        Console.Write("\r" + text.PadRight(80));
     }
 }
 
@@ -1342,41 +1297,72 @@ static string BuildFfmpegHeaders(string? httpReferrer, string? httpUserAgent)
     return string.Join("\r\n", parts) + "\r\n";
 }
 
-static Task DownloadWithFfmpegAsync(string ffmpegPath, StreamLink stream, string outputPath, string? httpReferrer, string? httpUserAgent, ILogger logger, CancellationToken cancellationToken)
+static async Task DownloadWithFfmpegAsync(string ffmpegPath, StreamLink stream, string outputPath, string? httpReferrer, string? httpUserAgent, ILogger logger, CancellationToken cancellationToken)
 {
-    return Task.Run(() =>
+    cancellationToken.ThrowIfCancellationRequested();
+
+    var start = new ProcessStartInfo
     {
-        cancellationToken.ThrowIfCancellationRequested();
+        FileName = ffmpegPath,
+        UseShellExecute = false,
+        RedirectStandardError = true,
+        RedirectStandardOutput = true,
+        CreateNoWindow = true
+    };
 
-        var start = new ProcessStartInfo
+    start.ArgumentList.Add("-y");
+    start.ArgumentList.Add("-loglevel");
+    start.ArgumentList.Add("error");
+
+    var headers = BuildFfmpegHeaders(httpReferrer, httpUserAgent);
+    if (!string.IsNullOrWhiteSpace(headers))
+    {
+        start.ArgumentList.Add("-headers");
+        start.ArgumentList.Add(headers);
+    }
+
+    start.ArgumentList.Add("-i");
+    start.ArgumentList.Add(stream.Url.ToString());
+    start.ArgumentList.Add("-c");
+    start.ArgumentList.Add("copy");
+    start.ArgumentList.Add("-bsf:a");
+    start.ArgumentList.Add("aac_adtstoasc");
+    start.ArgumentList.Add(outputPath);
+
+    using var process = new Process { StartInfo = start };
+
+    try
+    {
+        if (!process.Start())
         {
-            FileName = ffmpegPath,
-            UseShellExecute = false
-        };
-
-        start.ArgumentList.Add("-y");
-
-        var headers = BuildFfmpegHeaders(httpReferrer, httpUserAgent);
-        if (!string.IsNullOrWhiteSpace(headers))
-        {
-            start.ArgumentList.Add("-headers");
-            start.ArgumentList.Add(headers);
+            throw new InvalidOperationException("Failed to start ffmpeg process.");
         }
 
-        start.ArgumentList.Add("-i");
-        start.ArgumentList.Add(stream.Url.ToString());
-        start.ArgumentList.Add("-c");
-        start.ArgumentList.Add("copy");
-        start.ArgumentList.Add("-bsf:a");
-        start.ArgumentList.Add("aac_adtstoasc");
-        start.ArgumentList.Add(outputPath);
+        _ = process.StandardError.ReadToEndAsync();
+        _ = process.StandardOutput.ReadToEndAsync();
 
-        var exitCode = StartProcessAndWait(logger, start, ffmpegPath);
-        if (exitCode != 0)
+        await Task.Run(() => process.WaitForExit(), cancellationToken);
+
+        if (process.ExitCode != 0)
         {
-            throw new InvalidOperationException($"ffmpeg exited with code {exitCode}.");
+            throw new InvalidOperationException($"ffmpeg exited with code {process.ExitCode}.");
         }
-    }, cancellationToken);
+    }
+    catch
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+        }
+
+        throw;
+    }
 }
 
 static string? ResolveExecutablePath(string command)
