@@ -1,3 +1,7 @@
+<p align="left">
+  <img src="Assets/Logo/logo.png" alt="Koware logo" height="80" />
+</p>
+
 # Koware
 
 Koware is a Windows-native, console-first app that helps you **search for anime, pick an episode, and open streams in a player** from your terminal.
