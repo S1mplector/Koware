@@ -56,14 +56,24 @@ public static class DownloadPlanner
             var startPart = episodesArg[..dashIndex];
             var endPart = episodesArg[(dashIndex + 1)..];
 
-            if (!int.TryParse(startPart, out var start) || start <= 0 || (!string.IsNullOrWhiteSpace(endPart) && (!int.TryParse(endPart, out var end) || end <= 0)))
+            if (!int.TryParse(startPart, out var start) || start <= 0)
             {
                 logger?.LogWarning("Invalid --episodes value '{Value}'. Expected formats: N, N-M, or all.", episodesArg);
                 return Array.Empty<Episode>();
             }
 
+            int endValue = start;
+            if (!string.IsNullOrWhiteSpace(endPart))
+            {
+                if (!int.TryParse(endPart, out endValue) || endValue <= 0)
+                {
+                    logger?.LogWarning("Invalid --episodes value '{Value}'. Expected formats: N, N-M, or all.", episodesArg);
+                    return Array.Empty<Episode>();
+                }
+            }
+
             from = start;
-            to = string.IsNullOrWhiteSpace(endPart) ? start : end;
+            to = endValue;
         }
         else
         {
