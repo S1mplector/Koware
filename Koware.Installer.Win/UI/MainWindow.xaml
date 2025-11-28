@@ -67,8 +67,18 @@
                 </StackPanel>
             </Border>
             <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="Continue" Width="110" Height="36" Click="OnContinue"/>
-                <Button Content="Close" Width="90" Height="36" Margin="8,0,0,0" Click="OnClose"/>
+                <Button Width="120" Height="36" Click="OnContinue">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE72A;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock Text="Continue" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+                <Button Width="100" Height="36" Margin="8,0,0,0" Click="OnClose">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock Text="Close" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
             </StackPanel>
         </Grid>
 
@@ -87,7 +97,12 @@
                 <TextBlock Text="Install directory"/>
                 <DockPanel>
                     <TextBox x:Name="InstallPathBox" DockPanel.Dock="Left" MinWidth="420" />
-                    <Button x:Name="BrowseButton" Content="Browse..." Width="100" Margin="8,0,0,0" Click="OnBrowse"/>
+                    <Button x:Name="BrowseButton" Width="110" Margin="8,0,0,0" Click="OnBrowse">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE838;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <TextBlock Text="Browse" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
                 </DockPanel>
             </StackPanel>
 
@@ -98,9 +113,24 @@
             </GroupBox>
 
             <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" >
-                <Button x:Name="InstallButton" Content="Install" Width="110" Click="OnInstall"/>
-                <Button x:Name="UninstallButton" Content="Remove" Width="110" Margin="8,0,0,0" Click="OnUninstall" Visibility="Collapsed"/>
-                <Button Content="Close" Width="90" Margin="8,0,0,0" Click="OnClose"/>
+                <Button x:Name="InstallButton" Width="120" Click="OnInstall">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock x:Name="InstallButtonText" Text="Install" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="UninstallButton" Width="120" Margin="8,0,0,0" Click="OnUninstall" Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE74D;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock Text="Remove" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+                <Button Width="100" Margin="8,0,0,0" Click="OnClose">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock Text="Close" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
             </StackPanel>
         </Grid>
     </Grid>

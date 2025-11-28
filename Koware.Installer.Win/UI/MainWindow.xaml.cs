@@ -31,7 +31,7 @@ public partial class MainWindow : Window
         // Detect existing installation and adjust UI accordingly
         if (_engine.IsInstalled(_defaultInstallDir))
         {
-            InstallButton.Content = "Re-install";
+            InstallButtonText.Text = "Re-install";
             UninstallButton.Visibility = Visibility.Visible;
 
             if (!string.IsNullOrWhiteSpace(_installedVersion))

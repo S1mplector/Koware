@@ -463,19 +463,36 @@ internal static class HtmlPageBuilder
         }
 
         function applySubtitleStyles() {
-            if (!subtitleStyleEl) return;
             const { fontSize, fontFamily, color, bgOpacity } = subtitlePrefs;
             const clampedOpacity = Math.max(0, Math.min(0.9, Number(bgOpacity) || 0));
-            subtitleStyleEl.textContent = `
+            const css = `
 video::cue {
-  color: ${color};
-  font-size: ${fontSize}px;
-  font-family: "${fontFamily}", "Segoe UI", sans-serif;
-  background: rgba(0, 0, 0, ${clampedOpacity});
+  color: ${color} !important;
+  font-size: ${fontSize}px !important;
+  font-family: "${fontFamily}", "Segoe UI", sans-serif !important;
+  background: rgba(0, 0, 0, ${clampedOpacity}) !important;
   padding: 2px 6px;
   line-height: 1.4;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
 }`;
+            // Force browser to re-parse ::cue styles by recreating the style element
+            const oldStyle = document.getElementById("subtitle-style");
+            if (oldStyle) oldStyle.remove();
+            const newStyle = document.createElement("style");
+            newStyle.id = "subtitle-style";
+            newStyle.textContent = css;
+            document.head.appendChild(newStyle);
+
+            // Toggle track mode to force cue re-render
+            const tracks = video.textTracks;
+            for (let i = 0; i < tracks.length; i++) {
+                const wasShowing = tracks[i].mode === "showing";
+                if (wasShowing) {
+                    tracks[i].mode = "hidden";
+                    setTimeout(() => { tracks[i].mode = "showing"; }, 0);
+                }
+            }
+
             updateSettingsUi();
             persistSubtitlePrefs();
         }
