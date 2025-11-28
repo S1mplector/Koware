@@ -1,5 +1,4 @@
 // Author: Ilgaz Mehmetoğlu
-// Summary: SQLite-backed watch history store with legacy JSON migration and query helpers.
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -12,6 +11,9 @@ using Microsoft.Data.Sqlite;
 
 namespace Koware.Cli.History;
 
+/// <summary>
+/// Represents a single watch history entry with anime, episode, and timestamp.
+/// </summary>
 public sealed class WatchHistoryEntry
 {
     public string Provider { get; init; } = string.Empty;
@@ -29,21 +31,39 @@ public sealed class WatchHistoryEntry
     public DateTimeOffset WatchedAt { get; init; }
 }
 
+/// <summary>
+/// Interface for watch history persistence.
+/// </summary>
 public interface IWatchHistoryStore
 {
+    /// <summary>Add a new watch history entry.</summary>
     Task AddAsync(WatchHistoryEntry entry, CancellationToken cancellationToken = default);
 
+    /// <summary>Get the most recent watch entry.</summary>
     Task<WatchHistoryEntry?> GetLastAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Get the most recent entry for a specific anime title.</summary>
     Task<WatchHistoryEntry?> GetLastForAnimeAsync(string animeTitle, CancellationToken cancellationToken = default);
 
+    /// <summary>Search history by title (fuzzy match) and return the most recent match.</summary>
     Task<WatchHistoryEntry?> SearchLastAsync(string query, CancellationToken cancellationToken = default);
 
+    /// <summary>Query history with filters (anime, date range, episode range, limit).</summary>
     Task<IReadOnlyList<WatchHistoryEntry>> QueryAsync(HistoryQuery query, CancellationToken cancellationToken = default);
 
+    /// <summary>Get aggregated stats per anime (count, last watched).</summary>
     Task<IReadOnlyList<HistoryStat>> GetStatsAsync(string? animeFilter, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Query parameters for filtering watch history.
+/// </summary>
+/// <param name="AnimeContains">Filter by anime title (case-insensitive contains).</param>
+/// <param name="After">Only entries after this timestamp.</param>
+/// <param name="Before">Only entries before this timestamp.</param>
+/// <param name="FromEpisode">Minimum episode number.</param>
+/// <param name="ToEpisode">Maximum episode number.</param>
+/// <param name="Limit">Maximum entries to return.</param>
 public sealed record HistoryQuery(
     string? AnimeContains,
     DateTimeOffset? After,
@@ -52,11 +72,24 @@ public sealed record HistoryQuery(
     int? ToEpisode,
     int Limit);
 
+/// <summary>
+/// Aggregated watch stats for an anime.
+/// </summary>
+/// <param name="AnimeTitle">Anime title.</param>
+/// <param name="Count">Number of watch entries.</param>
+/// <param name="LastWatched">Most recent watch timestamp.</param>
 public sealed record HistoryStat(
     string AnimeTitle,
     int Count,
     DateTimeOffset LastWatched);
 
+/// <summary>
+/// SQLite-backed watch history store with legacy JSON migration.
+/// </summary>
+/// <remarks>
+/// Stores history in %APPDATA%/koware/history.db.
+/// Automatically migrates legacy history.json on first access.
+/// </remarks>
 public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
 {
     private const string TableName = "watch_history";

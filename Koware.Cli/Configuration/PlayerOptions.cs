@@ -1,6 +1,10 @@
-// Author: Ilgaz Mehmetoğlu | Summary: Options for selecting the external player command and arguments used by the CLI.
+// Author: Ilgaz Mehmetoğlu
 namespace Koware.Cli.Configuration;
 
+/// <summary>
+/// Options for selecting the external player command and arguments used by the CLI.
+/// Bound from the "Player" section in appsettings.json or appsettings.user.json.
+/// </summary>
 public sealed class PlayerOptions
 {
     /// <summary>

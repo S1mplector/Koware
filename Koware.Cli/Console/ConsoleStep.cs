@@ -1,11 +1,19 @@
 // Author: Ilgaz Mehmetoğlu
-// Simple reusable console spinner/step logger for friendlier progress output.
 using System;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Koware.Cli.Console;
 
+/// <summary>
+/// Simple reusable console spinner/step logger for friendlier progress output.
+/// Shows an animated spinner while an operation is in progress, then replaces it with a success/fail icon.
+/// </summary>
+/// <example>
+/// using var step = ConsoleStep.Start("Loading data");
+/// await LoadDataAsync();
+/// step.Succeed("Data loaded");
+/// </example>
 internal sealed class ConsoleStep : IDisposable
 {
     private static readonly string[] Spinner = { "-", "\\", "|", "/" };
@@ -17,6 +25,7 @@ internal sealed class ConsoleStep : IDisposable
     private ConsoleColor _originalColor;
     private int _lastRenderLength;
 
+    /// <summary>Create and start a new console step.</summary>
     private ConsoleStep(string message)
     {
         _message = message;
@@ -24,15 +33,26 @@ internal sealed class ConsoleStep : IDisposable
         _loop = Task.Run(SpinAsync);
     }
 
+    /// <summary>
+    /// Start a new console step with an animated spinner.
+    /// </summary>
+    /// <param name="message">Message to display next to the spinner.</param>
+    /// <returns>A disposable ConsoleStep; call Succeed/Fail when done.</returns>
     public static ConsoleStep Start(string message)
     {
         var step = new ConsoleStep(message);
         return step;
     }
 
+    /// <summary>Mark the step as successful with an optional completion message.</summary>
+    /// <param name="text">Message to display; defaults to original message.</param>
     public void Succeed(string? text = null) => Stop(text ?? _message, ConsoleColor.Green, "✔");
+
+    /// <summary>Mark the step as failed with an optional error message.</summary>
+    /// <param name="text">Message to display; defaults to original message.</param>
     public void Fail(string? text = null) => Stop(text ?? _message, ConsoleColor.Red, "✖");
 
+    /// <summary>Async loop that animates the spinner until stopped.</summary>
     private async Task SpinAsync()
     {
         var i = 0;
@@ -60,6 +80,7 @@ internal sealed class ConsoleStep : IDisposable
         }
     }
 
+    /// <summary>Stop the spinner and display final status.</summary>
     private void Stop(string text, ConsoleColor color, string symbol)
     {
         lock (_gate)
@@ -95,6 +116,7 @@ internal sealed class ConsoleStep : IDisposable
         }
     }
 
+    /// <summary>Dispose the step, calling Succeed if not already completed.</summary>
     public void Dispose()
     {
         if (!_completed)

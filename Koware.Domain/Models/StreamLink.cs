@@ -1,6 +1,17 @@
-// Author: Ilgaz Mehmetoğlu | Summary: Value object describing a stream link with quality, provider, and optional subtitles.
+// Author: Ilgaz Mehmetoğlu
 namespace Koware.Domain.Models;
 
+/// <summary>
+/// Value object describing a playable stream with quality, provider, and optional subtitles.
+/// </summary>
+/// <param name="Url">Direct URL to the stream (HLS, DASH, or direct file).</param>
+/// <param name="Quality">Quality label (e.g., "1080p", "720p", "auto").</param>
+/// <param name="Provider">Name of the provider/source (e.g., "allanime", "gogoanime").</param>
+/// <param name="Referrer">Optional HTTP Referer header required for playback.</param>
+/// <param name="Subtitles">Optional list of external subtitle tracks.</param>
+/// <param name="RequiresSoftSubSupport">True if player must support external subtitles.</param>
+/// <param name="HostPriority">Provider preference score (higher = preferred).</param>
+/// <param name="SourceTag">Friendly source identifier for UI/logging.</param>
 public sealed record StreamLink(
     Uri Url,
     string Quality,

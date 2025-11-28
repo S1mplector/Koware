@@ -1,5 +1,4 @@
 // Author: Ilgaz Mehmetoğlu
-// Coordinates catalog search, episode/stream selection, and quality preferences.
 using System.Diagnostics.CodeAnalysis;
 using Koware.Application.Abstractions;
 using Koware.Application.Models;
@@ -8,17 +7,33 @@ using Microsoft.Extensions.Logging;
 
 namespace Koware.Application.UseCases;
 
+/// <summary>
+/// Coordinates catalog search, episode/stream selection, and quality preferences.
+/// This is the main use case for resolving anime and streams from providers.
+/// </summary>
 public sealed class ScrapeOrchestrator
 {
     private readonly IAnimeCatalog _catalog;
     private readonly ILogger<ScrapeOrchestrator> _logger;
 
+    /// <summary>
+    /// Create a new orchestrator with the given catalog and logger.
+    /// </summary>
+    /// <param name="catalog">Anime catalog implementation (single or multi-source).</param>
+    /// <param name="logger">Logger for warnings and info messages.</param>
     public ScrapeOrchestrator(IAnimeCatalog catalog, ILogger<ScrapeOrchestrator> logger)
     {
         _catalog = catalog;
         _logger = logger;
     }
 
+    /// <summary>
+    /// Search for anime by query, returning results ranked by relevance.
+    /// </summary>
+    /// <param name="query">Search query (title or keywords).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Collection of matching anime, sorted by relevance score.</returns>
+    /// <exception cref="ArgumentException">Thrown if query is empty.</exception>
     public async Task<IReadOnlyCollection<Anime>> SearchAsync(string query, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query))
@@ -44,11 +59,24 @@ public sealed class ScrapeOrchestrator
         return ordered;
     }
 
+    /// <summary>
+    /// Execute a scrape plan using default match selection.
+    /// </summary>
+    /// <param name="plan">The scrape plan with query, episode, and quality preferences.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result containing matches, selected anime, episodes, and streams.</returns>
     public Task<ScrapeResult> ExecuteAsync(ScrapePlan plan, CancellationToken cancellationToken = default)
     {
         return ExecuteAsync(plan, selection: matches => ChooseMatch(matches, plan.PreferredMatchIndex), cancellationToken);
     }
 
+    /// <summary>
+    /// Execute a scrape plan with a custom match selection function.
+    /// </summary>
+    /// <param name="plan">The scrape plan.</param>
+    /// <param name="selection">Function to select an anime from search results; null uses default.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result containing matches, selected anime, episodes, and streams.</returns>
     public async Task<ScrapeResult> ExecuteAsync(
         ScrapePlan plan,
         Func<IReadOnlyCollection<Anime>, Anime?>? selection,
@@ -83,6 +111,7 @@ public sealed class ScrapeOrchestrator
         return new ScrapeResult(matches, selectedAnime, episodes, selectedEpisode, streams);
     }
 
+    /// <summary>Select an anime from matches by index (1-based).</summary>
     private Anime? ChooseMatch(IReadOnlyCollection<Anime> matches, int? preferredIndex)
     {
         if (matches.Count == 0)
@@ -105,6 +134,7 @@ public sealed class ScrapeOrchestrator
         return matches.ElementAt(index - 1);
     }
 
+    /// <summary>Pick an episode by number, or closest available.</summary>
     private Episode? TryPickEpisode(IReadOnlyCollection<Episode>? episodes, int? requestedNumber)
     {
         if (episodes is null || episodes.Count == 0)
@@ -137,6 +167,7 @@ public sealed class ScrapeOrchestrator
             .FirstOrDefault();
     }
 
+    /// <summary>Reorder streams to prioritize the preferred quality label.</summary>
     private IReadOnlyCollection<StreamLink>? ApplyQualityPreference(IReadOnlyCollection<StreamLink>? streams, string? preferredQuality)
     {
         if (streams is null || streams.Count == 0 || string.IsNullOrWhiteSpace(preferredQuality))
@@ -166,6 +197,7 @@ public sealed class ScrapeOrchestrator
             .ToArray();
     }
 
+    /// <summary>Extract numeric quality value from a label (e.g., 1080 from "1080p").</summary>
     private static int TryParseQualityNumber(string? quality)
     {
         if (string.IsNullOrWhiteSpace(quality))
@@ -182,6 +214,7 @@ public sealed class ScrapeOrchestrator
         return 0;
     }
 
+    /// <summary>Normalize a string for comparison (lowercase, strip punctuation).</summary>
     private static string Normalize(string value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -198,6 +231,7 @@ public sealed class ScrapeOrchestrator
         return string.Join(' ', cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries));
     }
 
+    /// <summary>Score how well a title matches the query (higher = better).</summary>
     private static int ScoreMatch(string normalizedQuery, string? title)
     {
         if (string.IsNullOrWhiteSpace(normalizedQuery) || string.IsNullOrWhiteSpace(title))

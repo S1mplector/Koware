@@ -1,5 +1,4 @@
 // Author: Ilgaz Mehmetoğlu
-// Connectivity checks for anime provider endpoints (DNS + HTTP).
 using System;
 using System.Net;
 using System.Net.Http;
@@ -9,16 +8,27 @@ using Koware.Infrastructure.Configuration;
 
 namespace Koware.Cli.Health;
 
+/// <summary>
+/// Connectivity diagnostics for anime provider endpoints (DNS + HTTP).
+/// Used by the "koware doctor" command.
+/// </summary>
 internal sealed class ProviderDiagnostics
 {
     private readonly HttpClient _httpClient;
 
+    /// <summary>Create a new diagnostics instance with the given HTTP client.</summary>
     public ProviderDiagnostics(HttpClient httpClient)
     {
         _httpClient = httpClient;
         _httpClient.Timeout = TimeSpan.FromSeconds(6);
     }
 
+    /// <summary>
+    /// Check DNS resolution and HTTP connectivity for a provider.
+    /// </summary>
+    /// <param name="options">Provider configuration with API base URL.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result with DNS and HTTP status.</returns>
     public async Task<ProviderCheckResult> CheckAsync(AllAnimeOptions options, CancellationToken cancellationToken)
     {
         var baseUri = new Uri(options.ApiBase.EndsWith("/") ? options.ApiBase : options.ApiBase + "/");
@@ -57,13 +67,23 @@ internal sealed class ProviderDiagnostics
     }
 }
 
+/// <summary>
+/// Result of a provider connectivity check.
+/// </summary>
 internal sealed record ProviderCheckResult
 {
+    /// <summary>Target hostname checked.</summary>
     public string Target { get; init; } = string.Empty;
+    /// <summary>True if DNS resolution succeeded.</summary>
     public bool DnsResolved { get; set; }
+    /// <summary>DNS error message if resolution failed.</summary>
     public string? DnsError { get; set; }
+    /// <summary>True if HTTP request returned a success status.</summary>
     public bool HttpSuccess { get; set; }
+    /// <summary>HTTP status code if request completed.</summary>
     public int? HttpStatus { get; set; }
+    /// <summary>HTTP error message if request failed.</summary>
     public string? HttpError { get; set; }
+    /// <summary>Overall success (DNS resolved and HTTP reachable).</summary>
     public bool Success { get; set; }
 }

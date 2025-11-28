@@ -10,6 +10,15 @@ using System.Threading.Tasks;
 
 namespace Koware.Updater;
 
+/// <summary>
+/// Result of an update operation, indicating success/failure and metadata.
+/// </summary>
+/// <param name="Success">True if the installer was downloaded and launched.</param>
+/// <param name="Error">Error message if failed; null on success.</param>
+/// <param name="InstallerPath">Local path to the downloaded installer.</param>
+/// <param name="ReleaseTag">GitHub release tag (e.g., "v1.0.0").</param>
+/// <param name="ReleaseName">GitHub release name.</param>
+/// <param name="AssetName">Downloaded asset filename.</param>
 public sealed record KowareUpdateResult(
     bool Success,
     string? Error,
@@ -18,15 +27,28 @@ public sealed record KowareUpdateResult(
     string? ReleaseName,
     string? AssetName);
 
+/// <summary>
+/// Represents the latest release version information from GitHub.
+/// </summary>
+/// <param name="Tag">Release tag (e.g., "v1.0.0").</param>
+/// <param name="Name">Release name/title.</param>
 public sealed record KowareLatestVersion(
     string? Tag,
     string? Name);
 
+/// <summary>
+/// Static helper to check for updates and download/run the latest Koware installer from GitHub Releases.
+/// </summary>
 public static class KowareUpdater
 {
     private const string Owner = "S1mplector";
     private const string Repo = "Koware";
 
+    /// <summary>
+    /// Query GitHub for the latest release version without downloading.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Latest version info (tag and name).</returns>
     public static async Task<KowareLatestVersion> GetLatestVersionAsync(
         CancellationToken cancellationToken = default)
     {
@@ -35,6 +57,15 @@ public static class KowareUpdater
         return new KowareLatestVersion(latest.Tag, latest.Name);
     }
 
+    /// <summary>
+    /// Download the latest installer from GitHub Releases and launch it.
+    /// </summary>
+    /// <param name="progress">Optional progress reporter for status messages.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result indicating success/failure with metadata.</returns>
+    /// <remarks>
+    /// Windows only. Downloads .exe or .zip assets, extracts if needed, and launches the installer.
+    /// </remarks>
     public static async Task<KowareUpdateResult> DownloadAndRunLatestInstallerAsync(
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
@@ -104,6 +135,7 @@ public static class KowareUpdater
         }
     }
 
+    /// <summary>Create an HttpClient configured for GitHub API requests.</summary>
     private static HttpClient CreateGitHubClient()
     {
         var client = new HttpClient();
@@ -112,6 +144,7 @@ public static class KowareUpdater
         return client;
     }
 
+    /// <summary>Download a file from a URL to a local path with progress reporting.</summary>
     private static async Task<string> DownloadAsync(
         HttpClient client,
         Uri url,
@@ -152,6 +185,7 @@ public static class KowareUpdater
         return destinationPath;
     }
 
+    /// <summary>Launch the installer executable using shell execute.</summary>
     private static void LaunchInstaller(string installerPath)
     {
         var startInfo = new ProcessStartInfo
@@ -167,6 +201,9 @@ public static class KowareUpdater
         }
     }
 
+    /// <summary>
+    /// Query GitHub API for the latest release and find the best installer asset.
+    /// </summary>
     private static async Task<(string? Tag, string? Name, string? AssetName, Uri? AssetUrl)> GetLatestInstallerAssetAsync(
         HttpClient client,
         CancellationToken cancellationToken)
@@ -239,6 +276,9 @@ public static class KowareUpdater
         return (tag, name, assetName, assetUrl);
     }
 
+    /// <summary>
+    /// Score an asset name to pick the best installer (prefers .exe, installer, win-x64).
+    /// </summary>
     private static int ScoreAssetName(string name)
     {
         var score = 0;
@@ -271,6 +311,7 @@ public static class KowareUpdater
         return score;
     }
 
+    /// <summary>Remove invalid filename characters from a string.</summary>
     private static string SanitizeForPath(string value)
     {
         var invalid = Path.GetInvalidFileNameChars();

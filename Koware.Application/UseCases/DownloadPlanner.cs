@@ -1,5 +1,4 @@
 // Author: Ilgaz Mehmetoğlu
-// Utility logic for planning download ranges and filenames.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -9,8 +8,23 @@ using Microsoft.Extensions.Logging;
 
 namespace Koware.Application.UseCases;
 
+/// <summary>
+/// Utility logic for planning download ranges and generating filenames.
+/// </summary>
 public static class DownloadPlanner
 {
+    /// <summary>
+    /// Resolve which episodes to download based on user input.
+    /// </summary>
+    /// <param name="episodesArg">Episode selection string: "all", "N", or "N-M".</param>
+    /// <param name="singleEpisodeNumber">Single episode number from --episode flag.</param>
+    /// <param name="episodes">Available episodes from the anime.</param>
+    /// <param name="logger">Optional logger for warnings.</param>
+    /// <returns>List of episodes to download, sorted by number.</returns>
+    /// <remarks>
+    /// Priority: episodesArg > singleEpisodeNumber > first episode.
+    /// "all" returns all episodes; "N-M" returns a range.
+    /// </remarks>
     public static IReadOnlyList<Episode> ResolveEpisodeSelection(
         string? episodesArg,
         int? singleEpisodeNumber,
@@ -104,6 +118,13 @@ public static class DownloadPlanner
         return selected;
     }
 
+    /// <summary>
+    /// Build a safe filename for a downloaded episode.
+    /// </summary>
+    /// <param name="animeTitle">Anime title (sanitized for filesystem).</param>
+    /// <param name="episode">Episode to download.</param>
+    /// <param name="quality">Optional quality label to include in filename.</param>
+    /// <returns>Filename like "Anime - Ep 001 - Title [1080p].mp4".</returns>
     public static string BuildDownloadFileName(string animeTitle, Episode episode, string? quality)
     {
         var titleSegment = SanitizeFileNameSegment(animeTitle);
@@ -120,6 +141,7 @@ public static class DownloadPlanner
         return name;
     }
 
+    /// <summary>Remove invalid filename characters from a string segment.</summary>
     private static string SanitizeFileNameSegment(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
