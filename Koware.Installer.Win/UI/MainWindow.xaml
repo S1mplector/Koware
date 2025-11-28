@@ -100,7 +100,6 @@
             <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" >
                 <Button x:Name="InstallButton" Content="Install" Width="110" Click="OnInstall"/>
                 <Button x:Name="UninstallButton" Content="Remove" Width="110" Margin="8,0,0,0" Click="OnUninstall" Visibility="Collapsed"/>
-                <Button x:Name="CheckUpdatesButton" Content="Check for updates" Width="150" Margin="8,0,0,0" Click="OnCheckUpdates"/>
                 <Button Content="Close" Width="90" Margin="8,0,0,0" Click="OnClose"/>
             </StackPanel>
         </Grid>

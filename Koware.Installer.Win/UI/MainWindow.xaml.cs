@@ -147,7 +147,6 @@ public partial class MainWindow : Window
         InstallButton.IsEnabled = !isBusy;
         BrowseButton.IsEnabled = !isBusy;
         UninstallButton.IsEnabled = !isBusy;
-        CheckUpdatesButton.IsEnabled = !isBusy;
     }
 
     private async void BeginCheckLatestVersion()
@@ -180,46 +179,6 @@ public partial class MainWindow : Window
         }
         catch
         {
-        }
-    }
-
-    private async void OnCheckUpdates(object sender, RoutedEventArgs e)
-    {
-        SetUiState(isBusy: true);
-        AppendLog("Checking for updates...");
-
-        try
-        {
-            var progress = new Progress<string>(AppendLog);
-            var result = await KowareUpdater.DownloadAndRunLatestInstallerAsync(progress, _cts.Token);
-
-            if (!result.Success)
-            {
-                var message = result.Error ?? "Unknown error while checking for updates.";
-                AppendLog($"Update check failed: {message}");
-                WpfMessageBox.Show(this, message, "Update failed", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-
-            AppendLog("Latest installer launched. You can close this window.");
-            WpfMessageBox.Show(this,
-                "The latest Koware installer has been downloaded and launched. Close this window and complete the update in the new installer.",
-                "Update available",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-        }
-        catch (OperationCanceledException)
-        {
-            AppendLog("Update check canceled.");
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"Error while checking for updates: {ex.Message}");
-            WpfMessageBox.Show(this, ex.Message, "Update failed", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
-        {
-            SetUiState(isBusy: false);
         }
     }
 
