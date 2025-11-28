@@ -266,6 +266,21 @@ static void LogNetworkHint(HttpRequestException ex)
     Console.WriteLine("  - Retry in a minute; the host may be temporarily down.");
 }
 
+static void WriteStatus(string label, bool success, string? detail = null)
+{
+    var prev = Console.ForegroundColor;
+    Console.ForegroundColor = success ? ConsoleColor.Green : ConsoleColor.Red;
+    Console.Write($"  {label,-6}: ");
+    Console.ForegroundColor = ConsoleColor.Gray;
+    Console.Write(success ? "OK" : "FAIL");
+    if (!string.IsNullOrWhiteSpace(detail))
+    {
+        Console.Write($" - {detail}");
+    }
+    Console.WriteLine();
+    Console.ForegroundColor = prev;
+}
+
 static async Task<int> HandleDoctorAsync(IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
 {
     var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
