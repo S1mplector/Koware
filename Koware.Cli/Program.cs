@@ -2500,7 +2500,7 @@ static void WriteCommand(string signature, string description, ConsoleColor colo
 }
 
 /// <summary>
-/// Read the entry assembly version and return a short label like "v0.3.0".
+/// Read the entry assembly version and return a short label like "v0.4.0".
 /// </summary>
 /// <returns>Version string or empty if unavailable.</returns>
 static string GetVersionLabel()
