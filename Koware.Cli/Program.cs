@@ -120,6 +120,10 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandleProviderAsync(args, services);
             case "update":
                 return await HandleUpdateAsync(logger, cts.Token);
+            case "version":
+            case "--version":
+            case "-v":
+                return HandleVersion();
             case "help":
             case "--help":
             case "-h":
@@ -2537,6 +2541,17 @@ static Version? TryParseVersionCore(string? label)
     }
 
     return Version.TryParse(text, out var parsed) ? parsed : null;
+}
+
+/// <summary>
+/// Implement the <c>koware version</c> command.
+/// </summary>
+/// <returns>Exit code: 0.</returns>
+static int HandleVersion()
+{
+    var version = GetVersionLabel();
+    Console.WriteLine(string.IsNullOrWhiteSpace(version) ? "Koware CLI (unknown version)" : $"Koware CLI {version}");
+    return 0;
 }
 
 /// <summary>
