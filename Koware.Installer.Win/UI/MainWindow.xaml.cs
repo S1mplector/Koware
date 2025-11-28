@@ -8,6 +8,7 @@ using WinForms = System.Windows.Forms;
 using WpfMessageBox = System.Windows.MessageBox;
 using Koware.Installer.Win.Models;
 using Koware.Installer.Win.Services;
+using Koware.Updater;
 
 namespace Koware.Installer.Win.UI;
 
@@ -16,6 +17,7 @@ public partial class MainWindow : Window
     private readonly InstallerEngine _engine;
     private readonly CancellationTokenSource _cts = new();
     private readonly string _defaultInstallDir;
+    private readonly string? _installedVersion;
 
     public MainWindow()
     {
@@ -24,6 +26,7 @@ public partial class MainWindow : Window
 
         _defaultInstallDir = new InstallOptions().InstallDir;
         InstallPathBox.Text = _defaultInstallDir;
+        _installedVersion = _engine.GetInstalledVersion(_defaultInstallDir);
 
         // Detect existing installation and adjust UI accordingly
         if (_engine.IsInstalled(_defaultInstallDir))
@@ -31,10 +34,9 @@ public partial class MainWindow : Window
             InstallButton.Content = "Re-install";
             UninstallButton.Visibility = Visibility.Visible;
 
-            var version = _engine.GetInstalledVersion(_defaultInstallDir);
-            if (!string.IsNullOrWhiteSpace(version))
+            if (!string.IsNullOrWhiteSpace(_installedVersion))
             {
-                ExistingInstallInfo.Text = $"Koware is already installed at {_defaultInstallDir} (version {version}).";
+                ExistingInstallInfo.Text = $"Koware is already installed at {_defaultInstallDir} (version {_installedVersion}).";
             }
             else
             {
@@ -42,6 +44,7 @@ public partial class MainWindow : Window
             }
 
             ExistingInstallInfo.Visibility = Visibility.Visible;
+            BeginCheckLatestVersion();
         }
     }
 
@@ -144,6 +147,80 @@ public partial class MainWindow : Window
         InstallButton.IsEnabled = !isBusy;
         BrowseButton.IsEnabled = !isBusy;
         UninstallButton.IsEnabled = !isBusy;
+        CheckUpdatesButton.IsEnabled = !isBusy;
+    }
+
+    private async void BeginCheckLatestVersion()
+    {
+        try
+        {
+            var latest = await KowareUpdater.GetLatestVersionAsync(_cts.Token);
+            var label = !string.IsNullOrWhiteSpace(latest.Tag) ? latest.Tag : latest.Name;
+            if (string.IsNullOrWhiteSpace(label))
+            {
+                return;
+            }
+
+            Dispatcher.Invoke(() =>
+            {
+                if (ExistingInstallInfo.Visibility != Visibility.Visible)
+                {
+                    return;
+                }
+
+                if (!string.IsNullOrWhiteSpace(_installedVersion))
+                {
+                    ExistingInstallInfo.Text = $"Koware is already installed at {_defaultInstallDir} (version {_installedVersion}, latest {label}).";
+                }
+                else
+                {
+                    ExistingInstallInfo.Text = $"Koware is already installed at {_defaultInstallDir} (latest {label}).";
+                }
+            });
+        }
+        catch
+        {
+        }
+    }
+
+    private async void OnCheckUpdates(object sender, RoutedEventArgs e)
+    {
+        SetUiState(isBusy: true);
+        AppendLog("Checking for updates...");
+
+        try
+        {
+            var progress = new Progress<string>(AppendLog);
+            var result = await KowareUpdater.DownloadAndRunLatestInstallerAsync(progress, _cts.Token);
+
+            if (!result.Success)
+            {
+                var message = result.Error ?? "Unknown error while checking for updates.";
+                AppendLog($"Update check failed: {message}");
+                WpfMessageBox.Show(this, message, "Update failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            AppendLog("Latest installer launched. You can close this window.");
+            WpfMessageBox.Show(this,
+                "The latest Koware installer has been downloaded and launched. Close this window and complete the update in the new installer.",
+                "Update available",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (OperationCanceledException)
+        {
+            AppendLog("Update check canceled.");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Error while checking for updates: {ex.Message}");
+            WpfMessageBox.Show(this, ex.Message, "Update failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetUiState(isBusy: false);
+        }
     }
 
     private async void OnUninstall(object sender, RoutedEventArgs e)

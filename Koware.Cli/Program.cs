@@ -17,6 +17,7 @@ using Koware.Cli.Configuration;
 using Koware.Cli.History;
 using Koware.Cli.Console;
 using Koware.Cli.Health;
+using Koware.Updater;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -95,6 +96,8 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandleDoctorAsync(services, logger, cts.Token);
             case "provider":
                 return await HandleProviderAsync(args, services);
+            case "update":
+                return await HandleUpdateAsync(logger, cts.Token);
             case "help":
             case "--help":
             case "-h":
@@ -327,17 +330,57 @@ static async Task<int> HandleDoctorAsync(IServiceProvider services, ILogger logg
     return 0;
 }
 
-static void WriteStatus(string label, bool success, string? detail = null)
+static async Task<int> HandleUpdateAsync(ILogger logger, CancellationToken cancellationToken)
 {
-    Console.ForegroundColor = success ? ConsoleColor.Green : ConsoleColor.Red;
-    var status = success ? "OK" : "FAIL";
-    Console.Write($"{label,-5}: {status}");
-    Console.ResetColor();
-    if (!string.IsNullOrWhiteSpace(detail))
+    if (!OperatingSystem.IsWindows())
     {
-        Console.Write($" - {detail}");
+        Console.WriteLine("The 'update' command is only available on Windows.");
+        return 1;
     }
-    Console.WriteLine();
+
+    var current = GetVersionLabel();
+    string? latestLabel = null;
+    try
+    {
+        var latest = await KowareUpdater.GetLatestVersionAsync(cancellationToken);
+        latestLabel = !string.IsNullOrWhiteSpace(latest.Tag) ? latest.Tag : latest.Name;
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Failed to query latest Koware release information.");
+    }
+
+    var currentLabel = !string.IsNullOrWhiteSpace(current) ? current : "unknown";
+    var latestDisplay = !string.IsNullOrWhiteSpace(latestLabel) ? latestLabel : "unknown";
+    Console.WriteLine($"Version: {currentLabel} (latest {latestDisplay})");
+
+    Console.WriteLine("Checking for the latest Koware installer...");
+
+    var progress = new Progress<string>(message =>
+    {
+        Console.WriteLine(message);
+        logger.LogInformation("{Message}", message);
+    });
+
+    var result = await KowareUpdater.DownloadAndRunLatestInstallerAsync(progress, cancellationToken);
+
+    if (!result.Success)
+    {
+        var description = result.Error ?? "Unknown error";
+        logger.LogError("Update failed: {Error}", description);
+        Console.WriteLine($"Update failed: {description}");
+        return 1;
+    }
+
+    logger.LogInformation(
+        "Launched installer {InstallerPath} from release {ReleaseTag} ({ReleaseName}) asset {AssetName}.",
+        result.InstallerPath ?? "(unknown)",
+        result.ReleaseTag ?? "(unknown)",
+        result.ReleaseName ?? "(unknown)",
+        result.AssetName ?? "(unknown)");
+
+    Console.WriteLine("Installer launched. Follow the GUI to complete the update.");
+    return 0;
 }
 
 static async Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
@@ -1849,6 +1892,7 @@ static void PrintUsage()
     WriteCommand("config [options]", "Persist defaults (quality/index/player) to appsettings.user.json.", ConsoleColor.Magenta);
     WriteCommand("doctor", "Check provider connectivity (DNS/HTTP).", ConsoleColor.Magenta);
     WriteCommand("provider [options]", "List/enable/disable providers.", ConsoleColor.Magenta);
+    WriteCommand("update", "Download and launch the latest Koware installer.", ConsoleColor.Magenta);
 }
 
 static int HandleHelp(string[] args)
@@ -1858,7 +1902,7 @@ static int HandleHelp(string[] args)
         PrintUsage();
         Console.WriteLine();
         Console.WriteLine("For detailed help: koware help <command>");
-        Console.WriteLine("Commands: search, stream, watch, play, download, last, continue, history, config, provider, doctor");
+        Console.WriteLine("Commands: search, stream, watch, play, download, last, continue, history, config, provider, doctor, update");
         return 0;
     }
 
@@ -1928,6 +1972,11 @@ static int HandleHelp(string[] args)
             PrintTopicHeader("doctor", "Check connectivity to the anime provider.");
             Console.WriteLine("Usage: koware doctor");
             Console.WriteLine("Behavior: pings api host, reports DNS + HTTP reachability.");
+            break;
+        case "update":
+            PrintTopicHeader("update", "Download and run the latest Koware installer from GitHub Releases.");
+            Console.WriteLine("Usage: koware update");
+            Console.WriteLine("Behavior: downloads the latest Windows installer and launches it. Follow the GUI to complete the update.");
             break;
         default:
             PrintUsage();
