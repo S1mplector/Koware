@@ -203,12 +203,14 @@ public static class KowareUpdater
 
     /// <summary>
     /// Query GitHub API for the latest release and find the best installer asset.
+    /// Uses /releases endpoint to include prereleases (e.g., beta versions).
     /// </summary>
     private static async Task<(string? Tag, string? Name, string? AssetName, Uri? AssetUrl)> GetLatestInstallerAssetAsync(
         HttpClient client,
         CancellationToken cancellationToken)
     {
-        var uri = new Uri($"https://api.github.com/repos/{Owner}/{Repo}/releases/latest");
+        // Use /releases (not /releases/latest) to include prereleases like beta versions
+        var uri = new Uri($"https://api.github.com/repos/{Owner}/{Repo}/releases?per_page=1");
 
         using var response = await client.GetAsync(uri, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
@@ -216,7 +218,13 @@ public static class KowareUpdater
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        var root = document.RootElement;
+        // /releases returns an array, so get the first element
+        if (document.RootElement.ValueKind != JsonValueKind.Array || document.RootElement.GetArrayLength() == 0)
+        {
+            return (null, null, null, null);
+        }
+
+        var root = document.RootElement[0];
 
         string? tag = null;
         string? name = null;

@@ -447,17 +447,53 @@ static async Task<int> HandleUpdateAsync(ILogger logger, CancellationToken cance
 
     var currentLabel = !string.IsNullOrWhiteSpace(current) ? current : "unknown";
     var latestDisplay = !string.IsNullOrWhiteSpace(latestLabel) ? latestLabel : "unknown";
+    var currentCore = TryParseVersionCore(current);
+    var latestCore = TryParseVersionCore(latestLabel);
+
+    if (currentCore is not null && latestCore is not null && currentCore >= latestCore)
+    {
+        Console.WriteLine($"Version: {currentLabel} (latest {latestDisplay})");
+        Console.WriteLine("You are already running the latest version of Koware.");
+        return 0;
+    }
+
     Console.WriteLine($"Version: {currentLabel} (latest {latestDisplay})");
+
+    Console.Write("Do you want to download and install the latest version? [y/N] ");
+    var response = Console.ReadLine()?.Trim();
+    if (!string.Equals(response, "y", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(response, "yes", StringComparison.OrdinalIgnoreCase))
+    {
+        Console.WriteLine("Update cancelled.");
+        return 0;
+    }
 
     Console.WriteLine("Checking for the latest Koware installer...");
 
+    var lastMessage = string.Empty;
     var progress = new Progress<string>(message =>
     {
-        Console.WriteLine(message);
+        // Only update console when message changes (avoid spamming same percentage)
+        if (message == lastMessage) return;
+        lastMessage = message;
+
+        // For download progress, overwrite the same line
+        if (message.StartsWith("Downloaded"))
+        {
+            Console.Write($"\r{message,-40}");
+        }
+        else
+        {
+            Console.WriteLine(message);
+        }
+
         logger.LogInformation("{Message}", message);
     });
 
     var result = await KowareUpdater.DownloadAndRunLatestInstallerAsync(progress, cancellationToken);
+
+    // Ensure we move to a new line after progress overwrites
+    Console.WriteLine();
 
     if (!result.Success)
     {
@@ -2474,6 +2510,33 @@ static string GetVersionLabel()
     var parts = version.ToString().Split('.');
     var trimmed = parts.Length >= 3 ? string.Join('.', parts.Take(3)) : version.ToString();
     return $"v{trimmed}";
+}
+
+static Version? TryParseVersionCore(string? label)
+{
+    if (string.IsNullOrWhiteSpace(label))
+    {
+        return null;
+    }
+
+    var text = label.Trim();
+
+    if (text.StartsWith("v.", StringComparison.OrdinalIgnoreCase))
+    {
+        text = text.Substring(2);
+    }
+    else if (text.StartsWith("v", StringComparison.OrdinalIgnoreCase))
+    {
+        text = text.Substring(1);
+    }
+
+    var separatorIndex = text.IndexOfAny(new[] { '-', '+', ' ' });
+    if (separatorIndex >= 0)
+    {
+        text = text.Substring(0, separatorIndex);
+    }
+
+    return Version.TryParse(text, out var parsed) ? parsed : null;
 }
 
 /// <summary>
