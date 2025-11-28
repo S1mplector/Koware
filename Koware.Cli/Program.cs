@@ -1,5 +1,6 @@
 // Author: Ilgaz Mehmetoğlu
 // Summary: Entry point and command routing for the Koware CLI, including playback orchestration and configuration handling.
+// 
 using System.Diagnostics;
 using System.Reflection;
 using System.IO;
@@ -2459,7 +2460,7 @@ static void WriteCommand(string signature, string description, ConsoleColor colo
 }
 
 /// <summary>
-/// Read the entry assembly version and return a short label like "v0.1.0".
+/// Read the entry assembly version and return a short label like "v0.3.0".
 /// </summary>
 /// <returns>Version string or empty if unavailable.</returns>
 static string GetVersionLabel()
