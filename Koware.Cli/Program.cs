@@ -28,6 +28,15 @@ using var host = BuildHost(args);
 var exitCode = await RunAsync(host, args);
 return exitCode;
 
+/// <summary>
+/// Configure and build the host that wires up dependency injection, configuration, and logging.
+/// </summary>
+/// <param name="args">Command-line arguments passed to the CLI.</param>
+/// <returns>A fully configured <see cref="IHost"/> ready to run commands.</returns>
+/// <remarks>
+/// Loads appsettings.json and appsettings.user.json from the base directory.
+/// Registers application, infrastructure, player, and watch history services.
+/// </remarks>
 static IHost BuildHost(string[] args)
 {
     var builder = Host.CreateApplicationBuilder(args);
@@ -46,6 +55,18 @@ static IHost BuildHost(string[] args)
     return builder.Build();
 }
 
+/// <summary>
+/// Main entry for the CLI logic: dispatches commands, sets up cancellation, and top-level error handling.
+/// </summary>
+/// <param name="host">The configured dependency injection host.</param>
+/// <param name="args">Command-line arguments; first element is the command name.</param>
+/// <returns>
+/// Exit code: 0 on success, 1 on error, 2 on user cancellation.
+/// </returns>
+/// <remarks>
+/// Handles Ctrl+C via <see cref="CancellationTokenSource"/>.
+/// Catches network errors and logs user-friendly hints.
+/// </remarks>
 static async Task<int> RunAsync(IHost host, string[] args)
 {
     using var scope = host.Services.CreateScope();
@@ -126,6 +147,20 @@ static async Task<int> RunAsync(IHost host, string[] args)
     }
 }
 
+/// <summary>
+/// Given a scrape plan, resolve streams, launch the player, and update watch history.
+/// </summary>
+/// <param name="orchestrator">The scraping orchestrator that resolves anime/episodes/streams.</param>
+/// <param name="plan">The query, episode, quality, and match preferences.</param>
+/// <param name="services">Service provider for player options and AllAnime config.</param>
+/// <param name="history">Watch history store to record successful plays.</param>
+/// <param name="logger">Logger for debug and info messages.</param>
+/// <param name="cancellationToken">Token to cancel the operation.</param>
+/// <returns>Exit code from the player process; 0 means success.</returns>
+/// <remarks>
+/// Filters streams by player capability, picks the best one, launches the player,
+/// and optionally lets the user retry with a different quality.
+/// </remarks>
 static async Task<int> ExecuteAndPlayAsync(
     ScrapeOrchestrator orchestrator,
     ScrapePlan plan,
@@ -210,6 +245,14 @@ static async Task<int> ExecuteAndPlayAsync(
     return exitCode;
 }
 
+/// <summary>
+/// Implement the <c>koware last</c> command: show or replay the most recent history entry.
+/// </summary>
+/// <param name="args">CLI arguments; supports --play and --json flags.</param>
+/// <param name="services">Service provider for history store.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Exit code: 0 on success, 1 if no history exists.</returns>
 static async Task<int> HandleLastAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
 {
     var history = services.GetRequiredService<IWatchHistoryStore>();
@@ -252,6 +295,14 @@ static async Task<int> HandleLastAsync(string[] args, IServiceProvider services,
     return 0;
 }
 
+/// <summary>
+/// Print a short, colored hint when network calls to the anime provider fail.
+/// </summary>
+/// <param name="ex">The caught <see cref="HttpRequestException"/>.</param>
+/// <remarks>
+/// Called from the top-level exception handler in <see cref="RunAsync"/>.
+/// Prints tips for DNS, firewall, and VPN issues.
+/// </remarks>
 static void LogNetworkHint(HttpRequestException ex)
 {
     Console.WriteLine();
@@ -266,6 +317,13 @@ static void LogNetworkHint(HttpRequestException ex)
     Console.WriteLine("  - Retry in a minute; the host may be temporarily down.");
 }
 
+/// <summary>
+/// Render a one-line status entry like "DNS: OK" or "HTTP: FAIL - details".
+/// </summary>
+/// <param name="label">Short label for the check (e.g., "DNS", "HTTP", "ffmpeg").</param>
+/// <param name="success">True if the check passed, false otherwise.</param>
+/// <param name="detail">Optional detail string shown after the status.</param>
+/// <remarks>Used by <see cref="HandleDoctorAsync"/> to summarize connectivity and tool checks.</remarks>
 static void WriteStatus(string label, bool success, string? detail = null)
 {
     var prev = Console.ForegroundColor;
@@ -281,6 +339,17 @@ static void WriteStatus(string label, bool success, string? detail = null)
     Console.ForegroundColor = prev;
 }
 
+/// <summary>
+/// Implement the <c>koware doctor</c> command.
+/// </summary>
+/// <param name="services">Service provider for provider options.</param>
+/// <param name="logger">Logger instance for errors.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Exit code: 0 if all providers reachable, 1 otherwise.</returns>
+/// <remarks>
+/// Checks DNS resolution and HTTP connectivity to AllAnime and GogoAnime.
+/// Also checks for external tools: ffmpeg, yt-dlp, aria2c, and configured player.
+/// </remarks>
 static async Task<int> HandleDoctorAsync(IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
 {
     var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
@@ -345,6 +414,16 @@ static async Task<int> HandleDoctorAsync(IServiceProvider services, ILogger logg
     return 0;
 }
 
+/// <summary>
+/// Implement the <c>koware update</c> command (Windows only).
+/// </summary>
+/// <param name="logger">Logger for progress and errors.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Exit code: 0 on success, 1 on failure or non-Windows.</returns>
+/// <remarks>
+/// Queries GitHub Releases for the latest Koware installer.
+/// Prints current vs latest version, downloads the installer, and launches it.
+/// </remarks>
 static async Task<int> HandleUpdateAsync(ILogger logger, CancellationToken cancellationToken)
 {
     if (!OperatingSystem.IsWindows())
@@ -398,6 +477,16 @@ static async Task<int> HandleUpdateAsync(ILogger logger, CancellationToken cance
     return 0;
 }
 
+/// <summary>
+/// Implement the <c>koware provider</c> command.
+/// </summary>
+/// <param name="args">CLI arguments; supports --enable and --disable flags.</param>
+/// <param name="services">Service provider for provider toggle options.</param>
+/// <returns>Exit code: 0 on success.</returns>
+/// <remarks>
+/// With no flags, lists known providers and their enabled/disabled status.
+/// With --enable or --disable, updates the DisabledProviders list in appsettings.user.json.
+/// </remarks>
 static async Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
 {
     var toggles = services.GetRequiredService<IOptions<ProviderToggleOptions>>().Value;
@@ -456,6 +545,19 @@ static async Task<int> HandleProviderAsync(string[] args, IServiceProvider servi
     return 1;
 }
 
+/// <summary>
+/// Implement the <c>koware continue</c> command: resume watching from history.
+/// </summary>
+/// <param name="args">CLI arguments; optional anime query, --from, and --quality.</param>
+/// <param name="services">Service provider for history and orchestrator.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="defaults">Default CLI options for quality fallback.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Exit code from playback.</returns>
+/// <remarks>
+/// Finds the most recent history entry (or matches by anime title),
+/// then plays the next episode (or a specific one via --from).
+/// </remarks>
 static async Task<int> HandleContinueAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
     string? animeQuery;
@@ -530,6 +632,20 @@ static async Task<int> HandleContinueAsync(string[] args, IServiceProvider servi
     return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
 }
 
+/// <summary>
+/// Implement the <c>koware history</c> command: browse, filter, and replay watch history.
+/// </summary>
+/// <param name="args">CLI arguments; supports search, --anime, --limit, --after, --before, --from, --to, --json, --stats, --play, --next.</param>
+/// <param name="services">Service provider for history store and orchestrator.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="defaults">Default CLI options for quality fallback.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Exit code: 0 on success.</returns>
+/// <remarks>
+/// With --stats, shows aggregated counts per anime.
+/// With --play N, replays the Nth entry in the filtered list.
+/// With --next, plays the next episode of the first matched entry.
+/// </remarks>
 static async Task<int> HandleHistoryAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
     var history = services.GetRequiredService<IWatchHistoryStore>();
@@ -692,6 +808,10 @@ static async Task<int> HandleHistoryAsync(string[] args, IServiceProvider servic
     return 0;
 }
 
+/// <summary>
+/// Render a table of watch history entries to the console.
+/// </summary>
+/// <param name="entries">List of history entries to display.</param>
 static void RenderHistory(IReadOnlyList<WatchHistoryEntry> entries)
 {
     Console.ForegroundColor = ConsoleColor.Cyan;
@@ -708,18 +828,41 @@ static void RenderHistory(IReadOnlyList<WatchHistoryEntry> entries)
     }
 }
 
+/// <summary>
+/// Truncate a string to a maximum length, appending "…" if cut.
+/// </summary>
+/// <param name="value">The string to truncate.</param>
+/// <param name="max">Maximum allowed length including the ellipsis.</param>
+/// <returns>The original string or a truncated version.</returns>
 static string Truncate(string value, int max)
 {
     if (string.IsNullOrEmpty(value) || value.Length <= max) return value;
     return value[..(max - 1)] + "…";
 }
 
+/// <summary>
+/// Print an error message and return exit code 1.
+/// </summary>
+/// <param name="message">Error message to display.</param>
+/// <returns>Always returns 1.</returns>
 static int UsageErrorWithReturn(string message)
 {
     Console.WriteLine(message);
     return 1;
 }
 
+/// <summary>
+/// Launch playback from a history entry at a specific episode number.
+/// </summary>
+/// <param name="entry">The history entry to base the plan on.</param>
+/// <param name="orchestrator">Scraping orchestrator.</param>
+/// <param name="services">Service provider.</param>
+/// <param name="history">Watch history store.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="defaults">Default CLI options.</param>
+/// <param name="episodeNumber">Episode number to play.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Exit code from playback.</returns>
 static async Task<int> LaunchFromHistory(WatchHistoryEntry entry, ScrapeOrchestrator orchestrator, IServiceProvider services, IWatchHistoryStore history, ILogger logger, DefaultCliOptions defaults, int episodeNumber, CancellationToken cancellationToken)
 {
     var quality = entry.Quality ?? defaults.Quality;
@@ -727,6 +870,17 @@ static async Task<int> LaunchFromHistory(WatchHistoryEntry entry, ScrapeOrchestr
     return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
 }
 
+/// <summary>
+/// Implement the <c>koware search</c> command: find anime by query.
+/// </summary>
+/// <param name="orchestrator">Scraping orchestrator.</param>
+/// <param name="args">CLI arguments; query words and optional --json flag.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Exit code: 0 on success, 1 if query missing.</returns>
+/// <remarks>
+/// With --json, outputs structured JSON instead of a formatted list.
+/// </remarks>
 static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string[] args, ILogger logger, CancellationToken cancellationToken)
 {
     var jsonOutput = args.Skip(1).Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
@@ -765,6 +919,18 @@ static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string
     return 0;
 }
 
+/// <summary>
+/// Implement the <c>koware stream</c> (or <c>plan</c>) command: resolve streams without playing.
+/// </summary>
+/// <param name="orchestrator">Scraping orchestrator.</param>
+/// <param name="args">CLI arguments; query, --episode, --quality, --index, --non-interactive, --json.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="defaults">Default CLI options.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Exit code: 0 on success.</returns>
+/// <remarks>
+/// Useful for inspecting available streams before deciding to play or download.
+/// </remarks>
 static async Task<int> HandlePlanAsync(ScrapeOrchestrator orchestrator, string[] args, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
     var jsonOutput = args.Skip(1).Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
@@ -835,6 +1001,16 @@ static async Task<int> HandlePlanAsync(ScrapeOrchestrator orchestrator, string[]
     return 0;
 }
 
+/// <summary>
+/// Implement the <c>koware watch</c> (or <c>play</c>) command: resolve streams and launch player.
+/// </summary>
+/// <param name="orchestrator">Scraping orchestrator.</param>
+/// <param name="args">CLI arguments; query, --episode, --quality, --index, --non-interactive.</param>
+/// <param name="services">Service provider for player options and history.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="defaults">Default CLI options.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Exit code from playback.</returns>
 static async Task<int> HandlePlayAsync(ScrapeOrchestrator orchestrator, string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
     ScrapePlan plan;
@@ -853,6 +1029,20 @@ static async Task<int> HandlePlayAsync(ScrapeOrchestrator orchestrator, string[]
     return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
 }
 
+/// <summary>
+/// Implement the <c>koware download</c> command: download episodes to disk.
+/// </summary>
+/// <param name="orchestrator">Scraping orchestrator.</param>
+/// <param name="args">CLI arguments; query, --episode, --episodes, --quality, --index, --dir, --non-interactive.</param>
+/// <param name="services">Service provider for AllAnime options.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="defaults">Default CLI options.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Exit code: 0 on success.</returns>
+/// <remarks>
+/// Resolves episodes for a show, selects a range via --episodes or --episode,
+/// and downloads each using HTTP (for direct files) or ffmpeg (for playlists).
+/// </remarks>
 static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
     string? episodesArg = null;
@@ -1017,6 +1207,13 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
     return 0;
 }
 
+/// <summary>
+/// Normalize parse errors into a friendly warning and usage hint for a given command.
+/// </summary>
+/// <param name="command">The command name that failed parsing.</param>
+/// <param name="ex">The parsing exception.</param>
+/// <param name="logger">Logger instance.</param>
+/// <returns>Always returns 1.</returns>
 static int HandleParseError(string command, ArgumentException ex, ILogger logger)
 {
     var canonical = command.Equals("play", StringComparison.OrdinalIgnoreCase) ? "watch" : command;
@@ -1035,6 +1232,13 @@ static int HandleParseError(string command, ArgumentException ex, ILogger logger
     return 1;
 }
 
+/// <summary>
+/// Print a short, user-friendly hint for incomplete or invalid command invocations.
+/// </summary>
+/// <param name="command">The command name to show hints for.</param>
+/// <remarks>
+/// Shows usage and example for watch, stream, search, and provider commands.
+/// </remarks>
 static void PrintFriendlyCommandHint(string command)
 {
     switch (command.ToLowerInvariant())
@@ -1067,6 +1271,18 @@ static void PrintFriendlyCommandHint(string command)
     WriteColoredLine($"Tip: run 'koware help {command.ToLowerInvariant()}' for more details.", ConsoleColor.DarkGray);
 }
 
+/// <summary>
+/// If no preferred match index is set, interactively (or heuristically) choose one from search results.
+/// </summary>
+/// <param name="orchestrator">Scraping orchestrator.</param>
+/// <param name="plan">Current scrape plan.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>A plan with PreferredMatchIndex set.</returns>
+/// <remarks>
+/// If NonInteractive is true, defaults to the first match.
+/// Otherwise, prompts the user to select from the search results.
+/// </remarks>
 static async Task<ScrapePlan> MaybeSelectMatchAsync(ScrapeOrchestrator orchestrator, ScrapePlan plan, ILogger logger, CancellationToken cancellationToken)
 {
     if (plan.PreferredMatchIndex.HasValue)
@@ -1117,6 +1333,15 @@ static async Task<ScrapePlan> MaybeSelectMatchAsync(ScrapeOrchestrator orchestra
     return plan with { PreferredMatchIndex = 1 };
 }
 
+/// <summary>
+/// Pick the "best" stream from a list, preferring playlists/HLS and avoiding bad hosts.
+/// </summary>
+/// <param name="streams">Collection of available streams.</param>
+/// <returns>The highest-scored stream, or null if none available.</returns>
+/// <remarks>
+/// Prefers .m3u8 HLS streams, then other playlists, then direct files.
+/// Avoids hosts known to be unreliable (see <see cref="IsBadHost"/>).
+/// </remarks>
 static StreamLink? PickBestStream(IReadOnlyCollection<StreamLink> streams)
 {
     var pool = streams.Where(s => !IsBadHost(s)).ToArray();
@@ -1148,6 +1373,17 @@ static StreamLink? PickBestStream(IReadOnlyCollection<StreamLink> streams)
     return best ?? pool.OrderByDescending(ScoreStream).FirstOrDefault();
 }
 
+/// <summary>
+/// Filter and order streams based on what the chosen player can handle.
+/// </summary>
+/// <param name="streams">All available streams.</param>
+/// <param name="playerName">Name of the resolved player (e.g., "vlc", "mpv").</param>
+/// <param name="logger">Logger instance.</param>
+/// <returns>Filtered and sorted stream collection.</returns>
+/// <remarks>
+/// Removes soft-sub-only streams if the player doesn't support external subtitles.
+/// Orders by host priority and quality descending.
+/// </remarks>
 static IReadOnlyCollection<StreamLink> FilterStreamsForPlayer(IReadOnlyCollection<StreamLink> streams, string playerName, ILogger logger)
 {
     var supportsSoftSubs = SupportsSoftSubtitles(playerName);
@@ -1167,9 +1403,23 @@ static IReadOnlyCollection<StreamLink> FilterStreamsForPlayer(IReadOnlyCollectio
         .ToArray();
 }
 
+/// <summary>
+/// Return whether a player is assumed to support separate subtitle tracks.
+/// </summary>
+/// <param name="playerName">Player executable name.</param>
+/// <returns>True if external subtitles are likely supported.</returns>
 static bool SupportsSoftSubtitles(string playerName) =>
     !playerName.Contains("vlc", StringComparison.OrdinalIgnoreCase);
 
+/// <summary>
+/// Score a stream based on quality, protocol, host, and provider (higher is better).
+/// </summary>
+/// <param name="stream">The stream to score.</param>
+/// <returns>An integer score; compare against other streams to pick the best.</returns>
+/// <remarks>
+/// Prefers HLS/DASH, HTTPS, known-good hosts (akamai), and high-quality labels.
+/// Penalizes bad hosts, JSON descriptors, and segment URLs.
+/// </remarks>
 static int ScoreStream(StreamLink stream)
 {
     var score = 0;
@@ -1230,6 +1480,11 @@ static int ScoreStream(StreamLink stream)
     return score;
 }
 
+/// <summary>
+/// Identify hosts known to be unreliable or undesirable for playback/download.
+/// </summary>
+/// <param name="stream">The stream to check.</param>
+/// <returns>True if the host is on the blocklist.</returns>
 static bool IsBadHost(StreamLink stream)
 {
     var host = stream.Url.Host;
@@ -1237,6 +1492,12 @@ static bool IsBadHost(StreamLink stream)
            || host.Contains("sharepoint", StringComparison.OrdinalIgnoreCase);
 }
 
+/// <summary>
+/// Extract a numeric quality value (e.g., 1080 from "1080p"), if present.
+/// </summary>
+/// <param name="quality">Quality label like "1080p", "720p", "auto".</param>
+/// <param name="value">Parsed integer value.</param>
+/// <returns>True if a number was extracted.</returns>
 static bool TryParseQualityNumber(string? quality, out int value)
 {
     value = 0;
@@ -1254,9 +1515,19 @@ static bool TryParseQualityNumber(string? quality, out int value)
     return int.TryParse(digits, out value);
 }
 
+/// <summary>
+/// Convert a quality label into a numeric score, defaulting to 0 when unknown.
+/// </summary>
+/// <param name="quality">Quality label.</param>
+/// <returns>Extracted numeric value or 0.</returns>
 static int ParseQualityScore(string? quality) =>
     TryParseQualityNumber(quality, out var q) ? q : 0;
 
+/// <summary>
+/// Heuristic: is this URL a playlist/manifest (HLS/DASH) instead of a single file.
+/// </summary>
+/// <param name="stream">The stream to check.</param>
+/// <returns>True if the URL looks like a playlist.</returns>
 static bool IsPlaylist(StreamLink stream)
 {
     var path = stream.Url.AbsolutePath;
@@ -1265,6 +1536,11 @@ static bool IsPlaylist(StreamLink stream)
            || path.Contains("manifest", StringComparison.OrdinalIgnoreCase);
 }
 
+/// <summary>
+/// Heuristic: does this URL look like a media segment (chunk) rather than a full stream.
+/// </summary>
+/// <param name="stream">The stream to check.</param>
+/// <returns>True if the URL looks like a segment.</returns>
 static bool IsSegment(StreamLink stream)
 {
     var path = stream.Url.AbsolutePath;
@@ -1272,12 +1548,23 @@ static bool IsSegment(StreamLink stream)
            || path.EndsWith(".ts", StringComparison.OrdinalIgnoreCase);
 }
 
+/// <summary>
+/// Heuristic: does this URL point to a JSON descriptor instead of media.
+/// </summary>
+/// <param name="stream">The stream to check.</param>
+/// <returns>True if the URL ends with .json.</returns>
 static bool IsJsonStream(StreamLink stream)
 {
     var path = stream.Url.AbsolutePath;
     return path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
 }
 
+/// <summary>
+/// Build a human-friendly player window title from anime, episode, and quality.
+/// </summary>
+/// <param name="result">Scrape result with selected anime/episode.</param>
+/// <param name="stream">The stream being played.</param>
+/// <returns>A title string like "One Piece — Episode 1000 — 1080p".</returns>
 static string BuildPlayerTitle(ScrapeResult result, StreamLink stream)
 {
     var parts = new List<string>();
@@ -1302,6 +1589,16 @@ static string BuildPlayerTitle(ScrapeResult result, StreamLink stream)
     return parts.Count == 0 ? stream.Url.ToString() : string.Join(" — ", parts);
 }
 
+/// <summary>
+/// Download a single stream via HttpClient to the given file path.
+/// </summary>
+/// <param name="httpClient">Reusable HTTP client.</param>
+/// <param name="stream">The stream to download.</param>
+/// <param name="outputPath">Destination file path.</param>
+/// <param name="httpReferrer">Optional HTTP Referer header.</param>
+/// <param name="httpUserAgent">Optional User-Agent header.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
 static async Task DownloadWithHttpAsync(HttpClient httpClient, StreamLink stream, string outputPath, string? httpReferrer, string? httpUserAgent, ILogger logger, CancellationToken cancellationToken)
 {
     var request = new HttpRequestMessage(HttpMethod.Get, stream.Url);
@@ -1333,6 +1630,12 @@ static async Task DownloadWithHttpAsync(HttpClient httpClient, StreamLink stream
     }
 }
 
+/// <summary>
+/// Build an HTTP headers blob suitable for ffmpeg's -headers argument.
+/// </summary>
+/// <param name="httpReferrer">Optional Referer header.</param>
+/// <param name="httpUserAgent">Optional User-Agent header.</param>
+/// <returns>A CRLF-delimited header string, or empty if none provided.</returns>
 static string BuildFfmpegHeaders(string? httpReferrer, string? httpUserAgent)
 {
     var parts = new List<string>();
@@ -1355,6 +1658,19 @@ static string BuildFfmpegHeaders(string? httpReferrer, string? httpUserAgent)
     return string.Join("\r\n", parts) + "\r\n";
 }
 
+/// <summary>
+/// Download a playlist stream using ffmpeg, copying streams directly to a file.
+/// </summary>
+/// <param name="ffmpegPath">Absolute path to ffmpeg executable.</param>
+/// <param name="stream">The stream to download.</param>
+/// <param name="outputPath">Destination file path.</param>
+/// <param name="httpReferrer">Optional HTTP Referer header.</param>
+/// <param name="httpUserAgent">Optional User-Agent header.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <remarks>
+/// Uses "-c copy" to remux without re-encoding. Kills ffmpeg on cancellation.
+/// </remarks>
 static async Task DownloadWithFfmpegAsync(string ffmpegPath, StreamLink stream, string outputPath, string? httpReferrer, string? httpUserAgent, ILogger logger, CancellationToken cancellationToken)
 {
     cancellationToken.ThrowIfCancellationRequested();
@@ -1423,6 +1739,14 @@ static async Task DownloadWithFfmpegAsync(string ffmpegPath, StreamLink stream, 
     }
 }
 
+/// <summary>
+/// Try to resolve an executable path for a given command name, probing local bins and PATH.
+/// </summary>
+/// <param name="command">Command name like "ffmpeg", "vlc", or a full path.</param>
+/// <returns>Absolute path to the executable, or null if not found.</returns>
+/// <remarks>
+/// Searches: explicit path, local bin directories, well-known install paths, then PATH.
+/// </remarks>
 static string? ResolveExecutablePath(string command)
 {
     if (string.IsNullOrWhiteSpace(command))
@@ -1519,6 +1843,14 @@ static string? ResolveExecutablePath(string command)
     return null;
 }
 
+/// <summary>
+/// Pick a concrete player executable (Koware.Player.Win, vlc, mpv, etc.) based on options.
+/// </summary>
+/// <param name="options">Player options from config (may specify a custom command).</param>
+/// <returns>A <see cref="PlayerResolution"/> with the resolved path, name, and tried candidates.</returns>
+/// <remarks>
+/// Tries the configured command first, then falls back to Koware.Player.Win, vlc, mpv.
+/// </remarks>
 static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
 {
     var candidates = new List<string>();
@@ -1543,6 +1875,20 @@ static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
     return new PlayerResolution(resolved?.Path, playerName, candidates);
 }
 
+/// <summary>
+/// Launch the resolved media player with appropriate arguments and HTTP headers/subtitles.
+/// </summary>
+/// <param name="options">Player options from config.</param>
+/// <param name="stream">The stream to play.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="httpReferrer">Optional HTTP Referer header.</param>
+/// <param name="httpUserAgent">Optional User-Agent header.</param>
+/// <param name="displayTitle">Window title for the player.</param>
+/// <param name="resolution">Pre-resolved player; if null, will be resolved.</param>
+/// <returns>Exit code from the player process.</returns>
+/// <remarks>
+/// Handles Koware.Player.Win, vlc, and mpv with appropriate argument styles.
+/// </remarks>
 static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger, string? httpReferrer, string? httpUserAgent, string? displayTitle, PlayerResolution? resolution = null)
 {
     resolution ??= ResolvePlayerExecutable(options);
@@ -1652,6 +1998,21 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
     return StartProcessAndWait(logger, startInfo, playerPath, arguments);
 }
 
+/// <summary>
+/// Interactive loop that lets the user retry playback with different quality labels.
+/// </summary>
+/// <param name="streams">Available streams to choose from.</param>
+/// <param name="options">Player options.</param>
+/// <param name="player">Resolved player.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="httpReferrer">Optional HTTP Referer header.</param>
+/// <param name="httpUserAgent">Optional User-Agent header.</param>
+/// <param name="displayTitle">Window title for the player.</param>
+/// <param name="lastExitCode">Exit code from the previous playback.</param>
+/// <returns>Final exit code after all replays.</returns>
+/// <remarks>
+/// Prompts the user to type a quality label; Enter exits the loop.
+/// </remarks>
 static int ReplayWithDifferentQuality(
     IReadOnlyCollection<StreamLink> streams,
     PlayerOptions options,
@@ -1694,6 +2055,14 @@ static int ReplayWithDifferentQuality(
     }
 }
 
+/// <summary>
+/// Start a process with the given start info, wait for exit, and log basic diagnostics.
+/// </summary>
+/// <param name="logger">Logger instance.</param>
+/// <param name="start">Process start info.</param>
+/// <param name="command">Command name for logging.</param>
+/// <param name="arguments">Optional arguments string for logging.</param>
+/// <returns>Process exit code, or 1 on failure.</returns>
 static int StartProcessAndWait(ILogger logger, ProcessStartInfo start, string command, string? arguments = null)
 {
     var formattedArgs = start.ArgumentList.Count > 0
@@ -1726,6 +2095,17 @@ static int StartProcessAndWait(ILogger logger, ProcessStartInfo start, string co
     }
 }
 
+/// <summary>
+/// Parse CLI arguments for search/stream/watch/download into a ScrapePlan with defaults applied.
+/// </summary>
+/// <param name="args">CLI arguments; first element is the command name.</param>
+/// <param name="defaults">Default CLI options for quality and match index.</param>
+/// <returns>A populated <see cref="ScrapePlan"/>.</returns>
+/// <exception cref="ArgumentException">Thrown if query is missing or episode is invalid.</exception>
+/// <remarks>
+/// Supports --episode, --quality, --index, --non-interactive flags.
+/// Positional episode number (last arg if numeric) is also supported.
+/// </remarks>
 static ScrapePlan ParsePlan(string[] args, DefaultCliOptions defaults)
 {
     var queryParts = new List<string>();
@@ -1817,6 +2197,11 @@ static ScrapePlan ParsePlan(string[] args, DefaultCliOptions defaults)
     return new ScrapePlan(query, episodeNumber, preferredQuality, preferredIndex, nonInteractive);
 }
 
+/// <summary>
+/// Pretty-print the results of a search query with colored indices and detail URLs.
+/// </summary>
+/// <param name="query">The search query string.</param>
+/// <param name="matches">Collection of matching anime results.</param>
 static void RenderSearch(string query, IReadOnlyCollection<Anime> matches)
 {
     Console.ForegroundColor = ConsoleColor.Cyan;
@@ -1840,6 +2225,11 @@ static void RenderSearch(string query, IReadOnlyCollection<Anime> matches)
     }
 }
 
+/// <summary>
+/// Summarize the current scrape plan: selected anime, episodes, and top streams.
+/// </summary>
+/// <param name="plan">The current scrape plan.</param>
+/// <param name="result">The result from executing the plan.</param>
 static void RenderPlan(ScrapePlan plan, ScrapeResult result)
 {
     Console.ForegroundColor = ConsoleColor.Cyan;
@@ -1891,6 +2281,9 @@ static void RenderPlan(ScrapePlan plan, ScrapeResult result)
     }
 }
 
+/// <summary>
+/// Print the high-level CLI usage and a one-line description for each command.
+/// </summary>
 static void PrintUsage()
 {
     WriteHeader($"Koware CLI {GetVersionLabel()}");
@@ -1910,6 +2303,14 @@ static void PrintUsage()
     WriteCommand("update", "Download and launch the latest Koware installer.", ConsoleColor.Magenta);
 }
 
+/// <summary>
+/// Implement <c>koware help</c> and <c>koware help &lt;command&gt;</c>.
+/// </summary>
+/// <param name="args">CLI arguments; second element is the help topic.</param>
+/// <returns>Exit code: 0 on success, 1 if topic unknown.</returns>
+/// <remarks>
+/// Delegates to topic-specific help sections for each command.
+/// </remarks>
 static int HandleHelp(string[] args)
 {
     if (args.Length == 1)
@@ -2003,12 +2404,21 @@ static int HandleHelp(string[] args)
     return 0;
 }
 
+/// <summary>
+/// Helper for help topics: prints a cyan "Help: &lt;name&gt;" header with a description.
+/// </summary>
+/// <param name="name">Command name.</param>
+/// <param name="description">Short description of the command.</param>
 static void PrintTopicHeader(string name, string description)
 {
     WriteHeader($"Help: {name}");
     Console.WriteLine(description);
 }
 
+/// <summary>
+/// Write a cyan header line, preserving and restoring the previous console color.
+/// </summary>
+/// <param name="text">Header text to display.</param>
 static void WriteHeader(string text)
 {
     var prev = Console.ForegroundColor;
@@ -2017,6 +2427,11 @@ static void WriteHeader(string text)
     Console.ForegroundColor = prev;
 }
 
+/// <summary>
+/// Write a single line in the specified color, then restore the previous color.
+/// </summary>
+/// <param name="text">Text to display.</param>
+/// <param name="color">Foreground color.</param>
 static void WriteColoredLine(string text, ConsoleColor color)
 {
     var prev = Console.ForegroundColor;
@@ -2025,6 +2440,12 @@ static void WriteColoredLine(string text, ConsoleColor color)
     Console.ForegroundColor = prev;
 }
 
+/// <summary>
+/// Helper for PrintUsage: render a command signature and description with consistent formatting.
+/// </summary>
+/// <param name="signature">Command syntax (e.g., "search &lt;query&gt;").</param>
+/// <param name="description">Short description of the command.</param>
+/// <param name="color">Foreground color for the signature.</param>
 static void WriteCommand(string signature, string description, ConsoleColor color = ConsoleColor.Green)
 {
     var prev = Console.ForegroundColor;
@@ -2037,6 +2458,10 @@ static void WriteCommand(string signature, string description, ConsoleColor colo
     Console.ForegroundColor = prev;
 }
 
+/// <summary>
+/// Read the entry assembly version and return a short label like "v0.1.0".
+/// </summary>
+/// <returns>Version string or empty if unavailable.</returns>
 static string GetVersionLabel()
 {
     var version = Assembly.GetEntryAssembly()?.GetName().Version;
@@ -2050,6 +2475,15 @@ static string GetVersionLabel()
     return $"v{trimmed}";
 }
 
+/// <summary>
+/// Implement the <c>koware config</c> command.
+/// </summary>
+/// <param name="args">CLI arguments; supports --quality, --index, --player, --args, --show.</param>
+/// <returns>Exit code: 0 on success.</returns>
+/// <remarks>
+/// Reads/writes appsettings.user.json and updates Player/Defaults sections.
+/// With --show, prints current config as JSON.
+/// </remarks>
 static int HandleConfig(string[] args)
 {
     var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.user.json");
@@ -2146,6 +2580,9 @@ static int HandleConfig(string[] args)
     return 0;
 }
 
+/// <summary>
+/// Print a short usage line for the <c>koware config</c> command.
+/// </summary>
 static void PrintConfigUsage()
 {
     Console.WriteLine("Usage: koware config [--quality <label>] [--index <n>] [--player <exe>] [--args <string>] [--show]");
