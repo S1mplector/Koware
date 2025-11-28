@@ -24,6 +24,11 @@
             <Setter Property="Foreground" Value="#0B1222"/>
             <Setter Property="Background" Value="#E2E8F0"/>
         </Style>
+        <Style x:Key="ButtonText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#0B1222"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
         <Style TargetType="TextBox">
             <Setter Property="Foreground" Value="#E2E8F0"/>
             <Setter Property="Background" Value="#1E293B"/>
@@ -69,14 +74,14 @@
             <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Width="120" Height="36" Click="OnContinue">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE72A;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <TextBlock Text="Continue" VerticalAlignment="Center"/>
+                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE72A;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0"/>
+                        <TextBlock Style="{StaticResource ButtonText}" Text="Continue"/>
                     </StackPanel>
                 </Button>
                 <Button Width="100" Height="36" Margin="8,0,0,0" Click="OnClose">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <TextBlock Text="Close" VerticalAlignment="Center"/>
+                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0"/>
+                        <TextBlock Style="{StaticResource ButtonText}" Text="Close"/>
                     </StackPanel>
                 </Button>
             </StackPanel>
@@ -99,8 +104,8 @@
                     <TextBox x:Name="InstallPathBox" DockPanel.Dock="Left" MinWidth="420" />
                     <Button x:Name="BrowseButton" Width="110" Margin="8,0,0,0" Click="OnBrowse">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#xE838;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                            <TextBlock Text="Browse" VerticalAlignment="Center"/>
+                            <TextBlock Style="{StaticResource ButtonText}" Text="&#xE838;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0"/>
+                            <TextBlock Style="{StaticResource ButtonText}" Text="Browse"/>
                         </StackPanel>
                     </Button>
                 </DockPanel>
@@ -115,20 +120,20 @@
             <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" >
                 <Button x:Name="InstallButton" Width="120" Click="OnInstall">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <TextBlock x:Name="InstallButtonText" Text="Install" VerticalAlignment="Center"/>
+                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE896;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0"/>
+                        <TextBlock x:Name="InstallButtonText" Style="{StaticResource ButtonText}" Text="Install"/>
                     </StackPanel>
                 </Button>
                 <Button x:Name="UninstallButton" Width="120" Margin="8,0,0,0" Click="OnUninstall" Visibility="Collapsed">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE74D;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <TextBlock Text="Remove" VerticalAlignment="Center"/>
+                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE74D;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0"/>
+                        <TextBlock Style="{StaticResource ButtonText}" Text="Remove"/>
                     </StackPanel>
                 </Button>
                 <Button Width="100" Margin="8,0,0,0" Click="OnClose">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <TextBlock Text="Close" VerticalAlignment="Center"/>
+                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0"/>
+                        <TextBlock Style="{StaticResource ButtonText}" Text="Close"/>
                     </StackPanel>
                 </Button>
             </StackPanel>
