@@ -909,6 +909,7 @@ static void RenderHistory(IReadOnlyList<WatchHistoryEntry> entries)
 static async Task<int> HandleListAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
 {
     var animeList = services.GetRequiredService<IAnimeListStore>();
+    var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
 
     if (args.Length < 2)
     {
@@ -921,7 +922,7 @@ static async Task<int> HandleListAsync(string[] args, IServiceProvider services,
     switch (subcommand)
     {
         case "add":
-            return await HandleListAddAsync(args, animeList, logger, cancellationToken);
+            return await HandleListAddAsync(args, animeList, orchestrator, logger, cancellationToken);
         case "update":
             return await HandleListUpdateAsync(args, animeList, logger, cancellationToken);
         case "remove":
@@ -956,9 +957,9 @@ static async Task<int> HandleListAsync(string[] args, IServiceProvider services,
     }
 }
 
-static async Task<int> HandleListAddAsync(string[] args, IAnimeListStore animeList, ILogger logger, CancellationToken cancellationToken)
+static async Task<int> HandleListAddAsync(string[] args, IAnimeListStore animeList, ScrapeOrchestrator orchestrator, ILogger logger, CancellationToken cancellationToken)
 {
-    string? title = null;
+    string? query = null;
     AnimeWatchStatus status = AnimeWatchStatus.PlanToWatch;
     int? episodes = null;
 
@@ -985,21 +986,80 @@ static async Task<int> HandleListAddAsync(string[] args, IAnimeListStore animeLi
             episodes = ep;
             i++;
         }
-        else if (title is null)
+        else if (query is null)
         {
-            title = args[i];
+            query = args[i];
         }
     }
 
-    if (string.IsNullOrWhiteSpace(title))
+    if (string.IsNullOrWhiteSpace(query))
     {
         Console.WriteLine("Usage: koware list add \"<anime title>\" [--status <status>] [--episodes <count>]");
         return 1;
     }
 
+    // Search for matching anime
+    Console.WriteLine($"Searching for '{query}'...");
+    var matches = (await orchestrator.SearchAsync(query, cancellationToken)).ToList();
+
+    if (matches.Count == 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"No anime found matching '{query}'.");
+        Console.ResetColor();
+        return 1;
+    }
+
+    string animeId;
+    string animeTitle;
+
+    if (matches.Count == 1)
+    {
+        // Single match - use it directly
+        animeId = matches[0].Id.Value;
+        animeTitle = matches[0].Title;
+    }
+    else
+    {
+        // Multiple matches - let user choose
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"Found {matches.Count} matches:");
+        Console.ResetColor();
+
+        for (var i = 0; i < matches.Count; i++)
+        {
+            Console.WriteLine($"  {i + 1,2}. {matches[i].Title}");
+        }
+
+        Console.Write("Select anime to add (number): ");
+        var input = Console.ReadLine()?.Trim();
+
+        if (!int.TryParse(input, out var choice) || choice < 1 || choice > matches.Count)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("Invalid selection. Cancelled.");
+            Console.ResetColor();
+            return 1;
+        }
+
+        var selected = matches[choice - 1];
+        animeId = selected.Id.Value;
+        animeTitle = selected.Title;
+    }
+
+    // Check if already in list
+    var existing = await animeList.GetByTitleAsync(animeTitle, cancellationToken);
+    if (existing is not null)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"'{animeTitle}' is already in your list as '{existing.Status.ToDisplayString()}'.");
+        Console.ResetColor();
+        return 1;
+    }
+
     try
     {
-        var entry = await animeList.AddAsync(title, title, status, episodes, cancellationToken);
+        var entry = await animeList.AddAsync(animeId, animeTitle, status, episodes, cancellationToken);
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine($"Added '{entry.AnimeTitle}' to your list as '{status.ToDisplayString()}'.");
         Console.ResetColor();
@@ -2803,20 +2863,31 @@ static int HandleHelp(string[] args)
             break;
         case "list":
             PrintTopicHeader("list", "Track your anime watch status.");
-            Console.WriteLine("Usage:");
-            Console.WriteLine("  koware list                           Show all anime in your list");
-            Console.WriteLine("  koware list --status <status>         Filter by status");
-            Console.WriteLine("  koware list add \"<title>\"             Add to plan-to-watch");
-            Console.WriteLine("  koware list add \"<title>\" --status watching --episodes 12");
-            Console.WriteLine("  koware list update \"<title>\" --status completed");
-            Console.WriteLine("  koware list update \"<title>\" --score 9 --notes \"Amazing show\"");
-            Console.WriteLine("  koware list remove \"<title>\"          Remove from list");
-            Console.WriteLine("  koware list stats                     Show counts by status");
             Console.WriteLine();
-            Console.WriteLine("Status values: watching, completed, plan (plan-to-watch), hold (on-hold), dropped");
+            WriteColoredLine("Commands:", ConsoleColor.Yellow);
+            WriteListCommand("koware list", "Show all anime in your list");
+            WriteListCommand("koware list --status <status>", "Filter by status");
+            WriteListCommand("koware list add \"<title>\"", "Add to plan-to-watch (default)");
+            WriteListCommand("koware list update \"<title>\" --status <status>", "Change status");
+            WriteListCommand("koware list remove \"<title>\"", "Remove from list");
+            WriteListCommand("koware list stats", "Show counts by status");
             Console.WriteLine();
-            Console.WriteLine("Auto-tracking: When you watch an episode, it's automatically added to your list");
-            Console.WriteLine("               as 'Watching'. When you finish the last episode, it auto-completes.");
+            WriteColoredLine("Options:", ConsoleColor.Yellow);
+            WriteListOption("--status <status>", "watching, completed, plan, hold, dropped");
+            WriteListOption("--episodes <n>", "Set total episode count");
+            WriteListOption("--score <1-10>", "Rate the anime");
+            WriteListOption("--notes \"...\"", "Add personal notes");
+            Console.WriteLine();
+            WriteColoredLine("Examples:", ConsoleColor.Yellow);
+            WriteListExample("koware list add \"Clannad\"");
+            WriteListExample("koware list add \"Demon Slayer\" --status watching --episodes 26");
+            WriteListExample("koware list update \"Clannad\" --status completed --score 10");
+            WriteListExample("koware list --status watching");
+            Console.WriteLine();
+            WriteColoredLine("Auto-tracking:", ConsoleColor.Yellow);
+            Console.WriteLine("  When you watch an episode, it's automatically added as 'Watching'.");
+            Console.WriteLine("  'Plan to Watch' entries transition to 'Watching' when you start.");
+            Console.WriteLine("  When you finish the last episode, it auto-completes.");
             break;
         default:
             PrintUsage();
@@ -2879,6 +2950,46 @@ static void WriteCommand(string signature, string description, ConsoleColor colo
     Console.Write(" - ");
     Console.ForegroundColor = ConsoleColor.Gray;
     Console.WriteLine(description);
+    Console.ForegroundColor = prev;
+}
+
+/// <summary>
+/// Helper for list help: write a command with syntax highlighting.
+/// </summary>
+static void WriteListCommand(string syntax, string description)
+{
+    var prev = Console.ForegroundColor;
+    Console.Write("  ");
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.Write($"{syntax,-45}");
+    Console.ForegroundColor = ConsoleColor.Gray;
+    Console.WriteLine(description);
+    Console.ForegroundColor = prev;
+}
+
+/// <summary>
+/// Helper for list help: write an option with its values.
+/// </summary>
+static void WriteListOption(string option, string values)
+{
+    var prev = Console.ForegroundColor;
+    Console.Write("  ");
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.Write($"{option,-20}");
+    Console.ForegroundColor = ConsoleColor.Gray;
+    Console.WriteLine(values);
+    Console.ForegroundColor = prev;
+}
+
+/// <summary>
+/// Helper for list help: write an example command in magenta.
+/// </summary>
+static void WriteListExample(string example)
+{
+    var prev = Console.ForegroundColor;
+    Console.Write("  ");
+    Console.ForegroundColor = ConsoleColor.Magenta;
+    Console.WriteLine(example);
     Console.ForegroundColor = prev;
 }
 
