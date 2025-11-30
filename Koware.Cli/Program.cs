@@ -86,8 +86,8 @@ static async Task<int> RunAsync(IHost host, string[] args)
 
     if (args.Length == 0)
     {
-        PrintUsage();
-        return 1;
+        PrintBanner();
+        return 0;
     }
 
     var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
@@ -303,15 +303,40 @@ static async Task<int> HandleLastAsync(string[] args, IServiceProvider services,
         }
         else
         {
-            Console.WriteLine("Last watched:");
-            Console.WriteLine($"  Anime   : {entry.AnimeTitle} ({entry.AnimeId})");
-            Console.WriteLine($"  Episode : {entry.EpisodeNumber}{(string.IsNullOrWhiteSpace(entry.EpisodeTitle) ? string.Empty : $" - {entry.EpisodeTitle}")}");
-            Console.WriteLine($"  Provider: {entry.Provider}");
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("Last Watched");
+            Console.ResetColor();
+            Console.WriteLine(new string('─', 40));
+
+            WriteLastField("Anime", entry.AnimeTitle, ConsoleColor.White);
+            
+            var epText = entry.EpisodeNumber.ToString();
+            if (!string.IsNullOrWhiteSpace(entry.EpisodeTitle))
+            {
+                epText += $" - {entry.EpisodeTitle}";
+            }
+            WriteLastField("Episode", epText, ConsoleColor.Yellow);
+            
+            WriteLastField("Provider", entry.Provider, ConsoleColor.Gray);
+            
             if (!string.IsNullOrWhiteSpace(entry.Quality))
             {
-                Console.WriteLine($"  Quality : {entry.Quality}");
+                WriteLastField("Quality", entry.Quality, ConsoleColor.Gray);
             }
-            Console.WriteLine($"  Watched : {entry.WatchedAt:u}");
+
+            // Format time ago
+            var ago = DateTimeOffset.UtcNow - entry.WatchedAt;
+            var agoText = ago.TotalMinutes < 1 ? "just now" :
+                         ago.TotalMinutes < 60 ? $"{(int)ago.TotalMinutes}m ago" :
+                         ago.TotalHours < 24 ? $"{(int)ago.TotalHours}h ago" :
+                         ago.TotalDays < 7 ? $"{(int)ago.TotalDays}d ago" :
+                         entry.WatchedAt.LocalDateTime.ToString("MMM dd, yyyy");
+            WriteLastField("Watched", $"{entry.WatchedAt.LocalDateTime:g} ({agoText})", ConsoleColor.DarkGray);
+
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine("Tip: Use 'koware last --play' to replay, or 'koware continue' for next episode.");
+            Console.ResetColor();
         }
 
             return 0;
@@ -2748,6 +2773,21 @@ static void RenderPlan(ScrapePlan plan, ScrapeResult result)
 }
 
 /// <summary>
+/// Print a minimal banner with version and copyright when no arguments are provided.
+/// </summary>
+static void PrintBanner()
+{
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine($"Koware CLI {GetVersionLabel()}");
+    Console.ResetColor();
+    Console.WriteLine("Copyright © Ilgaz Mehmetoglu. All rights reserved.");
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine("Type 'koware help' to see available commands.");
+    Console.ResetColor();
+}
+
+/// <summary>
 /// Print the high-level CLI usage and a one-line description for each command.
 /// </summary>
 static void PrintUsage()
@@ -2990,6 +3030,19 @@ static void WriteListExample(string example)
     Console.Write("  ");
     Console.ForegroundColor = ConsoleColor.Magenta;
     Console.WriteLine(example);
+    Console.ForegroundColor = prev;
+}
+
+/// <summary>
+/// Helper for koware last: write a labeled field with colored value.
+/// </summary>
+static void WriteLastField(string label, string value, ConsoleColor valueColor)
+{
+    var prev = Console.ForegroundColor;
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.Write($"  {label,-10}");
+    Console.ForegroundColor = valueColor;
+    Console.WriteLine(value);
     Console.ForegroundColor = prev;
 }
 
