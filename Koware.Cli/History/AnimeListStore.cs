@@ -378,10 +378,13 @@ public sealed class SqliteAnimeListStore : IAnimeListStore
         var newTotalEpisodes = totalEpisodes ?? existing.TotalEpisodes;
         var now2 = DateTimeOffset.UtcNow.UtcDateTime.ToString("O");
 
-        // Check if should auto-complete
+        // Determine status transitions:
+        // - Plan to Watch / On Hold → Watching (user started/resumed watching)
+        // - Watching → Completed (user finished all episodes)
+        var shouldStartWatching = existing.Status is AnimeWatchStatus.PlanToWatch or AnimeWatchStatus.OnHold;
         var shouldComplete = newTotalEpisodes.HasValue && 
                             newEpisodesWatched >= newTotalEpisodes.Value && 
-                            existing.Status == AnimeWatchStatus.Watching;
+                            (existing.Status == AnimeWatchStatus.Watching || shouldStartWatching);
 
         await using var updateCmd = connection.CreateCommand();
         if (shouldComplete)
@@ -392,6 +395,22 @@ public sealed class SqliteAnimeListStore : IAnimeListStore
                     total_episodes = $totalEpisodes,
                     status = 'completed',
                     completed_at = $now,
+                    updated_at = $now
+                WHERE id = $id;
+                """;
+            updateCmd.Parameters.AddWithValue("$id", existing.Id);
+            updateCmd.Parameters.AddWithValue("$episodesWatched", newEpisodesWatched);
+            updateCmd.Parameters.AddWithValue("$totalEpisodes", newTotalEpisodes.HasValue ? newTotalEpisodes.Value : DBNull.Value);
+            updateCmd.Parameters.AddWithValue("$now", now2);
+        }
+        else if (shouldStartWatching)
+        {
+            // Transition from Plan to Watch / On Hold → Watching
+            updateCmd.CommandText = $"""
+                UPDATE {TableName}
+                SET episodes_watched = $episodesWatched, 
+                    total_episodes = COALESCE($totalEpisodes, total_episodes),
+                    status = 'watching',
                     updated_at = $now
                 WHERE id = $id;
                 """;
