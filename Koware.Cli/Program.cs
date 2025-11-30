@@ -48,6 +48,7 @@ static IHost BuildHost(string[] args)
     builder.Services.Configure<PlayerOptions>(builder.Configuration.GetSection("Player"));
     builder.Services.Configure<DefaultCliOptions>(builder.Configuration.GetSection("Defaults"));
     builder.Services.AddSingleton<IWatchHistoryStore, SqliteWatchHistoryStore>();
+    builder.Services.AddSingleton<IAnimeListStore, SqliteAnimeListStore>();
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware", LogLevel.Information);
     builder.Logging.AddFilter("Koware.Infrastructure.Scraping.GogoAnimeCatalog", LogLevel.Error);
@@ -112,6 +113,8 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandleContinueAsync(args, services, logger, defaults, cts.Token);
             case "history":
                 return await HandleHistoryAsync(args, services, logger, defaults, cts.Token);
+            case "list":
+                return await HandleListAsync(args, services, logger, cts.Token);
             case "config":
                 return HandleConfig(args);
             case "doctor":
@@ -244,6 +247,23 @@ static async Task<int> ExecuteAndPlayAsync(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to update watch history.");
+        }
+
+        // Update anime tracking list (auto-adds if not present, auto-completes if finished)
+        try
+        {
+            var animeList = services.GetRequiredService<IAnimeListStore>();
+            var totalEpisodes = result.Episodes?.Count;
+            await animeList.RecordEpisodeWatchedAsync(
+                result.SelectedAnime.Id.Value,
+                result.SelectedAnime.Title,
+                result.SelectedEpisode.Number,
+                totalEpisodes,
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Failed to update anime list tracking.");
         }
     }
 
@@ -867,6 +887,351 @@ static void RenderHistory(IReadOnlyList<WatchHistoryEntry> entries)
         Console.WriteLine($"{index,3} {Truncate(e.AnimeTitle,30),-30} {e.EpisodeNumber,4} {e.Quality ?? "?",-8} {e.WatchedAt:u,-20} {e.EpisodeTitle ?? string.Empty}");
         index++;
     }
+}
+
+/// <summary>
+/// Implement the <c>koware list</c> command: manage anime tracking list.
+/// </summary>
+/// <param name="args">CLI arguments; supports add, update, remove, stats subcommands.</param>
+/// <param name="services">Service provider for anime list store.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Exit code: 0 on success.</returns>
+/// <remarks>
+/// Subcommands:
+///   list                          - Show all tracked anime
+///   list --status &lt;status&gt;       - Filter by status (watching, completed, plan, hold, dropped)
+///   list add "&lt;title&gt;"           - Add anime to list
+///   list update "&lt;title&gt;" --status &lt;status&gt; - Update anime status
+///   list remove "&lt;title&gt;"        - Remove anime from list
+///   list stats                    - Show aggregated stats
+/// </remarks>
+static async Task<int> HandleListAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+{
+    var animeList = services.GetRequiredService<IAnimeListStore>();
+
+    if (args.Length < 2)
+    {
+        // Default: show all anime in list
+        return await ShowListAsync(animeList, null, false, cancellationToken);
+    }
+
+    var subcommand = args[1].ToLowerInvariant();
+
+    switch (subcommand)
+    {
+        case "add":
+            return await HandleListAddAsync(args, animeList, logger, cancellationToken);
+        case "update":
+            return await HandleListUpdateAsync(args, animeList, logger, cancellationToken);
+        case "remove":
+        case "delete":
+            return await HandleListRemoveAsync(args, animeList, logger, cancellationToken);
+        case "stats":
+            return await HandleListStatsAsync(animeList, args.Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase)), cancellationToken);
+        default:
+            // Check for --status flag on main list command
+            AnimeWatchStatus? statusFilter = null;
+            bool json = false;
+
+            for (var i = 1; i < args.Length; i++)
+            {
+                if (args[i].Equals("--status", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    statusFilter = AnimeWatchStatusExtensions.ParseStatusArg(args[i + 1]);
+                    if (statusFilter is null)
+                    {
+                        Console.WriteLine($"Unknown status '{args[i + 1]}'. Valid: watching, completed, plan, hold, dropped");
+                        return 1;
+                    }
+                    i++;
+                }
+                else if (args[i].Equals("--json", StringComparison.OrdinalIgnoreCase))
+                {
+                    json = true;
+                }
+            }
+
+            return await ShowListAsync(animeList, statusFilter, json, cancellationToken);
+    }
+}
+
+static async Task<int> HandleListAddAsync(string[] args, IAnimeListStore animeList, ILogger logger, CancellationToken cancellationToken)
+{
+    string? title = null;
+    AnimeWatchStatus status = AnimeWatchStatus.PlanToWatch;
+    int? episodes = null;
+
+    for (var i = 2; i < args.Length; i++)
+    {
+        if (args[i].Equals("--status", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            var parsed = AnimeWatchStatusExtensions.ParseStatusArg(args[i + 1]);
+            if (parsed is null)
+            {
+                Console.WriteLine($"Unknown status '{args[i + 1]}'. Valid: watching, completed, plan, hold, dropped");
+                return 1;
+            }
+            status = parsed.Value;
+            i++;
+        }
+        else if (args[i].Equals("--episodes", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            if (!int.TryParse(args[i + 1], out var ep) || ep <= 0)
+            {
+                Console.WriteLine("--episodes must be a positive integer.");
+                return 1;
+            }
+            episodes = ep;
+            i++;
+        }
+        else if (title is null)
+        {
+            title = args[i];
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(title))
+    {
+        Console.WriteLine("Usage: koware list add \"<anime title>\" [--status <status>] [--episodes <count>]");
+        return 1;
+    }
+
+    try
+    {
+        var entry = await animeList.AddAsync(title, title, status, episodes, cancellationToken);
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"Added '{entry.AnimeTitle}' to your list as '{status.ToDisplayString()}'.");
+        Console.ResetColor();
+        return 0;
+    }
+    catch (InvalidOperationException ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine(ex.Message);
+        Console.ResetColor();
+        return 1;
+    }
+}
+
+static async Task<int> HandleListUpdateAsync(string[] args, IAnimeListStore animeList, ILogger logger, CancellationToken cancellationToken)
+{
+    string? title = null;
+    AnimeWatchStatus? status = null;
+    int? score = null;
+    int? episodes = null;
+    string? notes = null;
+
+    for (var i = 2; i < args.Length; i++)
+    {
+        if (args[i].Equals("--status", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            status = AnimeWatchStatusExtensions.ParseStatusArg(args[i + 1]);
+            if (status is null)
+            {
+                Console.WriteLine($"Unknown status '{args[i + 1]}'. Valid: watching, completed, plan, hold, dropped");
+                return 1;
+            }
+            i++;
+        }
+        else if (args[i].Equals("--score", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            if (!int.TryParse(args[i + 1], out var s) || s < 1 || s > 10)
+            {
+                Console.WriteLine("--score must be an integer between 1 and 10.");
+                return 1;
+            }
+            score = s;
+            i++;
+        }
+        else if (args[i].Equals("--episodes", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            if (!int.TryParse(args[i + 1], out var ep) || ep <= 0)
+            {
+                Console.WriteLine("--episodes must be a positive integer.");
+                return 1;
+            }
+            episodes = ep;
+            i++;
+        }
+        else if (args[i].Equals("--notes", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            notes = args[i + 1];
+            i++;
+        }
+        else if (title is null)
+        {
+            title = args[i];
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(title))
+    {
+        Console.WriteLine("Usage: koware list update \"<anime title>\" [--status <status>] [--score <1-10>] [--episodes <count>] [--notes \"...\"]");
+        return 1;
+    }
+
+    // Try exact match first, then fuzzy search
+    var existing = await animeList.GetByTitleAsync(title, cancellationToken)
+                   ?? await animeList.SearchAsync(title, cancellationToken);
+
+    if (existing is null)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"Anime '{title}' not found in your list.");
+        Console.ResetColor();
+        return 1;
+    }
+
+    var updated = await animeList.UpdateAsync(existing.AnimeTitle, status, null, episodes, score, notes, cancellationToken);
+
+    if (updated)
+    {
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($"Updated '{existing.AnimeTitle}'");
+        if (status.HasValue) Console.Write($" → {status.Value.ToDisplayString()}");
+        if (score.HasValue) Console.Write($" (score: {score}/10)");
+        Console.WriteLine();
+        Console.ResetColor();
+    }
+    else
+    {
+        Console.WriteLine("No changes made.");
+    }
+
+    return 0;
+}
+
+static async Task<int> HandleListRemoveAsync(string[] args, IAnimeListStore animeList, ILogger logger, CancellationToken cancellationToken)
+{
+    if (args.Length < 3)
+    {
+        Console.WriteLine("Usage: koware list remove \"<anime title>\"");
+        return 1;
+    }
+
+    var title = args[2];
+
+    // Try exact match first, then fuzzy search
+    var existing = await animeList.GetByTitleAsync(title, cancellationToken)
+                   ?? await animeList.SearchAsync(title, cancellationToken);
+
+    if (existing is null)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"Anime '{title}' not found in your list.");
+        Console.ResetColor();
+        return 1;
+    }
+
+    var removed = await animeList.RemoveAsync(existing.AnimeTitle, cancellationToken);
+
+    if (removed)
+    {
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"Removed '{existing.AnimeTitle}' from your list.");
+        Console.ResetColor();
+    }
+    else
+    {
+        Console.WriteLine("Failed to remove anime.");
+        return 1;
+    }
+
+    return 0;
+}
+
+static async Task<int> HandleListStatsAsync(IAnimeListStore animeList, bool json, CancellationToken cancellationToken)
+{
+    var stats = await animeList.GetStatsAsync(cancellationToken);
+
+    if (json)
+    {
+        var payload = new
+        {
+            watching = stats.Watching,
+            completed = stats.Completed,
+            planToWatch = stats.PlanToWatch,
+            onHold = stats.OnHold,
+            dropped = stats.Dropped,
+            totalEpisodesWatched = stats.TotalEpisodesWatched,
+            total = stats.Watching + stats.Completed + stats.PlanToWatch + stats.OnHold + stats.Dropped
+        };
+        Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        return 0;
+    }
+
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine("Anime List Stats");
+    Console.ResetColor();
+    Console.WriteLine($"  Watching:      {stats.Watching}");
+    Console.WriteLine($"  Completed:     {stats.Completed}");
+    Console.WriteLine($"  Plan to Watch: {stats.PlanToWatch}");
+    Console.WriteLine($"  On Hold:       {stats.OnHold}");
+    Console.WriteLine($"  Dropped:       {stats.Dropped}");
+    Console.WriteLine($"  ─────────────────────");
+    Console.WriteLine($"  Total:         {stats.Watching + stats.Completed + stats.PlanToWatch + stats.OnHold + stats.Dropped}");
+    Console.WriteLine($"  Episodes:      {stats.TotalEpisodesWatched}");
+    return 0;
+}
+
+static async Task<int> ShowListAsync(IAnimeListStore animeList, AnimeWatchStatus? statusFilter, bool json, CancellationToken cancellationToken)
+{
+    var entries = await animeList.GetAllAsync(statusFilter, cancellationToken);
+
+    if (entries.Count == 0)
+    {
+        if (statusFilter.HasValue)
+        {
+            Console.WriteLine($"No anime with status '{statusFilter.Value.ToDisplayString()}' in your list.");
+        }
+        else
+        {
+            Console.WriteLine("Your anime list is empty. Use 'koware list add \"<title>\"' to add anime.");
+        }
+        return 0;
+    }
+
+    if (json)
+    {
+        var payload = entries.Select(e => new
+        {
+            title = e.AnimeTitle,
+            status = e.Status.ToString().ToLowerInvariant(),
+            episodesWatched = e.EpisodesWatched,
+            totalEpisodes = e.TotalEpisodes,
+            score = e.Score,
+            addedAt = e.AddedAt,
+            updatedAt = e.UpdatedAt,
+            completedAt = e.CompletedAt
+        });
+        Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        return 0;
+    }
+
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine(statusFilter.HasValue ? $"Anime List ({statusFilter.Value.ToDisplayString()})" : "Anime List");
+    Console.ResetColor();
+    Console.WriteLine($"{"#",3} {"Status",-14} {"Progress",-10} {"Score",-6} {"Title",-40}");
+    Console.WriteLine(new string('─', 80));
+
+    var index = 1;
+    foreach (var e in entries)
+    {
+        var progress = e.TotalEpisodes.HasValue
+            ? $"{e.EpisodesWatched}/{e.TotalEpisodes}"
+            : $"{e.EpisodesWatched}/?";
+        var scoreStr = e.Score.HasValue ? $"{e.Score}/10" : "-";
+
+        Console.Write($"{index,3} ");
+        Console.ForegroundColor = e.Status.ToColor();
+        Console.Write($"{e.Status.ToDisplayString(),-14}");
+        Console.ResetColor();
+        Console.WriteLine($" {progress,-10} {scoreStr,-6} {Truncate(e.AnimeTitle, 40),-40}");
+        index++;
+    }
+
+    return 0;
 }
 
 /// <summary>
@@ -2337,6 +2702,7 @@ static void PrintUsage()
     WriteCommand("last [--play] [--json]", "Show or replay your most recent watch.", ConsoleColor.Yellow);
     WriteCommand("continue [<anime>] [--from <episode>] [--quality <label>]", "Resume from history (auto next episode).", ConsoleColor.Yellow);
     WriteCommand("history [options]", "Browse/search history; play entries or show stats.", ConsoleColor.Yellow);
+    WriteCommand("list [subcommand]", "Track anime: add, update status, mark complete.", ConsoleColor.Yellow);
     WriteCommand("help [command]", "Show this guide or a command-specific help page.", ConsoleColor.Magenta);
     WriteCommand("config [options]", "Persist defaults (quality/index/player) to appsettings.user.json.", ConsoleColor.Magenta);
     WriteCommand("doctor", "Check provider connectivity (DNS/HTTP).", ConsoleColor.Magenta);
@@ -2359,7 +2725,7 @@ static int HandleHelp(string[] args)
         PrintUsage();
         Console.WriteLine();
         Console.WriteLine("For detailed help: koware help <command>");
-        Console.WriteLine("Commands: search, stream, watch, play, download, last, continue, history, config, provider, doctor, update");
+        Console.WriteLine("Commands: search, stream, watch, play, download, last, continue, history, list, config, provider, doctor, update");
         return 0;
     }
 
@@ -2435,10 +2801,27 @@ static int HandleHelp(string[] args)
             Console.WriteLine("Usage: koware update");
             Console.WriteLine("Behavior: downloads the latest Windows installer and launches it. Follow the GUI to complete the update.");
             break;
+        case "list":
+            PrintTopicHeader("list", "Track your anime watch status.");
+            Console.WriteLine("Usage:");
+            Console.WriteLine("  koware list                           Show all anime in your list");
+            Console.WriteLine("  koware list --status <status>         Filter by status");
+            Console.WriteLine("  koware list add \"<title>\"             Add to plan-to-watch");
+            Console.WriteLine("  koware list add \"<title>\" --status watching --episodes 12");
+            Console.WriteLine("  koware list update \"<title>\" --status completed");
+            Console.WriteLine("  koware list update \"<title>\" --score 9 --notes \"Amazing show\"");
+            Console.WriteLine("  koware list remove \"<title>\"          Remove from list");
+            Console.WriteLine("  koware list stats                     Show counts by status");
+            Console.WriteLine();
+            Console.WriteLine("Status values: watching, completed, plan (plan-to-watch), hold (on-hold), dropped");
+            Console.WriteLine();
+            Console.WriteLine("Auto-tracking: When you watch an episode, it's automatically added to your list");
+            Console.WriteLine("               as 'Watching'. When you finish the last episode, it auto-completes.");
+            break;
         default:
             PrintUsage();
             Console.WriteLine();
-            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: search, stream, watch, play, last, continue, config, provider, doctor.");
+            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: search, stream, watch, play, last, continue, history, list, config, provider, doctor, update.");
             return 1;
     }
 
