@@ -4,7 +4,7 @@
 
 # Koware
 
-Koware is a Windows-native, console-first app that helps you **search for anime, pick an episode, and open streams in a player** from your terminal.
+Koware is a Windows-native, console-first link/stream aggregator application that helps you **search for anime, pick an episode, and open streams in a player** from your terminal.
 
 It has a text-based user interface but behaves like a regular CLI. You run a command, Koware finds shows and episodes, and then opens the selected stream in a video player.
 
@@ -149,5 +149,8 @@ koware help history
 
 - Koware is a locally hosted and operated tool that aggregates and presents links to content that is already publicly available on the internet. Koware strictly does NOT host or distribute media, and it does NOT include or support bypassing paywalls or DRM.
 
-- Your use must comply with local laws, website terms of service, and third-party rights. Whether your usage is lawful depends on what you access and how you access it.
-- See Usage-Notice.md for more details.
+- Using Koware itself as a local link/stream aggregator is not, by itself, intended to be an infringing or illegal activity. However, whether your actual usage is lawful depends entirely on what you access and how you access it, as well as on the laws and website terms that apply to you. Koware does not turn unauthorized or infringing content into authorized content.
+
+- You are solely responsible for ensuring that your use of Koware complies with local laws, website terms of service, and third-party rights (for example, rights held by copyright owners and streaming platforms). Nothing in this project, its documentation, or its source code constitutes legal advice.
+
+- See `Usage-Notice.md` for more details.
