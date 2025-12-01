@@ -34,13 +34,13 @@ public sealed class AllMangaCatalog : IMangaCatalog
 
     public async Task<IReadOnlyCollection<Manga>> SearchAsync(string query, CancellationToken cancellationToken = default)
     {
-        var gql = "query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { mangas( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name englishName thumbnail description __typename } }}";
+        // Note: manga search does not use translationType parameter (unlike anime/shows)
+        var gql = "query( $search: SearchInput $limit: Int $page: Int $countryOrigin: VaildCountryOriginEnumType ) { mangas( search: $search limit: $limit page: $page countryOrigin: $countryOrigin ) { edges { _id name englishName thumbnail description __typename } }}";
         var variables = new
         {
             search = new { allowAdult = false, allowUnknown = false, query },
             limit = _options.SearchLimit,
             page = 1,
-            translationType = _options.TranslationType,
             countryOrigin = "ALL"
         };
 
