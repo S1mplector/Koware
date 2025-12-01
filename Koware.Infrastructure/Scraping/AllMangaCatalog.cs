@@ -140,7 +140,9 @@ public sealed class AllMangaCatalog : IMangaCatalog
     public async Task<IReadOnlyCollection<ChapterPage>> GetPagesAsync(Chapter chapter, CancellationToken cancellationToken = default)
     {
         var (mangaId, chapterNumber) = ParseChapterId(chapter);
-        var gql = "query ($mangaId: String!, $translationType: VaildTranslationTypeEnumType!, $chapterString: String!) { chapterPages( mangaId: $mangaId translationType: $translationType chapterString: $chapterString ) { edges { pictureUrls { url } pictureUrlHead } }}";
+        // Note: manga uses VaildTranslationTypeMangaEnumType (not VaildTranslationTypeEnumType)
+        // and pictureUrls is now a scalar [Object] type without subfields
+        var gql = "query ($mangaId: String!, $translationType: VaildTranslationTypeMangaEnumType!, $chapterString: String!) { chapterPages( mangaId: $mangaId translationType: $translationType chapterString: $chapterString ) { edges { pictureUrls pictureUrlHead } }}";
         var variables = new
         {
             mangaId = mangaId,
@@ -165,7 +167,6 @@ public sealed class AllMangaCatalog : IMangaCatalog
             return Array.Empty<ChapterPage>();
         }
 
-        var pageNum = 1;
         foreach (var edge in edges.EnumerateArray())
         {
             string? pictureUrlHead = null;
@@ -179,14 +180,29 @@ public sealed class AllMangaCatalog : IMangaCatalog
                 continue;
             }
 
+            // pictureUrls is now an array of objects with "num" and "url" properties
             foreach (var pic in pictureUrls.EnumerateArray())
             {
-                if (!pic.TryGetProperty("url", out var urlProp) || urlProp.ValueKind != JsonValueKind.String)
+                string? url = null;
+                int pageNum = 0;
+
+                // Handle both old format (object with url property) and new format (object with num and url)
+                if (pic.ValueKind == JsonValueKind.Object)
                 {
-                    continue;
+                    if (pic.TryGetProperty("url", out var urlProp) && urlProp.ValueKind == JsonValueKind.String)
+                    {
+                        url = urlProp.GetString();
+                    }
+                    if (pic.TryGetProperty("num", out var numProp) && numProp.ValueKind == JsonValueKind.Number)
+                    {
+                        pageNum = numProp.GetInt32();
+                    }
+                }
+                else if (pic.ValueKind == JsonValueKind.String)
+                {
+                    url = pic.GetString();
                 }
 
-                var url = urlProp.GetString();
                 if (string.IsNullOrWhiteSpace(url))
                 {
                     continue;
@@ -196,12 +212,15 @@ public sealed class AllMangaCatalog : IMangaCatalog
                 var absoluteUrl = ResolveImageUrl(url, pictureUrlHead);
                 if (Uri.TryCreate(absoluteUrl, UriKind.Absolute, out var imageUri))
                 {
-                    pages.Add(new ChapterPage(pageNum++, imageUri, _options.Referer));
+                    // Use the page number from the API if available, otherwise use array index + 1
+                    var effectivePageNum = pageNum > 0 ? pageNum : pages.Count + 1;
+                    pages.Add(new ChapterPage(effectivePageNum, imageUri, _options.Referer));
                 }
             }
         }
 
-        return pages;
+        // Sort by page number to ensure correct order
+        return pages.OrderBy(p => p.PageNumber).ToArray();
     }
 
     private string ResolveImageUrl(string url, string? baseUrl)
