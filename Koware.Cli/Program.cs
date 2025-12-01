@@ -53,6 +53,7 @@ static IHost BuildHost(string[] args)
     builder.Services.AddSingleton<IWatchHistoryStore, SqliteWatchHistoryStore>();
     builder.Services.AddSingleton<IReadHistoryStore, SqliteReadHistoryStore>();
     builder.Services.AddSingleton<IAnimeListStore, SqliteAnimeListStore>();
+    builder.Services.AddSingleton<IMangaListStore, SqliteMangaListStore>();
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware", LogLevel.Information);
     builder.Logging.AddFilter("Koware.Infrastructure.Scraping.GogoAnimeCatalog", LogLevel.Error);
@@ -1223,12 +1224,11 @@ static async Task<int> HandleMangaHistoryAsync(string[] args, IServiceProvider s
 /// </remarks>
 static async Task<int> HandleListAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
-    // List is currently only available in anime mode
-    if (defaults.GetMode() == CliMode.Manga)
+    var mode = defaults.GetMode();
+
+    if (mode == CliMode.Manga)
     {
-        WriteColoredLine("The 'list' command is only available in anime mode.", ConsoleColor.Yellow);
-        WriteColoredLine("Use 'koware history' to see your manga reading history, or switch to anime mode with 'koware mode anime'.", ConsoleColor.Gray);
-        return 1;
+        return await HandleMangaListAsync(args, services, logger, cancellationToken);
     }
 
     var animeList = services.GetRequiredService<IAnimeListStore>();
@@ -1611,6 +1611,355 @@ static async Task<int> ShowListAsync(IAnimeListStore animeList, AnimeWatchStatus
         Console.Write($"{e.Status.ToDisplayString(),-14}");
         Console.ResetColor();
         Console.WriteLine($" {progress,-10} {scoreStr,-6} {Truncate(e.AnimeTitle, 40),-40}");
+        index++;
+    }
+
+    return 0;
+}
+
+// ===== Manga List Functions =====
+
+static async Task<int> HandleMangaListAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+{
+    var mangaList = services.GetRequiredService<IMangaListStore>();
+    var catalog = services.GetRequiredService<IMangaCatalog>();
+
+    if (args.Length < 2)
+    {
+        return await ShowMangaListAsync(mangaList, null, false, cancellationToken);
+    }
+
+    var subcommand = args[1].ToLowerInvariant();
+
+    switch (subcommand)
+    {
+        case "add":
+            return await HandleMangaListAddAsync(args, mangaList, catalog, logger, cancellationToken);
+        case "update":
+            return await HandleMangaListUpdateAsync(args, mangaList, logger, cancellationToken);
+        case "remove":
+        case "delete":
+            return await HandleMangaListRemoveAsync(args, mangaList, logger, cancellationToken);
+        case "stats":
+            return await HandleMangaListStatsAsync(mangaList, args.Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase)), cancellationToken);
+        default:
+            MangaReadStatus? statusFilter = null;
+            bool json = false;
+
+            for (var i = 1; i < args.Length; i++)
+            {
+                if (args[i].Equals("--status", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    statusFilter = MangaReadStatusExtensions.ParseStatusArg(args[i + 1]);
+                    if (statusFilter is null)
+                    {
+                        Console.WriteLine($"Unknown status '{args[i + 1]}'. Valid: reading, completed, plan, hold, dropped");
+                        return 1;
+                    }
+                    i++;
+                }
+                else if (args[i].Equals("--json", StringComparison.OrdinalIgnoreCase))
+                {
+                    json = true;
+                }
+            }
+
+            return await ShowMangaListAsync(mangaList, statusFilter, json, cancellationToken);
+    }
+}
+
+static async Task<int> HandleMangaListAddAsync(string[] args, IMangaListStore mangaList, IMangaCatalog catalog, ILogger logger, CancellationToken cancellationToken)
+{
+    string? query = null;
+    MangaReadStatus status = MangaReadStatus.PlanToRead;
+    int? chapters = null;
+
+    for (var i = 2; i < args.Length; i++)
+    {
+        if (args[i].Equals("--status", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            var parsed = MangaReadStatusExtensions.ParseStatusArg(args[i + 1]);
+            if (parsed is null)
+            {
+                Console.WriteLine($"Unknown status '{args[i + 1]}'. Valid: reading, completed, plan, hold, dropped");
+                return 1;
+            }
+            status = parsed.Value;
+            i++;
+        }
+        else if (args[i].Equals("--chapters", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            if (!int.TryParse(args[i + 1], out var ch) || ch <= 0)
+            {
+                Console.WriteLine("--chapters must be a positive integer.");
+                return 1;
+            }
+            chapters = ch;
+            i++;
+        }
+        else if (query is null)
+        {
+            query = args[i];
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(query))
+    {
+        Console.WriteLine("Usage: koware list add \"<manga title>\" [--status <status>] [--chapters <count>]");
+        return 1;
+    }
+
+    Console.WriteLine($"Searching for '{query}'...");
+    var matches = (await catalog.SearchAsync(query, cancellationToken)).ToList();
+
+    if (matches.Count == 0)
+    {
+        WriteColoredLine($"No manga found matching '{query}'.", ConsoleColor.Yellow);
+        return 1;
+    }
+
+    string mangaId;
+    string mangaTitle;
+
+    if (matches.Count == 1)
+    {
+        mangaId = matches[0].Id.Value;
+        mangaTitle = matches[0].Title;
+    }
+    else
+    {
+        WriteColoredLine($"Found {matches.Count} matches:", ConsoleColor.Cyan);
+        for (var i = 0; i < matches.Count; i++)
+        {
+            Console.WriteLine($"  {i + 1,2}. {matches[i].Title}");
+        }
+
+        Console.Write("Select manga to add (number): ");
+        var input = Console.ReadLine()?.Trim();
+
+        if (!int.TryParse(input, out var choice) || choice < 1 || choice > matches.Count)
+        {
+            WriteColoredLine("Invalid selection. Cancelled.", ConsoleColor.Yellow);
+            return 1;
+        }
+
+        var selected = matches[choice - 1];
+        mangaId = selected.Id.Value;
+        mangaTitle = selected.Title;
+    }
+
+    var existing = await mangaList.GetByTitleAsync(mangaTitle, cancellationToken);
+    if (existing is not null)
+    {
+        WriteColoredLine($"'{mangaTitle}' is already in your list as '{existing.Status.ToDisplayString()}'.", ConsoleColor.Yellow);
+        return 1;
+    }
+
+    try
+    {
+        await mangaList.AddAsync(mangaId, mangaTitle, status, chapters, cancellationToken);
+        WriteColoredLine($"Added '{mangaTitle}' to your list as '{status.ToDisplayString()}'.", ConsoleColor.Green);
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        WriteColoredLine($"Failed to add manga: {ex.Message}", ConsoleColor.Red);
+        return 1;
+    }
+}
+
+static async Task<int> HandleMangaListUpdateAsync(string[] args, IMangaListStore mangaList, ILogger logger, CancellationToken cancellationToken)
+{
+    string? query = null;
+    MangaReadStatus? status = null;
+    int? chaptersRead = null;
+    int? totalChapters = null;
+    int? score = null;
+
+    for (var i = 2; i < args.Length; i++)
+    {
+        if (args[i].Equals("--status", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            status = MangaReadStatusExtensions.ParseStatusArg(args[i + 1]);
+            if (status is null)
+            {
+                Console.WriteLine($"Unknown status '{args[i + 1]}'. Valid: reading, completed, plan, hold, dropped");
+                return 1;
+            }
+            i++;
+        }
+        else if (args[i].Equals("--chapters", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            if (!int.TryParse(args[i + 1], out var ch) || ch < 0)
+            {
+                Console.WriteLine("--chapters must be a non-negative integer.");
+                return 1;
+            }
+            chaptersRead = ch;
+            i++;
+        }
+        else if (args[i].Equals("--total", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            if (!int.TryParse(args[i + 1], out var t) || t <= 0)
+            {
+                Console.WriteLine("--total must be a positive integer.");
+                return 1;
+            }
+            totalChapters = t;
+            i++;
+        }
+        else if (args[i].Equals("--score", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            if (!int.TryParse(args[i + 1], out var s) || s < 1 || s > 10)
+            {
+                Console.WriteLine("--score must be between 1 and 10.");
+                return 1;
+            }
+            score = s;
+            i++;
+        }
+        else if (query is null)
+        {
+            query = args[i];
+        }
+    }
+
+    if (string.IsNullOrWhiteSpace(query))
+    {
+        Console.WriteLine("Usage: koware list update \"<manga title>\" [--status <status>] [--chapters <n>] [--total <n>] [--score <1-10>]");
+        return 1;
+    }
+
+    var entry = await mangaList.SearchAsync(query, cancellationToken);
+    if (entry is null)
+    {
+        WriteColoredLine($"No manga matching '{query}' found in your list.", ConsoleColor.Yellow);
+        return 1;
+    }
+
+    var updated = await mangaList.UpdateAsync(entry.MangaTitle, status, chaptersRead, totalChapters, score, cancellationToken: cancellationToken);
+    if (updated)
+    {
+        WriteColoredLine($"Updated '{entry.MangaTitle}'.", ConsoleColor.Green);
+        return 0;
+    }
+
+    WriteColoredLine("No changes made.", ConsoleColor.Yellow);
+    return 0;
+}
+
+static async Task<int> HandleMangaListRemoveAsync(string[] args, IMangaListStore mangaList, ILogger logger, CancellationToken cancellationToken)
+{
+    if (args.Length < 3)
+    {
+        Console.WriteLine("Usage: koware list remove \"<manga title>\"");
+        return 1;
+    }
+
+    var query = args[2];
+    var entry = await mangaList.SearchAsync(query, cancellationToken);
+    if (entry is null)
+    {
+        WriteColoredLine($"No manga matching '{query}' found in your list.", ConsoleColor.Yellow);
+        return 1;
+    }
+
+    Console.Write($"Remove '{entry.MangaTitle}' from your list? (y/N): ");
+    var confirm = Console.ReadLine()?.Trim().ToLowerInvariant();
+    if (confirm != "y" && confirm != "yes")
+    {
+        Console.WriteLine("Cancelled.");
+        return 0;
+    }
+
+    var removed = await mangaList.RemoveAsync(entry.MangaTitle, cancellationToken);
+    if (removed)
+    {
+        WriteColoredLine($"Removed '{entry.MangaTitle}' from your list.", ConsoleColor.Green);
+        return 0;
+    }
+
+    WriteColoredLine("Failed to remove manga.", ConsoleColor.Red);
+    return 1;
+}
+
+static async Task<int> HandleMangaListStatsAsync(IMangaListStore mangaList, bool json, CancellationToken cancellationToken)
+{
+    var stats = await mangaList.GetStatsAsync(cancellationToken);
+
+    if (json)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(stats, new JsonSerializerOptions { WriteIndented = true }));
+        return 0;
+    }
+
+    Console.ForegroundColor = ConsoleColor.Magenta;
+    Console.WriteLine("Manga List Stats");
+    Console.ResetColor();
+    Console.WriteLine($"  Reading:       {stats.Reading}");
+    Console.WriteLine($"  Completed:     {stats.Completed}");
+    Console.WriteLine($"  Plan to Read:  {stats.PlanToRead}");
+    Console.WriteLine($"  On Hold:       {stats.OnHold}");
+    Console.WriteLine($"  Dropped:       {stats.Dropped}");
+    Console.WriteLine($"  ─────────────────────");
+    Console.WriteLine($"  Total:         {stats.Reading + stats.Completed + stats.PlanToRead + stats.OnHold + stats.Dropped}");
+    Console.WriteLine($"  Chapters:      {stats.TotalChaptersRead}");
+    return 0;
+}
+
+static async Task<int> ShowMangaListAsync(IMangaListStore mangaList, MangaReadStatus? statusFilter, bool json, CancellationToken cancellationToken)
+{
+    var entries = await mangaList.GetAllAsync(statusFilter, cancellationToken);
+
+    if (entries.Count == 0)
+    {
+        if (statusFilter.HasValue)
+        {
+            Console.WriteLine($"No manga with status '{statusFilter.Value.ToDisplayString()}' in your list.");
+        }
+        else
+        {
+            Console.WriteLine("Your manga list is empty. Use 'koware list add \"<title>\"' to add manga.");
+        }
+        return 0;
+    }
+
+    if (json)
+    {
+        var payload = entries.Select(e => new
+        {
+            title = e.MangaTitle,
+            status = e.Status.ToString().ToLowerInvariant(),
+            chaptersRead = e.ChaptersRead,
+            totalChapters = e.TotalChapters,
+            score = e.Score,
+            addedAt = e.AddedAt,
+            updatedAt = e.UpdatedAt,
+            completedAt = e.CompletedAt
+        });
+        Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        return 0;
+    }
+
+    Console.ForegroundColor = ConsoleColor.Magenta;
+    Console.WriteLine(statusFilter.HasValue ? $"Manga List ({statusFilter.Value.ToDisplayString()})" : "Manga List");
+    Console.ResetColor();
+    Console.WriteLine($"{"#",3} {"Status",-14} {"Progress",-10} {"Score",-6} {"Title",-40}");
+    Console.WriteLine(new string('─', 80));
+
+    var index = 1;
+    foreach (var e in entries)
+    {
+        var progress = e.TotalChapters.HasValue
+            ? $"{e.ChaptersRead}/{e.TotalChapters}"
+            : $"{e.ChaptersRead}/?";
+        var scoreStr = e.Score.HasValue ? $"{e.Score}/10" : "-";
+
+        Console.Write($"{index,3} ");
+        Console.ForegroundColor = e.Status.ToColor();
+        Console.Write($"{e.Status.ToDisplayString(),-14}");
+        Console.ResetColor();
+        Console.WriteLine($" {progress,-10} {scoreStr,-6} {Truncate(e.MangaTitle, 40),-40}");
         index++;
     }
 
