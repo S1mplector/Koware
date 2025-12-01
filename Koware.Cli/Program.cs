@@ -120,7 +120,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
             case "history":
                 return await HandleHistoryAsync(args, services, logger, defaults, cts.Token);
             case "list":
-                return await HandleListAsync(args, services, logger, cts.Token);
+                return await HandleListAsync(args, services, logger, defaults, cts.Token);
             case "config":
                 return HandleConfig(args);
             case "doctor":
@@ -1221,8 +1221,16 @@ static async Task<int> HandleMangaHistoryAsync(string[] args, IServiceProvider s
 ///   list remove "&lt;title&gt;"        - Remove anime from list
 ///   list stats                    - Show aggregated stats
 /// </remarks>
-static async Task<int> HandleListAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+static async Task<int> HandleListAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
+    // List is currently only available in anime mode
+    if (defaults.GetMode() == CliMode.Manga)
+    {
+        WriteColoredLine("The 'list' command is only available in anime mode.", ConsoleColor.Yellow);
+        WriteColoredLine("Use 'koware history' to see your manga reading history, or switch to anime mode with 'koware mode anime'.", ConsoleColor.Gray);
+        return 1;
+    }
+
     var animeList = services.GetRequiredService<IAnimeListStore>();
     var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
 
