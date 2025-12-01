@@ -447,8 +447,7 @@ internal static class ReaderHtmlBuilder
     <footer id="footer">
         <div class="nav-controls">
             <button class="btn nav-btn" id="prev-btn" type="button" disabled>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
-                <kbd>←</kbd>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
             </button>
         </div>
         <div id="page-slider-container">
@@ -457,8 +456,7 @@ internal static class ReaderHtmlBuilder
         </div>
         <div class="nav-controls">
             <button class="btn nav-btn" id="next-btn" type="button">
-                <kbd>→</kbd>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
             </button>
         </div>
     </footer>
