@@ -51,6 +51,7 @@ static IHost BuildHost(string[] args)
     builder.Services.Configure<ReaderOptions>(builder.Configuration.GetSection("Reader"));
     builder.Services.Configure<DefaultCliOptions>(builder.Configuration.GetSection("Defaults"));
     builder.Services.AddSingleton<IWatchHistoryStore, SqliteWatchHistoryStore>();
+    builder.Services.AddSingleton<IReadHistoryStore, SqliteReadHistoryStore>();
     builder.Services.AddSingleton<IAnimeListStore, SqliteAnimeListStore>();
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware", LogLevel.Information);
@@ -101,7 +102,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
         switch (command)
         {
             case "search":
-                return await HandleSearchAsync(orchestrator, args, logger, cts.Token);
+                return await HandleSearchAsync(orchestrator, args, services, logger, defaults, cts.Token);
             case "plan":
             case "stream":
                 return await HandlePlanAsync(orchestrator, args, logger, defaults, cts.Token);
@@ -113,7 +114,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
             case "read":
                 return await HandleReadAsync(args, services, logger, cts.Token);
             case "last":
-                return await HandleLastAsync(args, services, logger, cts.Token);
+                return await HandleLastAsync(args, services, logger, defaults, cts.Token);
             case "continue":
                 return await HandleContinueAsync(args, services, logger, defaults, cts.Token);
             case "history":
@@ -126,6 +127,8 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandleDoctorAsync(services, logger, cts.Token);
             case "provider":
                 return await HandleProviderAsync(args, services);
+            case "mode":
+                return await HandleModeAsync(args, logger);
             case "update":
                 return await HandleUpdateAsync(logger, cts.Token);
             case "version":
@@ -281,10 +284,67 @@ static async Task<int> ExecuteAndPlayAsync(
 /// <param name="args">CLI arguments; supports --play and --json flags.</param>
 /// <param name="services">Service provider for history store.</param>
 /// <param name="logger">Logger instance.</param>
+/// <param name="defaults">Default CLI options for mode detection.</param>
 /// <param name="cancellationToken">Cancellation token.</param>
 /// <returns>Exit code: 0 on success, 1 if no history exists.</returns>
-static async Task<int> HandleLastAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+/// <remarks>Mode-aware: shows last watched anime or last read manga based on current mode.</remarks>
+static async Task<int> HandleLastAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
+    var json = args.Any(a => string.Equals(a, "--json", StringComparison.OrdinalIgnoreCase));
+    var mode = defaults.GetMode();
+
+    if (mode == CliMode.Manga)
+    {
+        // Manga mode - show last read
+        var readHistory = services.GetRequiredService<IReadHistoryStore>();
+        var readEntry = await readHistory.GetLastAsync(cancellationToken);
+        if (readEntry is null)
+        {
+            logger.LogWarning("No read history found.");
+            return 1;
+        }
+
+        if (json)
+        {
+            var jsonText = JsonSerializer.Serialize(readEntry, new JsonSerializerOptions { WriteIndented = true });
+            Console.WriteLine(jsonText);
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Magenta;
+            Console.WriteLine("Last Read");
+            Console.ResetColor();
+            Console.WriteLine(new string('─', 40));
+
+            WriteLastField("Manga", readEntry.MangaTitle, ConsoleColor.White);
+            
+            var chText = readEntry.ChapterNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!string.IsNullOrWhiteSpace(readEntry.ChapterTitle) && readEntry.ChapterTitle != $"Chapter {readEntry.ChapterNumber}")
+            {
+                chText += $" - {readEntry.ChapterTitle}";
+            }
+            WriteLastField("Chapter", chText, ConsoleColor.Yellow);
+            
+            WriteLastField("Provider", readEntry.Provider, ConsoleColor.Gray);
+
+            var ago = DateTimeOffset.UtcNow - readEntry.ReadAt;
+            var agoText = ago.TotalMinutes < 1 ? "just now" :
+                         ago.TotalMinutes < 60 ? $"{(int)ago.TotalMinutes}m ago" :
+                         ago.TotalHours < 24 ? $"{(int)ago.TotalHours}h ago" :
+                         ago.TotalDays < 7 ? $"{(int)ago.TotalDays}d ago" :
+                         readEntry.ReadAt.LocalDateTime.ToString("MMM dd, yyyy");
+            WriteLastField("Read", $"{readEntry.ReadAt.LocalDateTime:g} ({agoText})", ConsoleColor.DarkGray);
+
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine("Tip: Use 'koware continue' to read the next chapter.");
+            Console.ResetColor();
+        }
+
+        return 0;
+    }
+
+    // Anime mode (default) - show last watched
     var history = services.GetRequiredService<IWatchHistoryStore>();
     var entry = await history.GetLastAsync(cancellationToken);
     if (entry is null)
@@ -294,16 +354,12 @@ static async Task<int> HandleLastAsync(string[] args, IServiceProvider services,
     }
 
     var play = args.Any(a => string.Equals(a, "--play", StringComparison.OrdinalIgnoreCase));
-    var json = args.Any(a => string.Equals(a, "--json", StringComparison.OrdinalIgnoreCase));
 
     if (!play)
     {
         if (json)
         {
-            var jsonText = System.Text.Json.JsonSerializer.Serialize(entry, new System.Text.Json.JsonSerializerOptions
-            {
-                WriteIndented = true
-            });
+            var jsonText = JsonSerializer.Serialize(entry, new JsonSerializerOptions { WriteIndented = true });
             Console.WriteLine(jsonText);
         }
         else
@@ -329,7 +385,6 @@ static async Task<int> HandleLastAsync(string[] args, IServiceProvider services,
                 WriteLastField("Quality", entry.Quality, ConsoleColor.Gray);
             }
 
-            // Format time ago
             var ago = DateTimeOffset.UtcNow - entry.WatchedAt;
             var agoText = ago.TotalMinutes < 1 ? "just now" :
                          ago.TotalMinutes < 60 ? $"{(int)ago.TotalMinutes}m ago" :
@@ -344,7 +399,7 @@ static async Task<int> HandleLastAsync(string[] args, IServiceProvider services,
             Console.ResetColor();
         }
 
-            return 0;
+        return 0;
     }
 
     return 0;
@@ -637,20 +692,29 @@ static async Task<int> HandleProviderAsync(string[] args, IServiceProvider servi
 }
 
 /// <summary>
-/// Implement the <c>koware continue</c> command: resume watching from history.
+/// Implement the <c>koware continue</c> command: resume watching/reading from history.
 /// </summary>
-/// <param name="args">CLI arguments; optional anime query, --from, and --quality.</param>
+/// <param name="args">CLI arguments; optional query, --from, and --quality (anime) or --chapter (manga).</param>
 /// <param name="services">Service provider for history and orchestrator.</param>
 /// <param name="logger">Logger instance.</param>
-/// <param name="defaults">Default CLI options for quality fallback.</param>
+/// <param name="defaults">Default CLI options for quality fallback and mode detection.</param>
 /// <param name="cancellationToken">Cancellation token.</param>
-/// <returns>Exit code from playback.</returns>
+/// <returns>Exit code from playback/reading.</returns>
 /// <remarks>
-/// Finds the most recent history entry (or matches by anime title),
-/// then plays the next episode (or a specific one via --from).
+/// Mode-aware: continues anime (next episode) or manga (next chapter) based on current mode.
+/// Finds the most recent history entry (or matches by title),
+/// then plays/reads the next episode/chapter (or a specific one via --from/--chapter).
 /// </remarks>
 static async Task<int> HandleContinueAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
+    var mode = defaults.GetMode();
+
+    if (mode == CliMode.Manga)
+    {
+        return await HandleContinueMangaAsync(args, services, logger, cancellationToken);
+    }
+
+    // Anime mode (default)
     string? animeQuery;
     int? fromEpisode = null;
     string? preferredQuality = null;
@@ -724,21 +788,91 @@ static async Task<int> HandleContinueAsync(string[] args, IServiceProvider servi
 }
 
 /// <summary>
-/// Implement the <c>koware history</c> command: browse, filter, and replay watch history.
+/// Handle continue command in manga mode: resume reading from history.
 /// </summary>
-/// <param name="args">CLI arguments; supports search, --anime, --limit, --after, --before, --from, --to, --json, --stats, --play, --next.</param>
+static async Task<int> HandleContinueMangaAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+{
+    string? mangaQuery = null;
+    float? fromChapter = null;
+
+    var queryParts = new List<string>();
+    for (var i = 1; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if ((arg.Equals("--from", StringComparison.OrdinalIgnoreCase) || arg.Equals("--chapter", StringComparison.OrdinalIgnoreCase)) && i + 1 < args.Length)
+        {
+            if (float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+            {
+                fromChapter = parsed;
+                i++;
+                continue;
+            }
+            logger.LogWarning("Chapter number must be a number.");
+            return 1;
+        }
+
+        queryParts.Add(arg);
+    }
+
+    mangaQuery = queryParts.Count == 0 ? null : string.Join(' ', queryParts).Trim();
+
+    var readHistory = services.GetRequiredService<IReadHistoryStore>();
+    ReadHistoryEntry? entry;
+
+    if (string.IsNullOrWhiteSpace(mangaQuery))
+    {
+        entry = await readHistory.GetLastAsync(cancellationToken);
+    }
+    else
+    {
+        entry = await readHistory.SearchLastAsync(mangaQuery, cancellationToken)
+                ?? await readHistory.GetLastForMangaAsync(mangaQuery, cancellationToken);
+    }
+
+    if (entry is null)
+    {
+        logger.LogWarning("No read history found to continue from.");
+        return 1;
+    }
+
+    var targetChapter = fromChapter ?? (entry.ChapterNumber + 1);
+    if (targetChapter <= 0)
+    {
+        targetChapter = 1;
+    }
+
+    logger.LogInformation("Continuing {Manga} from chapter {Chapter}", entry.MangaTitle, targetChapter);
+
+    // Build args for HandleReadAsync
+    var readArgs = new List<string> { "read", entry.MangaTitle, "--chapter", targetChapter.ToString(System.Globalization.CultureInfo.InvariantCulture), "--index", "1", "--non-interactive" };
+    return await HandleReadAsync(readArgs.ToArray(), services, logger, cancellationToken);
+}
+
+/// <summary>
+/// Implement the <c>koware history</c> command: browse, filter, and replay watch/read history.
+/// </summary>
+/// <param name="args">CLI arguments; supports search, --anime/--manga, --limit, --after, --before, --from, --to, --json, --stats, --play, --next.</param>
 /// <param name="services">Service provider for history store and orchestrator.</param>
 /// <param name="logger">Logger instance.</param>
-/// <param name="defaults">Default CLI options for quality fallback.</param>
+/// <param name="defaults">Default CLI options for quality fallback and mode detection.</param>
 /// <param name="cancellationToken">Cancellation token.</param>
 /// <returns>Exit code: 0 on success.</returns>
 /// <remarks>
-/// With --stats, shows aggregated counts per anime.
+/// Mode-aware: shows watch history (anime) or read history (manga) based on current mode.
+/// With --stats, shows aggregated counts per anime/manga.
 /// With --play N, replays the Nth entry in the filtered list.
-/// With --next, plays the next episode of the first matched entry.
+/// With --next, plays/reads the next episode/chapter of the first matched entry.
 /// </remarks>
 static async Task<int> HandleHistoryAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
+    var mode = defaults.GetMode();
+
+    if (mode == CliMode.Manga)
+    {
+        return await HandleMangaHistoryAsync(args, services, logger, cancellationToken);
+    }
+
+    // Anime mode (default)
     var history = services.GetRequiredService<IWatchHistoryStore>();
     var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
 
@@ -917,6 +1051,156 @@ static void RenderHistory(IReadOnlyList<WatchHistoryEntry> entries)
         Console.WriteLine($"{index,3} {Truncate(e.AnimeTitle,30),-30} {e.EpisodeNumber,4} {e.Quality ?? "?",-8} {e.WatchedAt:u,-20} {e.EpisodeTitle ?? string.Empty}");
         index++;
     }
+}
+
+/// <summary>
+/// Handle history command in manga mode: browse read history.
+/// </summary>
+static async Task<int> HandleMangaHistoryAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+{
+    var readHistory = services.GetRequiredService<IReadHistoryStore>();
+
+    string? search = null;
+    int limit = 10;
+    DateTimeOffset? after = null;
+    DateTimeOffset? before = null;
+    float? fromChapter = null;
+    float? toChapter = null;
+    bool json = false;
+    bool stats = false;
+
+    var idx = 1;
+    if (args.Length > 1 && args[1].Equals("search", StringComparison.OrdinalIgnoreCase))
+    {
+        idx = 2;
+        if (args.Length > 2)
+        {
+            search = string.Join(' ', args.Skip(2)).Trim();
+        }
+    }
+
+    while (idx < args.Length)
+    {
+        var arg = args[idx];
+        switch (arg.ToLowerInvariant())
+        {
+            case "--manga":
+            case "--anime": // Allow --anime as alias for compatibility
+                if (idx + 1 >= args.Length) { Console.WriteLine("Missing value for --manga"); return 1; }
+                search = args[++idx];
+                break;
+            case "--limit":
+                if (idx + 1 >= args.Length || !int.TryParse(args[idx + 1], out limit))
+                { Console.WriteLine("Value for --limit must be an integer."); return 1; }
+                idx++;
+                break;
+            case "--after":
+                if (idx + 1 >= args.Length || !DateTimeOffset.TryParse(args[idx + 1], out var parsedAfter))
+                { Console.WriteLine("Value for --after must be a date."); return 1; }
+                after = parsedAfter;
+                idx++;
+                break;
+            case "--before":
+                if (idx + 1 >= args.Length || !DateTimeOffset.TryParse(args[idx + 1], out var parsedBefore))
+                { Console.WriteLine("Value for --before must be a date."); return 1; }
+                before = parsedBefore;
+                idx++;
+                break;
+            case "--from":
+                if (idx + 1 >= args.Length || !float.TryParse(args[idx + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var f))
+                { Console.WriteLine("Value for --from must be a number."); return 1; }
+                fromChapter = f;
+                idx++;
+                break;
+            case "--to":
+                if (idx + 1 >= args.Length || !float.TryParse(args[idx + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var t))
+                { Console.WriteLine("Value for --to must be a number."); return 1; }
+                toChapter = t;
+                idx++;
+                break;
+            case "--json":
+                json = true;
+                break;
+            case "--stats":
+                stats = true;
+                break;
+        }
+        idx++;
+    }
+
+    if (stats)
+    {
+        var statsResult = await readHistory.GetStatsAsync(search, cancellationToken);
+        if (json)
+        {
+            var payload = new
+            {
+                mode = "manga",
+                total = statsResult.Sum(s => s.Count),
+                uniqueManga = statsResult.Count,
+                top = statsResult.Select(s => new { title = s.MangaTitle, count = s.Count, lastRead = s.LastRead })
+            };
+            Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+            return 0;
+        }
+
+        Console.ForegroundColor = ConsoleColor.Magenta;
+        Console.WriteLine("Reading History Stats");
+        Console.ResetColor();
+        Console.WriteLine($"Total reads : {statsResult.Sum(s => s.Count)}");
+        Console.WriteLine($"Unique manga: {statsResult.Count}");
+        Console.WriteLine("Top manga:");
+        foreach (var s in statsResult.Take(10))
+        {
+            Console.WriteLine($"  {s.MangaTitle} ({s.Count} entries, last: {s.LastRead:u})");
+        }
+        return 0;
+    }
+
+    var query = new ReadHistoryQuery(search, after, before, fromChapter, toChapter, limit);
+    var entries = await readHistory.QueryAsync(query, cancellationToken);
+
+    if (entries.Count == 0)
+    {
+        Console.WriteLine("No reading history matches your filters.");
+        return 0;
+    }
+
+    if (json)
+    {
+        var payload = new
+        {
+            mode = "manga",
+            total = entries.Count,
+            entries = entries.Select(e => new
+            {
+                mangaId = e.MangaId,
+                mangaTitle = e.MangaTitle,
+                chapter = e.ChapterNumber,
+                chapterTitle = e.ChapterTitle,
+                readAt = e.ReadAt
+            })
+        };
+        Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        return 0;
+    }
+
+    // Render manga history
+    Console.ForegroundColor = ConsoleColor.Magenta;
+    Console.WriteLine("Reading History");
+    Console.ResetColor();
+    Console.WriteLine($"Showing {entries.Count} entr{(entries.Count == 1 ? "y" : "ies")}:");
+
+    Console.WriteLine($"{"#",3} {"Manga",-35} {"Ch",6} {"Read At",-20}");
+    var index = 1;
+    foreach (var e in entries)
+    {
+        var chNum = e.ChapterNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Console.WriteLine($"{index,3} {Truncate(e.MangaTitle, 35),-35} {chNum,6} {e.ReadAt:u,-20}");
+        index++;
+    }
+
+    return 0;
 }
 
 /// <summary>
@@ -1369,15 +1653,18 @@ static async Task<int> LaunchFromHistory(WatchHistoryEntry entry, ScrapeOrchestr
 /// <summary>
 /// Implement the <c>koware search</c> command: find anime by query.
 /// </summary>
-/// <param name="orchestrator">Scraping orchestrator.</param>
+/// <param name="orchestrator">Scraping orchestrator (for anime search).</param>
 /// <param name="args">CLI arguments; query words and optional --json flag.</param>
+/// <param name="services">Service provider for manga catalog.</param>
 /// <param name="logger">Logger instance.</param>
+/// <param name="defaults">Default CLI options for mode detection.</param>
 /// <param name="cancellationToken">Cancellation token.</param>
 /// <returns>Exit code: 0 on success, 1 if query missing.</returns>
 /// <remarks>
+/// Mode-aware: searches anime or manga based on current mode.
 /// With --json, outputs structured JSON instead of a formatted list.
 /// </remarks>
-static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string[] args, ILogger logger, CancellationToken cancellationToken)
+static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
     var jsonOutput = args.Skip(1).Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
     var filteredArgs = args.Where((a, idx) => idx == 0 || !a.Equals("--json", StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -1390,26 +1677,60 @@ static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string
         return 1;
     }
 
-    var matches = await orchestrator.SearchAsync(query, cancellationToken);
-    if (jsonOutput)
-    {
-        var payload = new
-        {
-            query,
-            count = matches.Count,
-            matches = matches.Select(m => new
-            {
-                id = m.Id.Value,
-                title = m.Title,
-                detail = m.DetailPage.ToString()
-            })
-        };
+    var mode = defaults.GetMode();
 
-        Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+    if (mode == CliMode.Manga)
+    {
+        // Manga search
+        var mangaCatalog = services.GetRequiredService<IMangaCatalog>();
+        var mangaMatches = await mangaCatalog.SearchAsync(query, cancellationToken);
+
+        if (jsonOutput)
+        {
+            var payload = new
+            {
+                mode = "manga",
+                query,
+                count = mangaMatches.Count,
+                matches = mangaMatches.Select(m => new
+                {
+                    id = m.Id.Value,
+                    title = m.Title,
+                    synopsis = m.Synopsis,
+                    detail = m.DetailPage.ToString()
+                })
+            };
+            Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        else
+        {
+            RenderMangaSearch(query, mangaMatches);
+        }
     }
     else
     {
-        RenderSearch(query, matches);
+        // Anime search (default)
+        var matches = await orchestrator.SearchAsync(query, cancellationToken);
+        if (jsonOutput)
+        {
+            var payload = new
+            {
+                mode = "anime",
+                query,
+                count = matches.Count,
+                matches = matches.Select(m => new
+                {
+                    id = m.Id.Value,
+                    title = m.Title,
+                    detail = m.DetailPage.ToString()
+                })
+            };
+            Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        else
+        {
+            RenderSearch(query, matches);
+        }
     }
 
     return 0;
@@ -1915,7 +2236,29 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
     var allMangaOptions = services.GetService<IOptions<AllMangaOptions>>()?.Value;
     var displayTitle = $"{selectedManga.Title} - Chapter {selectedChapter.Number}";
 
-    return LaunchReader(readerOptions, pages, logger, allMangaOptions?.Referer, allMangaOptions?.UserAgent, displayTitle);
+    var exitCode = LaunchReader(readerOptions, pages, logger, allMangaOptions?.Referer, allMangaOptions?.UserAgent, displayTitle);
+
+    // Save to reading history
+    try
+    {
+        var readHistory = services.GetRequiredService<IReadHistoryStore>();
+        var entry = new ReadHistoryEntry
+        {
+            Provider = "allmanga",
+            MangaId = selectedManga.Id.Value,
+            MangaTitle = selectedManga.Title,
+            ChapterNumber = selectedChapter.Number,
+            ChapterTitle = selectedChapter.Title,
+            ReadAt = DateTimeOffset.UtcNow
+        };
+        await readHistory.AddAsync(entry, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        logger.LogDebug(ex, "Failed to update read history.");
+    }
+
+    return exitCode;
 }
 
 /// <summary>
@@ -3030,6 +3373,34 @@ static void RenderSearch(string query, IReadOnlyCollection<Anime> matches)
 }
 
 /// <summary>
+/// Pretty-print the results of a manga search query with colored indices and detail URLs.
+/// </summary>
+/// <param name="query">The search query string.</param>
+/// <param name="matches">Collection of matching manga results.</param>
+static void RenderMangaSearch(string query, IReadOnlyCollection<Manga> matches)
+{
+    Console.ForegroundColor = ConsoleColor.Magenta;
+    Console.WriteLine($"Manga matches for \"{query}\":");
+    Console.ResetColor();
+    if (matches.Count == 0)
+    {
+        Console.WriteLine("  No results found. Try a different query.");
+        return;
+    }
+
+    var index = 1;
+    foreach (var manga in matches)
+    {
+        var color = TextColorer.ForMatchIndex(index - 1, matches.Count);
+        Console.ForegroundColor = color;
+        Console.Write($"  [{index}] {manga.Title}");
+        Console.ResetColor();
+        Console.WriteLine($" -> {manga.DetailPage}");
+        index++;
+    }
+}
+
+/// <summary>
 /// Summarize the current scrape plan: selected anime, episodes, and top streams.
 /// </summary>
 /// <param name="plan">The current scrape plan.</param>
@@ -3119,7 +3490,7 @@ static void PrintUsage()
     WriteCommand("list [subcommand]", "Track anime: add, update status, mark complete.", ConsoleColor.Yellow);
     WriteCommand("help [command]", "Show this guide or a command-specific help page.", ConsoleColor.Magenta);
     WriteCommand("config [options]", "Persist defaults (quality/index/player) to appsettings.user.json.", ConsoleColor.Magenta);
-    WriteCommand("provider [options]", "List or toggle providers.", ConsoleColor.Magenta);
+    WriteCommand("mode [anime|manga]", "Show or switch between anime and manga modes.", ConsoleColor.Magenta);
     WriteCommand("doctor", "Check provider connectivity (DNS/HTTP).", ConsoleColor.Magenta);
     WriteCommand("provider [options]", "List/enable/disable providers.", ConsoleColor.Magenta);
     WriteCommand("update", "Download and launch the latest Koware installer.", ConsoleColor.Magenta);
@@ -3218,6 +3589,20 @@ static int HandleHelp(string[] args)
             PrintTopicHeader("doctor", "Check connectivity to the anime provider.");
             Console.WriteLine("Usage: koware doctor");
             Console.WriteLine("Behavior: pings api host, reports DNS + HTTP reachability.");
+            break;
+        case "mode":
+            PrintTopicHeader("mode", "Switch between anime and manga modes.");
+            Console.WriteLine("Usage: koware mode [anime|manga]");
+            Console.WriteLine("Behavior:");
+            Console.WriteLine("  • No argument: shows current mode.");
+            Console.WriteLine("  • 'anime': switches to anime mode (default).");
+            Console.WriteLine("  • 'manga': switches to manga mode.");
+            Console.WriteLine();
+            Console.WriteLine("Mode affects these commands:");
+            Console.WriteLine("  • search  → searches anime or manga");
+            Console.WriteLine("  • history → shows watch or read history");
+            Console.WriteLine("  • last    → shows last watched or last read");
+            Console.WriteLine("  • continue → continues anime or manga");
             break;
         case "update":
             PrintTopicHeader("update", "Download and run the latest Koware installer from GitHub Releases.");
@@ -3422,6 +3807,91 @@ static int HandleVersion()
     var version = GetVersionLabel();
     Console.WriteLine(string.IsNullOrWhiteSpace(version) ? "Koware CLI (unknown version)" : $"Koware CLI {version}");
     return 0;
+}
+
+/// <summary>
+/// Implement the <c>koware mode</c> command: show or switch between anime and manga modes.
+/// </summary>
+/// <param name="args">CLI arguments; optional "anime" or "manga" to switch.</param>
+/// <param name="logger">Logger instance.</param>
+/// <returns>Exit code: 0 on success.</returns>
+/// <remarks>
+/// With no arguments, shows current mode.
+/// With "anime" or "manga", switches mode and saves to appsettings.user.json.
+/// </remarks>
+static Task<int> HandleModeAsync(string[] args, ILogger logger)
+{
+    var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.user.json");
+    var root = File.Exists(configPath)
+        ? (JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? new JsonObject())
+        : new JsonObject();
+    var defaults = root["Defaults"] as JsonObject ?? new JsonObject();
+    var currentMode = defaults["Mode"]?.ToString() ?? "anime";
+
+    if (args.Length == 1)
+    {
+        // Show current mode
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine("Current Mode");
+        Console.ResetColor();
+        Console.WriteLine(new string('─', 30));
+
+        Console.ForegroundColor = currentMode.Equals("manga", StringComparison.OrdinalIgnoreCase)
+            ? ConsoleColor.Magenta
+            : ConsoleColor.Green;
+        Console.WriteLine($"  {currentMode.ToUpperInvariant()}");
+        Console.ResetColor();
+
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine("Switch with: koware mode anime | koware mode manga");
+        Console.ResetColor();
+        return Task.FromResult(0);
+    }
+
+    var newMode = args[1].ToLowerInvariant();
+    if (newMode != "anime" && newMode != "manga")
+    {
+        logger.LogWarning("Invalid mode '{Mode}'. Use 'anime' or 'manga'.", args[1]);
+        return Task.FromResult(1);
+    }
+
+    if (newMode == currentMode.ToLowerInvariant())
+    {
+        Console.WriteLine($"Already in {newMode} mode.");
+        return Task.FromResult(0);
+    }
+
+    defaults["Mode"] = newMode;
+    root["Defaults"] = defaults;
+
+    var json = JsonSerializer.Serialize(root, new JsonSerializerOptions { WriteIndented = true });
+    File.WriteAllText(configPath, json);
+
+    Console.ForegroundColor = newMode == "manga" ? ConsoleColor.Magenta : ConsoleColor.Green;
+    Console.WriteLine($"Switched to {newMode.ToUpperInvariant()} mode.");
+    Console.ResetColor();
+
+    // Show mode-specific tips
+    Console.WriteLine();
+    if (newMode == "manga")
+    {
+        Console.WriteLine("Commands now work with manga:");
+        Console.WriteLine("  koware search \"one piece\"    → Search manga");
+        Console.WriteLine("  koware read \"one piece\" 1    → Read chapter 1");
+        Console.WriteLine("  koware continue              → Continue reading");
+        Console.WriteLine("  koware history               → Reading history");
+    }
+    else
+    {
+        Console.WriteLine("Commands now work with anime:");
+        Console.WriteLine("  koware search \"one piece\"    → Search anime");
+        Console.WriteLine("  koware watch \"one piece\" 1   → Watch episode 1");
+        Console.WriteLine("  koware continue              → Continue watching");
+        Console.WriteLine("  koware history               → Watch history");
+    }
+
+    return Task.FromResult(0);
 }
 
 /// <summary>
