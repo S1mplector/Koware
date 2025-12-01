@@ -58,6 +58,7 @@ $payloadDir = Join-Path $scriptRoot '..\Koware.Installer.Win\payload'
 try { $payloadDir = (Resolve-Path -LiteralPath $payloadDir).Path } catch {}
 $cliZip = Join-Path $payloadDir 'koware-cli.zip'
 $playerZip = Join-Path $payloadDir 'koware-player.zip'
+$readerZip = Join-Path $payloadDir 'koware-reader.zip'
 
 if (Test-Path $cliZip) {
     Copy-Item -LiteralPath $cliZip -Destination $resolvedOut -Force
@@ -71,6 +72,13 @@ if (Test-Path $playerZip) {
     Write-Info "Copied payload: $(Split-Path $playerZip -Leaf)"
 } else {
     Write-Warn "Player payload zip not found at $playerZip (build target may not have run or player disabled)."
+}
+
+if (Test-Path $readerZip) {
+    Copy-Item -LiteralPath $readerZip -Destination $resolvedOut -Force
+    Write-Info "Copied payload: $(Split-Path $readerZip -Leaf)"
+} else {
+    Write-Warn "Reader payload zip not found at $readerZip (build target may not have run or reader disabled)."
 }
 
 Write-Host ""; Write-Info "Publish complete. Output: $resolvedOut"

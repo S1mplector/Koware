@@ -112,7 +112,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
             case "download":
                 return await HandleDownloadAsync(orchestrator, args, services, logger, defaults, cts.Token);
             case "read":
-                return await HandleReadAsync(args, services, logger, cts.Token);
+                return await HandleReadAsync(args, services, logger, defaults, cts.Token);
             case "last":
                 return await HandleLastAsync(args, services, logger, defaults, cts.Token);
             case "continue":
@@ -845,7 +845,8 @@ static async Task<int> HandleContinueMangaAsync(string[] args, IServiceProvider 
 
     // Build args for HandleReadAsync
     var readArgs = new List<string> { "read", entry.MangaTitle, "--chapter", targetChapter.ToString(System.Globalization.CultureInfo.InvariantCulture), "--index", "1", "--non-interactive" };
-    return await HandleReadAsync(readArgs.ToArray(), services, logger, cancellationToken);
+    var defaults = services.GetRequiredService<IOptions<DefaultCliOptions>>().Value;
+    return await HandleReadAsync(readArgs.ToArray(), services, logger, defaults, cancellationToken);
 }
 
 /// <summary>
@@ -1830,6 +1831,14 @@ static async Task<int> HandlePlanAsync(ScrapeOrchestrator orchestrator, string[]
 /// <returns>Exit code from playback.</returns>
 static async Task<int> HandlePlayAsync(ScrapeOrchestrator orchestrator, string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
+    // Block watch command in manga mode
+    if (defaults.GetMode() == CliMode.Manga)
+    {
+        WriteColoredLine("The 'watch' command is not available in manga mode.", ConsoleColor.Yellow);
+        WriteColoredLine("Use 'koware read <query>' to read manga, or switch to anime mode with 'koware mode anime'.", ConsoleColor.Gray);
+        return 1;
+    }
+
     ScrapePlan plan;
     try
     {
@@ -2041,8 +2050,16 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
 /// <param name="logger">Logger instance.</param>
 /// <param name="cancellationToken">Cancellation token.</param>
 /// <returns>Exit code: 0 on success.</returns>
-static async Task<int> HandleReadAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+static async Task<int> HandleReadAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
+    // Block read command in anime mode
+    if (defaults.GetMode() == CliMode.Anime)
+    {
+        WriteColoredLine("The 'read' command is not available in anime mode.", ConsoleColor.Yellow);
+        WriteColoredLine("Use 'koware watch <query>' to watch anime, or switch to manga mode with 'koware mode manga'.", ConsoleColor.Gray);
+        return 1;
+    }
+
     var queryParts = new List<string>();
     float? chapterNumber = null;
     int? preferredIndex = null;
@@ -2133,28 +2150,33 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
     }
     else
     {
-        // Interactive selection
-        Console.WriteLine();
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine($"Found {results.Count} manga for \"{query}\":");
+        // Interactive selection with colored output
+        RenderMangaSearch(query, results);
+        Console.Write($"Select manga [1-{results.Count}] (Enter for 1, ");
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.Write("c to cancel");
         Console.ResetColor();
-        var idx = 1;
-        foreach (var m in results.Take(10))
-        {
-            Console.WriteLine($"  {idx++}. {m.Title}");
-        }
-        if (results.Count > 10)
-        {
-            Console.WriteLine($"  ... and {results.Count - 10} more");
-        }
-        Console.Write("Select manga (1-{0}): ", Math.Min(results.Count, 10));
+        Console.Write("): ");
         var input = Console.ReadLine();
-        if (!int.TryParse(input, out var selected) || selected < 1 || selected > Math.Min(results.Count, 10))
+
+        if (string.Equals(input?.Trim(), "c", StringComparison.OrdinalIgnoreCase))
         {
-            logger.LogWarning("Invalid selection.");
+            logger.LogInformation("Selection canceled by user.");
             return 1;
         }
-        selectedManga = results.ElementAt(selected - 1);
+        if (int.TryParse(input, out var selected) && selected >= 1 && selected <= results.Count)
+        {
+            selectedManga = results.ElementAt(selected - 1);
+        }
+        else if (string.IsNullOrWhiteSpace(input))
+        {
+            selectedManga = results.First();
+        }
+        else
+        {
+            logger.LogWarning("Invalid selection '{Input}'. Defaulting to first match.", input);
+            selectedManga = results.First();
+        }
     }
 
     logger.LogInformation("Selected: {Title}", selectedManga.Title);

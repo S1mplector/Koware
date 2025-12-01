@@ -36,10 +36,12 @@ public sealed class InstallerEngine
 
         var embeddedUsed = TryExtractEmbedded("Payload.KowareCli", installDir, progress);
         var embeddedPlayerUsed = false;
+        var embeddedReaderUsed = false;
 
         if (options.IncludePlayer)
         {
             embeddedPlayerUsed = TryExtractEmbedded("Payload.KowarePlayer", installDir, progress);
+            embeddedReaderUsed = TryExtractEmbedded("Payload.KowareReader", installDir, progress);
         }
 
         if (!embeddedUsed && options.Publish)
