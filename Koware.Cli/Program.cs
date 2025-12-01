@@ -1847,21 +1847,30 @@ static async Task<int> HandlePlayAsync(ScrapeOrchestrator orchestrator, string[]
 }
 
 /// <summary>
-/// Implement the <c>koware download</c> command: download episodes to disk.
+/// Implement the <c>koware download</c> command: download episodes or chapters to disk.
 /// </summary>
 /// <param name="orchestrator">Scraping orchestrator.</param>
-/// <param name="args">CLI arguments; query, --episode, --episodes, --quality, --index, --dir, --non-interactive.</param>
-/// <param name="services">Service provider for AllAnime options.</param>
+/// <param name="args">CLI arguments; query, --episode/--chapter, --episodes/--chapters, --quality, --index, --dir, --non-interactive.</param>
+/// <param name="services">Service provider for options.</param>
 /// <param name="logger">Logger instance.</param>
-/// <param name="defaults">Default CLI options.</param>
+/// <param name="defaults">Default CLI options for mode detection.</param>
 /// <param name="cancellationToken">Cancellation token.</param>
 /// <returns>Exit code: 0 on success.</returns>
 /// <remarks>
-/// Resolves episodes for a show, selects a range via --episodes or --episode,
-/// and downloads each using HTTP (for direct files) or ffmpeg (for playlists).
+/// Mode-aware: downloads anime episodes or manga chapters based on current mode.
+/// Resolves episodes/chapters for a show/manga, selects a range via --episodes/--chapters or --episode/--chapter,
+/// and downloads each using HTTP.
 /// </remarks>
 static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
+    var mode = defaults.GetMode();
+
+    if (mode == CliMode.Manga)
+    {
+        return await HandleMangaDownloadAsync(args, services, logger, cancellationToken);
+    }
+
+    // Anime mode (default)
     string? episodesArg = null;
     string? outputDir = null;
 
@@ -2352,6 +2361,312 @@ static string? ResolveReaderExecutable(ReaderOptions options)
     }
 
     return null;
+}
+
+/// <summary>
+/// Handle download command in manga mode: download chapter pages to disk.
+/// </summary>
+static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+{
+    var queryParts = new List<string>();
+    string? chaptersArg = null;
+    float? singleChapter = null;
+    int? preferredIndex = null;
+    var nonInteractive = false;
+    string? outputDir = null;
+
+    for (var i = 1; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if ((arg.Equals("--chapter", StringComparison.OrdinalIgnoreCase) || arg.Equals("--chapters", StringComparison.OrdinalIgnoreCase)) && i + 1 < args.Length)
+        {
+            var value = args[i + 1];
+            if (value.Contains('-') || value.Equals("all", StringComparison.OrdinalIgnoreCase))
+            {
+                chaptersArg = value;
+            }
+            else if (float.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+            {
+                singleChapter = parsed;
+            }
+            else
+            {
+                chaptersArg = value;
+            }
+            i++;
+            continue;
+        }
+
+        if (arg.Equals("--index", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            if (int.TryParse(args[i + 1], out var idx) && idx >= 1)
+            {
+                preferredIndex = idx;
+                i++;
+                continue;
+            }
+            logger.LogWarning("--index must be a positive integer.");
+            return 1;
+        }
+
+        if (arg.Equals("--dir", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            outputDir = args[++i];
+            continue;
+        }
+
+        if (arg.Equals("--non-interactive", StringComparison.OrdinalIgnoreCase))
+        {
+            nonInteractive = true;
+            continue;
+        }
+
+        queryParts.Add(arg);
+    }
+
+    if (queryParts.Count == 0)
+    {
+        logger.LogWarning("download command is missing a search query.");
+        WriteColoredLine("Usage: koware download <query> [--chapter <n|n-m|all>] [--dir <path>] [--index <n>] [--non-interactive]", ConsoleColor.Cyan);
+        return 1;
+    }
+
+    var query = string.Join(' ', queryParts).Trim();
+    var mangaCatalog = services.GetRequiredService<IMangaCatalog>();
+
+    // Search for manga
+    var searchStep = ConsoleStep.Start("Searching manga");
+    var results = await mangaCatalog.SearchAsync(query, cancellationToken);
+    searchStep.Succeed($"Found {results.Count} result(s)");
+
+    if (results.Count == 0)
+    {
+        logger.LogWarning("No manga found for query: {Query}", query);
+        return 1;
+    }
+
+    // Select manga
+    Manga selectedManga;
+    if (preferredIndex.HasValue)
+    {
+        var idx = preferredIndex.Value - 1;
+        if (idx < 0 || idx >= results.Count)
+        {
+            logger.LogWarning("Index {Index} is out of range (1-{Count}).", preferredIndex.Value, results.Count);
+            return 1;
+        }
+        selectedManga = results.ElementAt(idx);
+    }
+    else if (results.Count == 1 || nonInteractive)
+    {
+        selectedManga = results.First();
+    }
+    else
+    {
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Magenta;
+        Console.WriteLine($"Found {results.Count} manga for \"{query}\":");
+        Console.ResetColor();
+        var i = 1;
+        foreach (var m in results.Take(10))
+        {
+            Console.WriteLine($"  {i++}. {m.Title}");
+        }
+        Console.Write("Select manga (1-{0}): ", Math.Min(results.Count, 10));
+        var input = Console.ReadLine();
+        if (!int.TryParse(input, out var selected) || selected < 1 || selected > Math.Min(results.Count, 10))
+        {
+            logger.LogWarning("Invalid selection.");
+            return 1;
+        }
+        selectedManga = results.ElementAt(selected - 1);
+    }
+
+    logger.LogInformation("Selected: {Title}", selectedManga.Title);
+
+    // Fetch chapters
+    var chaptersStep = ConsoleStep.Start("Fetching chapters");
+    var chapters = await mangaCatalog.GetChaptersAsync(selectedManga, cancellationToken);
+    chaptersStep.Succeed($"Found {chapters.Count} chapter(s)");
+
+    if (chapters.Count == 0)
+    {
+        logger.LogWarning("No chapters found for {Title}.", selectedManga.Title);
+        return 1;
+    }
+
+    // Determine which chapters to download
+    var orderedChapters = chapters.OrderBy(c => c.Number).ToList();
+    var targetChapters = new List<Chapter>();
+
+    if (singleChapter.HasValue)
+    {
+        var ch = orderedChapters.FirstOrDefault(c => Math.Abs(c.Number - singleChapter.Value) < 0.001f)
+                 ?? orderedChapters.FirstOrDefault(c => (int)c.Number == (int)singleChapter.Value);
+        if (ch is null)
+        {
+            logger.LogWarning("Chapter {Chapter} not found.", singleChapter.Value);
+            return 1;
+        }
+        targetChapters.Add(ch);
+    }
+    else if (!string.IsNullOrWhiteSpace(chaptersArg))
+    {
+        if (chaptersArg.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            targetChapters.AddRange(orderedChapters);
+        }
+        else if (chaptersArg.Contains('-'))
+        {
+            var parts = chaptersArg.Split('-');
+            if (parts.Length == 2 &&
+                float.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var from) &&
+                float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var to))
+            {
+                targetChapters.AddRange(orderedChapters.Where(c => c.Number >= from && c.Number <= to));
+            }
+        }
+    }
+    else
+    {
+        // Interactive selection
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"Available chapters: {orderedChapters.First().Number} - {orderedChapters.Last().Number} ({chapters.Count} total)");
+        Console.ResetColor();
+        Console.Write("Enter chapter(s) to download (e.g., 1, 1-10, all): ");
+        var input = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            logger.LogInformation("Download cancelled.");
+            return 0;
+        }
+
+        if (input.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            targetChapters.AddRange(orderedChapters);
+        }
+        else if (input.Contains('-'))
+        {
+            var parts = input.Split('-');
+            if (parts.Length == 2 &&
+                float.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var from) &&
+                float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var to))
+            {
+                targetChapters.AddRange(orderedChapters.Where(c => c.Number >= from && c.Number <= to));
+            }
+        }
+        else if (float.TryParse(input, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var num))
+        {
+            var ch = orderedChapters.FirstOrDefault(c => Math.Abs(c.Number - num) < 0.001f)
+                     ?? orderedChapters.FirstOrDefault(c => (int)c.Number == (int)num);
+            if (ch is not null)
+            {
+                targetChapters.Add(ch);
+            }
+        }
+    }
+
+    if (targetChapters.Count == 0)
+    {
+        logger.LogWarning("No chapters match the requested selection.");
+        return 1;
+    }
+
+    // Prepare output directory
+    var sanitizedTitle = SanitizeFileName(selectedManga.Title);
+    var targetDir = string.IsNullOrWhiteSpace(outputDir)
+        ? Path.Combine(Environment.CurrentDirectory, sanitizedTitle)
+        : Path.Combine(outputDir, sanitizedTitle);
+    Directory.CreateDirectory(targetDir);
+
+    var allMangaOptions = services.GetService<IOptions<AllMangaOptions>>()?.Value;
+    using var httpClient = new HttpClient();
+    if (!string.IsNullOrWhiteSpace(allMangaOptions?.UserAgent))
+    {
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(allMangaOptions.UserAgent);
+    }
+    if (!string.IsNullOrWhiteSpace(allMangaOptions?.Referer))
+    {
+        httpClient.DefaultRequestHeaders.Referrer = new Uri(allMangaOptions.Referer);
+    }
+
+    logger.LogInformation("Downloading {Count} chapter(s) to {Dir}", targetChapters.Count, targetDir);
+
+    var total = targetChapters.Count;
+    var index = 0;
+
+    foreach (var chapter in targetChapters)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        index++;
+
+        var chapterDir = Path.Combine(targetDir, $"Chapter_{chapter.Number:000}");
+        Directory.CreateDirectory(chapterDir);
+
+        var stepLabel = $"[{index}/{total}] Chapter {chapter.Number}";
+        var step = ConsoleStep.Start(stepLabel);
+
+        try
+        {
+            var pages = await mangaCatalog.GetPagesAsync(chapter, cancellationToken);
+            var pageIndex = 0;
+            foreach (var page in pages.OrderBy(p => p.PageNumber))
+            {
+                pageIndex++;
+                var ext = GetImageExtension(page.ImageUrl.ToString());
+                var fileName = $"{page.PageNumber:000}{ext}";
+                var filePath = Path.Combine(chapterDir, fileName);
+
+                if (File.Exists(filePath))
+                {
+                    continue; // Skip if already downloaded
+                }
+
+                var imageBytes = await httpClient.GetByteArrayAsync(page.ImageUrl, cancellationToken);
+                await File.WriteAllBytesAsync(filePath, imageBytes, cancellationToken);
+            }
+
+            step.Succeed($"Chapter {chapter.Number} ({pages.Count} pages)");
+        }
+        catch (Exception ex)
+        {
+            step.Fail($"Failed: {ex.Message}");
+            logger.LogWarning("Failed to download chapter {Chapter}: {Error}", chapter.Number, ex.Message);
+        }
+    }
+
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine($"Download complete. Saved to \"{targetDir}\".");
+    Console.ResetColor();
+
+    return 0;
+}
+
+/// <summary>
+/// Get the image file extension from a URL.
+/// </summary>
+static string GetImageExtension(string url)
+{
+    var uri = new Uri(url);
+    var path = uri.AbsolutePath;
+    var ext = Path.GetExtension(path);
+    if (string.IsNullOrWhiteSpace(ext) || ext.Length > 5)
+    {
+        return ".jpg"; // Default to jpg
+    }
+    return ext;
+}
+
+/// <summary>
+/// Sanitize a string for use as a file/directory name.
+/// </summary>
+static string SanitizeFileName(string name)
+{
+    var invalid = Path.GetInvalidFileNameChars();
+    var sanitized = new string(name.Where(c => !invalid.Contains(c)).ToArray());
+    return string.IsNullOrWhiteSpace(sanitized) ? "download" : sanitized.Trim();
 }
 
 /// <summary>
@@ -3511,7 +3826,7 @@ static int HandleHelp(string[] args)
         PrintUsage();
         Console.WriteLine();
         Console.WriteLine("For detailed help: koware help <command>");
-        Console.WriteLine("Commands: search, stream, watch, play, download, last, continue, history, list, config, provider, doctor, update");
+        Console.WriteLine("Commands: search, stream, watch, play, download, read, last, continue, history, list, config, mode, provider, doctor, update");
         return 0;
     }
 
@@ -3519,8 +3834,9 @@ static int HandleHelp(string[] args)
     switch (topic)
     {
         case "search":
-            PrintTopicHeader("search", "Find anime and show a numbered list of matches.");
+            PrintTopicHeader("search", "Find anime or manga and show a numbered list of matches.");
             Console.WriteLine("Usage: koware search <query>");
+            Console.WriteLine("Mode : searches anime or manga based on current mode (use 'koware mode' to switch).");
             Console.WriteLine("Tips : use quotes for multi-word queries (e.g., \"demon slayer\").");
             break;
         case "stream":
@@ -3537,11 +3853,13 @@ static int HandleHelp(string[] args)
             Console.WriteLine("Example: koware watch \"one piece\" --episode 1010 --quality 1080p");
             break;
         case "download":
-            PrintTopicHeader("download", "Download episodes or full shows to files on disk.");
-            Console.WriteLine("Usage: koware download <query> [--episode <n> | --episodes <n-m|all>] [--quality <label>] [--index <match>] [--dir <path>] [--non-interactive]");
+            PrintTopicHeader("download", "Download episodes or chapters to files on disk.");
+            Console.WriteLine("Usage (anime): koware download <query> [--episode <n> | --episodes <n-m|all>] [--quality <label>] [--index <match>] [--dir <path>]");
+            Console.WriteLine("Usage (manga): koware download <query> [--chapter <n|n-m|all>] [--index <match>] [--dir <path>]");
+            Console.WriteLine("Mode : downloads episodes or chapters based on current mode.");
             Console.WriteLine("Examples:");
             Console.WriteLine("  koware download \"one piece\" --episodes 1-12 --quality 1080p");
-            Console.WriteLine("  koware download \"demon slayer\" --episodes all --dir \"C:\\Anime\\Demon Slayer\"");
+            Console.WriteLine("  koware download \"chainsaw man\" --chapter 1-10  (manga mode)");
             break;
         case "read":
             PrintTopicHeader("read", "Search for manga and read chapters in the Koware reader.");
@@ -3552,25 +3870,29 @@ static int HandleHelp(string[] args)
             Console.WriteLine("Behavior: searches allmanga.to, fetches chapter pages, and launches the reader.");
             break;
         case "last":
-            PrintTopicHeader("last", "Show or replay the most recent watched entry.");
+            PrintTopicHeader("last", "Show the most recent watched/read entry.");
             Console.WriteLine("Usage: koware last [--play] [--json]");
-            Console.WriteLine("Flags: --play launches the last stream; --json prints structured data.");
+            Console.WriteLine("Mode : shows last watched anime or last read manga based on current mode.");
+            Console.WriteLine("Flags: --play launches the last stream (anime mode); --json prints structured data.");
             break;
         case "continue":
-            PrintTopicHeader("continue", "Resume from history (fuzzy match by title) and play the next episode.");
-            Console.WriteLine("Usage: koware continue [<anime name>] [--from <episode>] [--quality <label>]");
+            PrintTopicHeader("continue", "Resume from history and play/read the next episode/chapter.");
+            Console.WriteLine("Usage (anime): koware continue [<anime name>] [--from <episode>] [--quality <label>]");
+            Console.WriteLine("Usage (manga): koware continue [<manga name>] [--from <chapter>]");
+            Console.WriteLine("Mode : continues anime or manga based on current mode.");
             Console.WriteLine("Behavior:");
-            Console.WriteLine("  • No name: resumes the most recent entry and advances to the next episode.");
-            Console.WriteLine("  • With name: fuzzy-matches history by title (case-insensitive contains) and resumes that show.");
+            Console.WriteLine("  • No name: resumes the most recent entry and advances to the next episode/chapter.");
+            Console.WriteLine("  • With name: fuzzy-matches history by title and resumes that show/manga.");
             Console.WriteLine("  • --from overrides the episode number; --quality overrides quality (else defaults/history).");
             break;
         case "history":
-            PrintTopicHeader("history", "Browse and filter watch history (and replay entries).");
-            Console.WriteLine("Usage: koware history [search <query>] [--anime <query>] [--limit <n>] [--after <ISO>] [--before <ISO>] [--from <ep>] [--to <ep>] [--json] [--stats] [--play <n>] [--next]");
+            PrintTopicHeader("history", "Browse and filter watch/read history.");
+            Console.WriteLine("Usage: koware history [search <query>] [--anime/--manga <query>] [--limit <n>] [--after <ISO>] [--before <ISO>] [--from <ep>] [--to <ep>] [--json] [--stats]");
+            Console.WriteLine("Mode : shows watch history (anime) or read history (manga) based on current mode.");
             Console.WriteLine("Notes:");
-            Console.WriteLine("  • search <query> or --anime <query> filters titles (case-insensitive contains).");
-            Console.WriteLine("  • --play <n> plays the nth item in the shown list; --next plays next episode of the first match.");
-            Console.WriteLine("  • --stats shows counts per anime instead of entries.");
+            Console.WriteLine("  • search <query> or --anime/--manga <query> filters titles.");
+            Console.WriteLine("  • --play <n> plays the nth item (anime mode); --next plays next episode.");
+            Console.WriteLine("  • --stats shows counts per anime/manga.");
             break;
         case "config":
             PrintTopicHeader("config", "Persist preferred defaults to appsettings.user.json.");
