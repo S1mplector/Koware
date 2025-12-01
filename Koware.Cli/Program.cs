@@ -12,8 +12,10 @@ using Koware.Application.DependencyInjection;
 using Koware.Application.Models;
 using Koware.Application.UseCases;
 using Koware.Domain.Models;
+using Koware.Application.Abstractions;
 using Koware.Infrastructure.DependencyInjection;
 using Koware.Infrastructure.Configuration;
+using Koware.Infrastructure.Scraping;
 using Koware.Cli.Configuration;
 using Koware.Cli.History;
 using Koware.Cli.Console;
@@ -46,6 +48,7 @@ static IHost BuildHost(string[] args)
     builder.Services.AddApplication();
     builder.Services.AddInfrastructure(builder.Configuration);
     builder.Services.Configure<PlayerOptions>(builder.Configuration.GetSection("Player"));
+    builder.Services.Configure<ReaderOptions>(builder.Configuration.GetSection("Reader"));
     builder.Services.Configure<DefaultCliOptions>(builder.Configuration.GetSection("Defaults"));
     builder.Services.AddSingleton<IWatchHistoryStore, SqliteWatchHistoryStore>();
     builder.Services.AddSingleton<IAnimeListStore, SqliteAnimeListStore>();
@@ -107,6 +110,8 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandlePlayAsync(orchestrator, args, services, logger, defaults, cts.Token);
             case "download":
                 return await HandleDownloadAsync(orchestrator, args, services, logger, defaults, cts.Token);
+            case "read":
+                return await HandleReadAsync(args, services, logger, cts.Token);
             case "last":
                 return await HandleLastAsync(args, services, logger, cts.Token);
             case "continue":
@@ -1699,6 +1704,314 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
 }
 
 /// <summary>
+/// Implement the <c>koware read</c> command: search manga, fetch chapter pages, and launch the reader.
+/// </summary>
+/// <param name="args">CLI arguments; query, --chapter, --index, --non-interactive.</param>
+/// <param name="services">Service provider for manga catalog and reader options.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Exit code: 0 on success.</returns>
+static async Task<int> HandleReadAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+{
+    var queryParts = new List<string>();
+    float? chapterNumber = null;
+    int? preferredIndex = null;
+    var nonInteractive = false;
+
+    for (var i = 1; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if (arg.Equals("--chapter", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            if (float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+            {
+                chapterNumber = parsed;
+                i++;
+                continue;
+            }
+            logger.LogWarning("Chapter number must be a number.");
+            return 1;
+        }
+
+        if (arg.Equals("--index", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            if (int.TryParse(args[i + 1], out var idx) && idx >= 1)
+            {
+                preferredIndex = idx;
+                i++;
+                continue;
+            }
+            logger.LogWarning("--index must be a positive integer.");
+            return 1;
+        }
+
+        if (arg.Equals("--non-interactive", StringComparison.OrdinalIgnoreCase))
+        {
+            nonInteractive = true;
+            continue;
+        }
+
+        queryParts.Add(arg);
+    }
+
+    if (queryParts.Count == 0)
+    {
+        logger.LogWarning("read command is missing a search query.");
+        WriteColoredLine("Usage: koware read <query> [--chapter <n>] [--index <n>] [--non-interactive]", ConsoleColor.Cyan);
+        WriteColoredLine("Example: koware read \"one piece\" --chapter 1", ConsoleColor.Green);
+        return 1;
+    }
+
+    var query = string.Join(' ', queryParts).Trim();
+    var mangaCatalog = services.GetRequiredService<IMangaCatalog>();
+
+    // Search for manga
+    var searchStep = ConsoleStep.Start("Searching manga");
+    IReadOnlyCollection<Manga> results;
+    try
+    {
+        results = await mangaCatalog.SearchAsync(query, cancellationToken);
+        searchStep.Succeed($"Found {results.Count} result(s)");
+    }
+    catch (Exception)
+    {
+        searchStep.Fail("Search failed");
+        throw;
+    }
+
+    if (results.Count == 0)
+    {
+        logger.LogWarning("No manga found for query: {Query}", query);
+        return 1;
+    }
+
+    // Select manga
+    Manga selectedManga;
+    if (preferredIndex.HasValue)
+    {
+        var idx = preferredIndex.Value - 1;
+        if (idx < 0 || idx >= results.Count)
+        {
+            logger.LogWarning("Index {Index} is out of range (1-{Count}).", preferredIndex.Value, results.Count);
+            return 1;
+        }
+        selectedManga = results.ElementAt(idx);
+    }
+    else if (results.Count == 1 || nonInteractive)
+    {
+        selectedManga = results.First();
+    }
+    else
+    {
+        // Interactive selection
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"Found {results.Count} manga for \"{query}\":");
+        Console.ResetColor();
+        var idx = 1;
+        foreach (var m in results.Take(10))
+        {
+            Console.WriteLine($"  {idx++}. {m.Title}");
+        }
+        if (results.Count > 10)
+        {
+            Console.WriteLine($"  ... and {results.Count - 10} more");
+        }
+        Console.Write("Select manga (1-{0}): ", Math.Min(results.Count, 10));
+        var input = Console.ReadLine();
+        if (!int.TryParse(input, out var selected) || selected < 1 || selected > Math.Min(results.Count, 10))
+        {
+            logger.LogWarning("Invalid selection.");
+            return 1;
+        }
+        selectedManga = results.ElementAt(selected - 1);
+    }
+
+    logger.LogInformation("Selected: {Title}", selectedManga.Title);
+
+    // Fetch chapters
+    var chaptersStep = ConsoleStep.Start("Fetching chapters");
+    IReadOnlyCollection<Chapter> chapters;
+    try
+    {
+        chapters = await mangaCatalog.GetChaptersAsync(selectedManga, cancellationToken);
+        chaptersStep.Succeed($"Found {chapters.Count} chapter(s)");
+    }
+    catch (Exception)
+    {
+        chaptersStep.Fail("Failed to fetch chapters");
+        throw;
+    }
+
+    if (chapters.Count == 0)
+    {
+        logger.LogWarning("No chapters found for {Title}.", selectedManga.Title);
+        return 1;
+    }
+
+    // Select chapter
+    Chapter selectedChapter;
+    if (chapterNumber.HasValue)
+    {
+        selectedChapter = chapters.FirstOrDefault(c => Math.Abs(c.Number - chapterNumber.Value) < 0.001f)
+                          ?? chapters.FirstOrDefault(c => (int)c.Number == (int)chapterNumber.Value)!;
+        if (selectedChapter is null)
+        {
+            logger.LogWarning("Chapter {Chapter} not found. Available: {Min}-{Max}", chapterNumber.Value, chapters.Min(c => c.Number), chapters.Max(c => c.Number));
+            return 1;
+        }
+    }
+    else if (nonInteractive)
+    {
+        selectedChapter = chapters.First();
+    }
+    else
+    {
+        // Interactive chapter selection
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"Available chapters: {chapters.Min(c => c.Number)} - {chapters.Max(c => c.Number)} ({chapters.Count} total)");
+        Console.ResetColor();
+        Console.Write("Enter chapter number: ");
+        var input = Console.ReadLine();
+        if (!float.TryParse(input, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var num))
+        {
+            logger.LogWarning("Invalid chapter number.");
+            return 1;
+        }
+        selectedChapter = chapters.FirstOrDefault(c => Math.Abs(c.Number - num) < 0.001f)
+                          ?? chapters.FirstOrDefault(c => (int)c.Number == (int)num)!;
+        if (selectedChapter is null)
+        {
+            logger.LogWarning("Chapter {Chapter} not found.", num);
+            return 1;
+        }
+    }
+
+    logger.LogInformation("Reading: {Title} - Chapter {Chapter}", selectedManga.Title, selectedChapter.Number);
+
+    // Fetch pages
+    var pagesStep = ConsoleStep.Start("Fetching pages");
+    IReadOnlyCollection<ChapterPage> pages;
+    try
+    {
+        pages = await mangaCatalog.GetPagesAsync(selectedChapter, cancellationToken);
+        pagesStep.Succeed($"Loaded {pages.Count} page(s)");
+    }
+    catch (Exception)
+    {
+        pagesStep.Fail("Failed to fetch pages");
+        throw;
+    }
+
+    if (pages.Count == 0)
+    {
+        logger.LogWarning("No pages found for chapter {Chapter}.", selectedChapter.Number);
+        return 1;
+    }
+
+    // Launch reader
+    var readerOptions = services.GetRequiredService<IOptions<ReaderOptions>>().Value;
+    var allMangaOptions = services.GetService<IOptions<AllMangaOptions>>()?.Value;
+    var displayTitle = $"{selectedManga.Title} - Chapter {selectedChapter.Number}";
+
+    return LaunchReader(readerOptions, pages, logger, allMangaOptions?.Referer, allMangaOptions?.UserAgent, displayTitle);
+}
+
+/// <summary>
+/// Launch the manga reader with the given pages.
+/// </summary>
+/// <param name="options">Reader options from configuration.</param>
+/// <param name="pages">Chapter pages to display.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="httpReferrer">Optional HTTP Referer header.</param>
+/// <param name="httpUserAgent">Optional User-Agent header.</param>
+/// <param name="displayTitle">Window title for the reader.</param>
+/// <returns>Exit code from the reader process.</returns>
+static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> pages, ILogger logger, string? httpReferrer, string? httpUserAgent, string? displayTitle)
+{
+    var readerPath = ResolveReaderExecutable(options);
+    if (readerPath is null)
+    {
+        logger.LogError("No supported reader found. Build Koware.Reader.Win or set Reader:Command in appsettings.json.");
+        return 1;
+    }
+
+    // Build pages JSON
+    var pagesData = pages.Select(p => new { url = p.ImageUrl.ToString(), pageNumber = p.PageNumber }).ToArray();
+    var pagesJson = JsonSerializer.Serialize(pagesData);
+
+    var start = new ProcessStartInfo
+    {
+        FileName = readerPath,
+        UseShellExecute = false
+    };
+
+    start.ArgumentList.Add(pagesJson);
+    start.ArgumentList.Add(string.IsNullOrWhiteSpace(displayTitle) ? "Koware Reader" : displayTitle!);
+
+    if (!string.IsNullOrWhiteSpace(httpReferrer))
+    {
+        start.ArgumentList.Add("--referer");
+        start.ArgumentList.Add(httpReferrer!);
+    }
+
+    if (!string.IsNullOrWhiteSpace(httpUserAgent))
+    {
+        start.ArgumentList.Add("--user-agent");
+        start.ArgumentList.Add(httpUserAgent!);
+    }
+
+    return StartProcessAndWait(logger, start, readerPath);
+}
+
+/// <summary>
+/// Resolve the reader executable path from options.
+/// </summary>
+/// <param name="options">Reader options.</param>
+/// <returns>Full path to reader executable, or null if not found.</returns>
+static string? ResolveReaderExecutable(ReaderOptions options)
+{
+    var command = options.Command;
+    if (string.IsNullOrWhiteSpace(command))
+    {
+        command = "Koware.Reader.Win.exe";
+    }
+
+    // Check if it's an absolute path
+    if (Path.IsPathRooted(command) && File.Exists(command))
+    {
+        return command;
+    }
+
+    // Check in app directory
+    var appDir = AppContext.BaseDirectory;
+    var candidates = new[]
+    {
+        Path.Combine(appDir, command),
+        Path.Combine(appDir, "Koware.Reader.Win.exe"),
+        Path.Combine(appDir, "Koware.Reader.Win", "Koware.Reader.Win.exe"),
+    };
+
+    foreach (var candidate in candidates)
+    {
+        if (File.Exists(candidate))
+        {
+            return candidate;
+        }
+    }
+
+    // Check PATH
+    var resolved = ResolveExecutablePath(command.Replace(".exe", string.Empty, StringComparison.OrdinalIgnoreCase));
+    if (!string.IsNullOrWhiteSpace(resolved))
+    {
+        return resolved;
+    }
+
+    return null;
+}
+
+/// <summary>
 /// Normalize parse errors into a friendly warning and usage hint for a given command.
 /// </summary>
 /// <param name="command">The command name that failed parsing.</param>
@@ -2799,12 +3112,14 @@ static void PrintUsage()
     WriteCommand("watch <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Pick a stream and play (alias: play).", ConsoleColor.Green);
     WriteCommand("play <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Same as watch.", ConsoleColor.Green);
     WriteCommand("download <query>", "Download episodes or full shows to disk.", ConsoleColor.Green);
+    WriteCommand("read <query> [--chapter <n>]", "Read manga chapters in the reader.", ConsoleColor.Green);
     WriteCommand("last [--play] [--json]", "Show or replay your most recent watch.", ConsoleColor.Yellow);
     WriteCommand("continue [<anime>] [--from <episode>] [--quality <label>]", "Resume from history (auto next episode).", ConsoleColor.Yellow);
     WriteCommand("history [options]", "Browse/search history; play entries or show stats.", ConsoleColor.Yellow);
     WriteCommand("list [subcommand]", "Track anime: add, update status, mark complete.", ConsoleColor.Yellow);
     WriteCommand("help [command]", "Show this guide or a command-specific help page.", ConsoleColor.Magenta);
     WriteCommand("config [options]", "Persist defaults (quality/index/player) to appsettings.user.json.", ConsoleColor.Magenta);
+    WriteCommand("provider [options]", "List or toggle providers.", ConsoleColor.Magenta);
     WriteCommand("doctor", "Check provider connectivity (DNS/HTTP).", ConsoleColor.Magenta);
     WriteCommand("provider [options]", "List/enable/disable providers.", ConsoleColor.Magenta);
     WriteCommand("update", "Download and launch the latest Koware installer.", ConsoleColor.Magenta);
@@ -2856,6 +3171,14 @@ static int HandleHelp(string[] args)
             Console.WriteLine("Examples:");
             Console.WriteLine("  koware download \"one piece\" --episodes 1-12 --quality 1080p");
             Console.WriteLine("  koware download \"demon slayer\" --episodes all --dir \"C:\\Anime\\Demon Slayer\"");
+            break;
+        case "read":
+            PrintTopicHeader("read", "Search for manga and read chapters in the Koware reader.");
+            Console.WriteLine("Usage: koware read <query> [--chapter <n>] [--index <match>] [--non-interactive]");
+            Console.WriteLine("Examples:");
+            Console.WriteLine("  koware read \"one piece\" --chapter 1");
+            Console.WriteLine("  koware read \"chainsaw man\" --index 1 --chapter 10");
+            Console.WriteLine("Behavior: searches allmanga.to, fetches chapter pages, and launches the reader.");
             break;
         case "last":
             PrintTopicHeader("last", "Show or replay the most recent watched entry.");
