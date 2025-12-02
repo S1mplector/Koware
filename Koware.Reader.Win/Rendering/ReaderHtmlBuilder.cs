@@ -418,10 +418,10 @@ internal static class ReaderHtmlBuilder
     <header id="header">
         <div id="title">{{TITLE}}</div>
         <div class="controls">
-            <button class="btn btn-sm" id="rtl-btn" type="button" title="Right-to-Left reading">RTL</button>
-            <button class="btn btn-sm" id="double-btn" type="button" title="Double page spread">2-Page</button>
+            <button class="btn btn-sm" id="rtl-btn" type="button" title="Right-to-Left reading">RTL <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 4H10c-2.76 0-5 2.24-5 5s2.24 5 5 5h1M7 14l-4 4 4 4"/><path d="M17 4v16"/></svg></button>
+            <button class="btn btn-sm" id="double-btn" type="button" title="Double page spread">2-Page <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H12V3H6.5A2.5 2.5 0 0 0 4 5.5v14z"/><path d="M20 19.5A2.5 2.5 0 0 0 17.5 17H12V3h5.5A2.5 2.5 0 0 1 20 5.5v14z"/></svg></button>
             <div class="dropdown" id="fit-dropdown">
-                <button class="btn btn-sm" id="fit-btn" type="button">Fit Width</button>
+                <button class="btn btn-sm" id="fit-btn" type="button">Fit Width <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12H3M21 12l-4-4m4 4l-4 4M3 12l4-4m-4 4l4 4"/></svg></button>
                 <div class="dropdown-menu">
                     <button class="dropdown-item active" data-fit="width">Fit Width</button>
                     <button class="dropdown-item" data-fit="height">Fit Height</button>
@@ -429,7 +429,7 @@ internal static class ReaderHtmlBuilder
                 </div>
             </div>
             <div class="dropdown" id="zoom-dropdown">
-                <button class="btn btn-sm" id="zoom-btn" type="button">100%</button>
+                <button class="btn btn-sm" id="zoom-btn" type="button">100% <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg></button>
                 <div class="dropdown-menu">
                     <button class="dropdown-item active" data-zoom="100">100%</button>
                     <button class="dropdown-item" data-zoom="125">125%</button>
@@ -438,7 +438,7 @@ internal static class ReaderHtmlBuilder
                     <button class="dropdown-item" data-zoom="200">200%</button>
                 </div>
             </div>
-            <button class="btn btn-sm" id="mode-btn" type="button">Scroll</button>
+            <button class="btn btn-sm" id="mode-btn" type="button">Scroll <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M12 3l4 4M12 3L8 7M12 21l4-4M12 21l-4-4"/></svg></button>
         </div>
     </header>
     <main id="reader" class="fit-width" data-zoom="100">
@@ -630,10 +630,13 @@ internal static class ReaderHtmlBuilder
             }
         }
 
+        const scrollIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M12 3l4 4M12 3L8 7M12 21l4-4M12 21l-4-4"/></svg>';
+        const pageIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>';
+
         function toggleMode() {
             singlePageMode = !singlePageMode;
             reader.classList.toggle("single-page", singlePageMode);
-            modeBtn.textContent = singlePageMode ? "Page" : "Scroll";
+            modeBtn.innerHTML = singlePageMode ? "Page " + pageIcon : "Scroll " + scrollIcon;
             
             if (singlePageMode) {
                 reader.scrollTop = 0;
@@ -662,6 +665,11 @@ internal static class ReaderHtmlBuilder
             persistPrefs();
         }
 
+        const fitWidthIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12H3M21 12l-4-4m4 4l-4 4M3 12l4-4m-4 4l4 4"/></svg>';
+        const fitHeightIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M12 3l-4 4m4-4l4 4M12 21l-4-4m4 4l4-4"/></svg>';
+        const originalIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="3"/></svg>';
+        const zoomIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg>';
+
         function setFit(fit) {
             currentFit = fit;
             reader.className = reader.className.replace(/fit-\w+/g, "");
@@ -670,7 +678,9 @@ internal static class ReaderHtmlBuilder
             if (rtlMode) reader.classList.add("rtl");
             if (doublePageMode) reader.classList.add("double-page");
             
-            fitBtn.textContent = fit === "width" ? "Fit Width" : fit === "height" ? "Fit Height" : "Original";
+            const fitText = fit === "width" ? "Fit Width" : fit === "height" ? "Fit Height" : "Original";
+            const fitIcon = fit === "width" ? fitWidthIcon : fit === "height" ? fitHeightIcon : originalIcon;
+            fitBtn.innerHTML = fitText + " " + fitIcon;
             
             fitDropdown.querySelectorAll(".dropdown-item").forEach(item => {
                 item.classList.toggle("active", item.dataset.fit === fit);
@@ -683,7 +693,7 @@ internal static class ReaderHtmlBuilder
         function setZoom(zoom) {
             currentZoom = parseInt(zoom, 10);
             reader.dataset.zoom = currentZoom;
-            zoomBtn.textContent = `${currentZoom}%`;
+            zoomBtn.innerHTML = `${currentZoom}% ` + zoomIcon;
             
             zoomDropdown.querySelectorAll(".dropdown-item").forEach(item => {
                 item.classList.toggle("active", item.dataset.zoom === String(currentZoom));
