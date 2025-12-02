@@ -22,9 +22,20 @@ public sealed class GogoAnimeCatalog : IAnimeCatalog
         _logger = logger;
     }
 
+    /// <summary>
+    /// Returns true if this provider is properly configured.
+    /// </summary>
+    public bool IsConfigured => _options.IsConfigured;
+
     public async Task<IReadOnlyCollection<Anime>> SearchAsync(string query, CancellationToken cancellationToken = default)
     {
-        var url = $"{_options.ApiBase.TrimEnd('/')}/anime/gogoanime/{Uri.EscapeDataString(query)}?page=1";
+        if (!_options.IsConfigured)
+        {
+            _logger.LogWarning("GogoAnime source not configured. Add configuration to ~/.config/koware/appsettings.user.json");
+            return Array.Empty<Anime>();
+        }
+
+        var url = $"{_options.ApiBase!.TrimEnd('/')}/anime/gogoanime/{Uri.EscapeDataString(query)}?page=1";
         try
         {
             using var response = await _httpClient.GetAsync(url, cancellationToken);
@@ -73,7 +84,7 @@ public sealed class GogoAnimeCatalog : IAnimeCatalog
             throw new InvalidOperationException("GogoAnimeCatalog can only handle gogo-prefixed anime ids.");
         }
 
-        var url = $"{_options.ApiBase.TrimEnd('/')}/anime/gogoanime/info/{Uri.EscapeDataString(id)}";
+        var url = $"{_options.ApiBase!.TrimEnd('/')}/anime/gogoanime/info/{Uri.EscapeDataString(id)}";
         using var response = await _httpClient.GetAsync(url, cancellationToken);
         response.EnsureSuccessStatusCode();
 
@@ -106,7 +117,7 @@ public sealed class GogoAnimeCatalog : IAnimeCatalog
             throw new InvalidOperationException("GogoAnimeCatalog can only handle gogo-prefixed episode ids.");
         }
 
-        var url = $"{_options.ApiBase.TrimEnd('/')}/anime/gogoanime/watch/{Uri.EscapeDataString(id)}";
+        var url = $"{_options.ApiBase!.TrimEnd('/')}/anime/gogoanime/watch/{Uri.EscapeDataString(id)}";
         using var response = await _httpClient.GetAsync(url, cancellationToken);
         response.EnsureSuccessStatusCode();
 
@@ -168,7 +179,7 @@ public sealed class GogoAnimeCatalog : IAnimeCatalog
 
     private Uri BuildSiteUrl(string path)
     {
-        var trimmed = path.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? path : _options.SiteBase.TrimEnd('/') + path;
+        var trimmed = path.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? path : _options.SiteBase!.TrimEnd('/') + path;
         return new Uri(trimmed);
     }
 

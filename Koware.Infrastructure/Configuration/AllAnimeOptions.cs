@@ -4,12 +4,29 @@ namespace Koware.Infrastructure.Configuration;
 
 public sealed class AllAnimeOptions
 {
-    public string BaseHost { get; set; } = "allanime.day";
+    /// <summary>
+    /// Whether this source is enabled. Sources without configuration are disabled.
+    /// </summary>
+    public bool Enabled { get; set; } = false;
 
-    public string ApiBase { get; set; } = "https://api.allanime.day";
+    /// <summary>
+    /// Base hostname for the provider (user must configure).
+    /// </summary>
+    public string? BaseHost { get; set; }
 
-    public string Referer { get; set; } = "https://allmanga.to";
+    /// <summary>
+    /// API base URL (user must configure).
+    /// </summary>
+    public string? ApiBase { get; set; }
 
+    /// <summary>
+    /// HTTP Referer header value (user must configure).
+    /// </summary>
+    public string? Referer { get; set; }
+
+    /// <summary>
+    /// User-Agent string for requests.
+    /// </summary>
     public string UserAgent { get; set; } = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0";
 
     /// <summary>
@@ -21,4 +38,12 @@ public sealed class AllAnimeOptions
     /// Maximum search results returned.
     /// </summary>
     public int SearchLimit { get; set; } = 20;
+
+    /// <summary>
+    /// Returns true if the source has valid configuration.
+    /// </summary>
+    public bool IsConfigured => Enabled && 
+        !string.IsNullOrWhiteSpace(BaseHost) && 
+        !string.IsNullOrWhiteSpace(ApiBase) && 
+        !string.IsNullOrWhiteSpace(Referer);
 }

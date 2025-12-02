@@ -34,8 +34,19 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         _logger = logger;
     }
 
+    /// <summary>
+    /// Returns true if this provider is properly configured.
+    /// </summary>
+    public bool IsConfigured => _options.IsConfigured;
+
     public async Task<IReadOnlyCollection<Anime>> SearchAsync(string query, CancellationToken cancellationToken = default)
     {
+        if (!_options.IsConfigured)
+        {
+            _logger.LogWarning("AllAnime source not configured. Add configuration to ~/.config/koware/appsettings.user.json");
+            return Array.Empty<Anime>();
+        }
+
         var gql = "query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name availableEpisodes __typename } }}";
         var variables = new
         {

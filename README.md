@@ -4,22 +4,23 @@
 
 # Koware
 
-Koware is a Windows-native, console-first link/stream aggregator application that helps you **search for anime, pick an episode, and open streams in a player** from your terminal.
+Koware is a console-first link/stream aggregator for **Windows** and **macOS** that helps you search for anime/manga and open streams in a player from your terminal.
 
-It has a text-based user interface but behaves like a regular CLI. You run a command, Koware finds shows and episodes, and then opens the selected stream in a video player.
+It has a text-based user interface but behaves like a regular CLI. You run a command, Koware queries your configured sources, and opens the selected stream in a video player or manga in a reader.
+
+> **⚠️ Important:** Koware ships with **no pre-configured sources**. You must configure your own sources before using it. See [Source Configuration](#source-configuration) below.
 
 ---
 
 ## Features
 
-- **Search for anime** by title.
-- **Browse episodes** for a selected show.
-- **Open streams** in:
-  - The bundled Koware player (recommended for best compatibility), or
-  - External players such as **VLC** or **mpv** if you prefer.
-- **Keep watch history** locally in a small SQLite database.
+- **Search for anime/manga** by title
+- **Browse episodes/chapters** for a selected show
+- **Open streams** in IINA, mpv, VLC, or the bundled Koware player (Windows)
+- **Read manga** in browser (macOS) or bundled reader (Windows)
+- **Keep watch history** locally in a small SQLite database
 
-Koware does **NOT** host any media. It only helps you discover and open links that are already publicly available.
+Koware does **NOT** host any media. It does **NOT** include any source URLs. It only provides a framework for accessing user-configured sources.
 
 ---
 
@@ -156,6 +157,66 @@ Key settings:
 
 ---
 
+## Source Configuration
+
+**Koware ships with no pre-configured sources.** You must configure sources yourself before using the app.
+
+### Configuration File Location
+
+Create or edit the configuration file at:
+
+- **Windows**: `%APPDATA%\koware\appsettings.user.json`
+- **macOS/Linux**: `~/.config/koware/appsettings.user.json`
+
+### Example Configuration
+
+```json
+{
+  "AllAnime": {
+    "Enabled": true,
+    "BaseHost": "your-source-host.example",
+    "ApiBase": "https://api.your-source.example",
+    "Referer": "https://your-source.example",
+    "TranslationType": "sub"
+  },
+  "AllManga": {
+    "Enabled": true,
+    "BaseHost": "your-manga-host.example",
+    "ApiBase": "https://api.your-manga-source.example",
+    "Referer": "https://your-manga-source.example",
+    "TranslationType": "sub"
+  },
+  "GogoAnime": {
+    "Enabled": false,
+    "ApiBase": "https://api.your-alt-source.example",
+    "SiteBase": "https://your-alt-source.example"
+  }
+}
+```
+
+### Required Fields
+
+Each source requires:
+
+| Field | Description |
+|-------|-------------|
+| `Enabled` | Set to `true` to enable this source |
+| `BaseHost` | The hostname of the source |
+| `ApiBase` | The API endpoint URL |
+| `Referer` | The HTTP Referer header to use |
+
+### Finding Sources
+
+Koware does not provide or recommend specific sources. You must:
+
+1. Find compatible API endpoints yourself
+2. Ensure you have the legal right to access them
+3. Configure them in your `appsettings.user.json`
+
+**Note:** Without configured sources, Koware will display a warning and return no results.
+
+---
+
 ## Watch history
 
 Koware keeps a local watch history in a small SQLite database:
@@ -171,10 +232,31 @@ koware help history
 
 ## Usage & Legality
 
-- Koware is a locally hosted and operated tool that aggregates and presents links to content that is already publicly available on the internet. Koware strictly does NOT host or distribute media, and it does NOT include or support bypassing paywalls or DRM.
+### No Bundled Sources
 
-- Using Koware itself as a local link/stream aggregator is not, by itself, intended to be an infringing or illegal activity. However, whether your actual usage is lawful depends entirely on what you access and how you access it, as well as on the laws and website terms that apply to you. Koware does not turn unauthorized or infringing content into authorized content.
+**Koware ships with zero pre-configured sources.** The software is a framework that requires users to configure their own sources. This is similar to how a web browser does not include bookmarks—users add their own.
 
-- You are solely responsible for ensuring that your use of Koware complies with local laws, website terms of service, and third-party rights (for example, rights held by copyright owners and streaming platforms). Nothing in this project, its documentation, or its source code constitutes legal advice.
+### What Koware Does NOT Do
 
-- See `Usage-Notice.md` for more details.
+- ❌ Does NOT host, store, or distribute any media content
+- ❌ Does NOT include any pre-configured source URLs or streaming links
+- ❌ Does NOT include or support bypassing paywalls or DRM
+- ❌ Does NOT circumvent technical protection measures
+
+### User Responsibility
+
+You are solely responsible for:
+
+1. The sources you configure
+2. The content you access
+3. Ensuring compliance with your local laws
+4. Respecting the terms of service of any services you access
+
+**Koware does not turn unauthorized or infringing content into authorized content.**
+
+### Legal Documents
+
+- See [`Usage-Notice.md`](Usage-Notice.md) for the full usage notice
+- See [`DMCA.md`](DMCA.md) for our DMCA policy and takedown process
+
+*Nothing in this project, its documentation, or its source code constitutes legal advice.*

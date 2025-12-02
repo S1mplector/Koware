@@ -32,8 +32,19 @@ public sealed class AllMangaCatalog : IMangaCatalog
         _logger = logger;
     }
 
+    /// <summary>
+    /// Returns true if this provider is properly configured.
+    /// </summary>
+    public bool IsConfigured => _options.IsConfigured;
+
     public async Task<IReadOnlyCollection<Manga>> SearchAsync(string query, CancellationToken cancellationToken = default)
     {
+        if (!_options.IsConfigured)
+        {
+            _logger.LogWarning("AllManga source not configured. Add configuration to ~/.config/koware/appsettings.user.json");
+            return Array.Empty<Manga>();
+        }
+
         // Note: manga search does not use translationType parameter (unlike anime/shows)
         var gql = "query( $search: SearchInput $limit: Int $page: Int $countryOrigin: VaildCountryOriginEnumType ) { mangas( search: $search limit: $limit page: $page countryOrigin: $countryOrigin ) { edges { _id name englishName thumbnail description __typename } }}";
         var variables = new

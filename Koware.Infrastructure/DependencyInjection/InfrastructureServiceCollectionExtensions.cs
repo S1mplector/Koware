@@ -33,8 +33,15 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHttpClient<AllAnimeCatalog>((sp, client) =>
         {
             var options = sp.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
-            client.BaseAddress = new Uri(options.ApiBase);
-            client.DefaultRequestHeaders.Referrer = new Uri(options.Referer);
+            // Only configure if source is properly set up (user must provide config)
+            if (!string.IsNullOrWhiteSpace(options.ApiBase))
+            {
+                client.BaseAddress = new Uri(options.ApiBase);
+            }
+            if (!string.IsNullOrWhiteSpace(options.Referer))
+            {
+                client.DefaultRequestHeaders.Referrer = new Uri(options.Referer);
+            }
             client.DefaultRequestHeaders.UserAgent.ParseAdd(options.UserAgent);
             client.DefaultRequestHeaders.Accept.ParseAdd("application/json, */*");
             client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
@@ -48,7 +55,11 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHttpClient<GogoAnimeCatalog>((sp, client) =>
         {
             var options = sp.GetRequiredService<IOptions<GogoAnimeOptions>>().Value;
-            client.BaseAddress = new Uri(options.ApiBase);
+            // Only configure if source is properly set up (user must provide config)
+            if (!string.IsNullOrWhiteSpace(options.ApiBase))
+            {
+                client.BaseAddress = new Uri(options.ApiBase);
+            }
             client.DefaultRequestHeaders.UserAgent.ParseAdd(options.UserAgent);
             client.DefaultRequestHeaders.Accept.ParseAdd("application/json, */*");
         });
@@ -56,8 +67,15 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHttpClient<AllMangaCatalog>((sp, client) =>
         {
             var options = sp.GetRequiredService<IOptions<AllMangaOptions>>().Value;
-            client.BaseAddress = new Uri(options.ApiBase);
-            client.DefaultRequestHeaders.Referrer = new Uri(options.Referer);
+            // Only configure if source is properly set up (user must provide config)
+            if (!string.IsNullOrWhiteSpace(options.ApiBase))
+            {
+                client.BaseAddress = new Uri(options.ApiBase);
+            }
+            if (!string.IsNullOrWhiteSpace(options.Referer))
+            {
+                client.DefaultRequestHeaders.Referrer = new Uri(options.Referer);
+            }
             client.DefaultRequestHeaders.UserAgent.ParseAdd(options.UserAgent);
             client.DefaultRequestHeaders.Accept.ParseAdd("application/json, */*");
             client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
