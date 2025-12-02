@@ -132,7 +132,7 @@ public class DownloadPlannerTests
 
     [Theory]
     [InlineData("My Show", "Episode 1", 1, null, "My Show - Ep 001 - Episode 1.mp4")]
-    [InlineData("My/Show", "Episode: 1", 1, "1080p", "My_Show - Ep 001 - Episode_ 1 [1080p].mp4")]
+    [InlineData("My/Show", "Episode: 1", 1, "1080p", "My_Show - Ep 001 - Episode: 1 [1080p].mp4")]
     [InlineData("   ", "   ", 5, "720p", "untitled - Ep 005 - Episode 5 [720p].mp4")]
     public void BuildDownloadFileName_ProducesExpected(string animeTitle, string episodeTitle, int number, string? quality, string expected)
     {

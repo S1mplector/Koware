@@ -1,6 +1,6 @@
 // Author: Ilgaz Mehmetoğlu
-// Summary: Entry point and command routing for the Koware CLI, including playback orchestration and configuration handling.
-// 
+// Entry point and command routing for the Koware CLI, including playback orchestration and configuration handling.
+
 using System.Diagnostics;
 using System.Reflection;
 using System.IO;
@@ -524,7 +524,7 @@ static async Task<int> HandleDoctorAsync(IServiceProvider services, ILogger logg
         {
             step.Fail("Check failed");
             logger.LogError(ex, "{Provider} doctor check failed.", name);
-            results.Add((name, new ProviderCheckResult { Target = target, HttpError = ex.Message }));
+            results.Add((name, new ProviderCheckResult { Target = target ?? "not configured", HttpError = ex.Message }));
         }
     }
 
@@ -679,9 +679,8 @@ static async Task<int> HandleUpdateAsync(ILogger logger, CancellationToken cance
 /// - test [name]: Test provider connectivity
 /// - --enable/--disable: Toggle provider on/off
 /// </remarks>
-static async Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
+static Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
 {
-    var toggles = services.GetRequiredService<IOptions<ProviderToggleOptions>>().Value;
     var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
     var gogoAnime = services.GetRequiredService<IOptions<GogoAnimeOptions>>().Value;
     var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
@@ -693,41 +692,41 @@ static async Task<int> HandleProviderAsync(string[] args, IServiceProvider servi
     switch (subcommand)
     {
         case "list":
-            return HandleProviderList(allAnime, gogoAnime, allManga);
+            return Task.FromResult(HandleProviderList(allAnime, gogoAnime, allManga));
             
         case "add":
             var providerToAdd = args.Length > 2 ? args[2] : null;
-            return await HandleProviderAdd(providerToAdd, configPath);
+            return HandleProviderAddAsync(providerToAdd, configPath);
             
         case "edit":
-            return HandleProviderEdit(configPath);
+            return Task.FromResult(HandleProviderEdit(configPath));
             
         case "init":
-            return HandleProviderInit(configPath);
+            return Task.FromResult(HandleProviderInit(configPath));
             
         case "test":
             var providerToTest = args.Length > 2 ? args[2] : null;
-            return await HandleProviderTest(providerToTest, allAnime, gogoAnime, allManga);
+            return HandleProviderTestAsync(providerToTest, allAnime, gogoAnime, allManga);
             
         case "--enable":
         case "--disable":
             if (args.Length < 3)
             {
                 Console.WriteLine("Usage: koware provider --enable <name> | --disable <name>");
-                return 1;
+                return Task.FromResult(1);
             }
-            return HandleProviderToggle(args[2], subcommand == "--enable", configPath);
+            return Task.FromResult(HandleProviderToggle(args[2], subcommand == "--enable", configPath));
             
         case "help":
         case "--help":
         case "-h":
             PrintProviderHelp();
-            return 0;
+            return Task.FromResult(0);
             
         default:
             // Legacy: if arg looks like a provider name, show its status
             PrintProviderHelp();
-            return 1;
+            return Task.FromResult(1);
     }
 }
 
@@ -792,7 +791,7 @@ static int HandleProviderList(AllAnimeOptions allAnime, GogoAnimeOptions gogoAni
 /// <summary>
 /// Interactive wizard to add/configure a provider.
 /// </summary>
-static async Task<int> HandleProviderAdd(string? providerName, string configPath)
+static Task<int> HandleProviderAddAsync(string? providerName, string configPath)
 {
     var validProviders = new[] { "allanime", "allmanga", "gogoanime" };
     
@@ -817,7 +816,7 @@ static async Task<int> HandleProviderAdd(string? providerName, string configPath
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"Invalid provider. Choose from: {string.Join(", ", validProviders)}");
         Console.ResetColor();
-        return 1;
+        return Task.FromResult(1);
     }
     
     // Load existing config
@@ -842,7 +841,7 @@ static async Task<int> HandleProviderAdd(string? providerName, string configPath
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine("API Base URL is required.");
         Console.ResetColor();
-        return 1;
+        return Task.FromResult(1);
     }
     providerNode["ApiBase"] = apiBase;
     
@@ -907,7 +906,7 @@ static async Task<int> HandleProviderAdd(string? providerName, string configPath
     Console.ResetColor();
     Console.WriteLine($"Config saved to: {configPath}");
     
-    return 0;
+    return Task.FromResult(0);
 }
 
 /// <summary>
@@ -1022,7 +1021,7 @@ static int HandleProviderInit(string configPath)
 /// <summary>
 /// Test provider connectivity.
 /// </summary>
-static async Task<int> HandleProviderTest(string? providerName, AllAnimeOptions allAnime, GogoAnimeOptions gogoAnime, AllMangaOptions allManga)
+static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOptions allAnime, GogoAnimeOptions gogoAnime, AllMangaOptions allManga)
 {
     var providers = new Dictionary<string, (bool configured, string? apiBase)>(StringComparer.OrdinalIgnoreCase)
     {

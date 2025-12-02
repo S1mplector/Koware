@@ -27,6 +27,7 @@ public class AllAnimeCatalogTests
         var httpClient = new HttpClient(handler);
         var options = Options.Create(new AllAnimeOptions
         {
+            Enabled = true,
             ApiBase = "https://api.allanime.day",
             BaseHost = "allanime.day",
             Referer = "https://allmanga.to",
@@ -302,8 +303,114 @@ index.m3u8
         Assert.Equal("5", doc.RootElement.GetProperty("episodeString").GetString());
     }
 
+    [Fact]
+    public void IsConfigured_ReturnsFalse_WhenNotEnabled()
+    {
+        var options = new AllAnimeOptions
+        {
+            Enabled = false,
+            ApiBase = "https://api.example.com",
+            BaseHost = "example.com",
+            Referer = "https://example.com"
+        };
+        
+        Assert.False(options.IsConfigured);
+    }
+
+    [Fact]
+    public void IsConfigured_ReturnsFalse_WhenApiBaseMissing()
+    {
+        var options = new AllAnimeOptions
+        {
+            Enabled = true,
+            ApiBase = null,
+            BaseHost = "example.com",
+            Referer = "https://example.com"
+        };
+        
+        Assert.False(options.IsConfigured);
+    }
+
+    [Fact]
+    public void IsConfigured_ReturnsFalse_WhenBaseHostMissing()
+    {
+        var options = new AllAnimeOptions
+        {
+            Enabled = true,
+            ApiBase = "https://api.example.com",
+            BaseHost = null,
+            Referer = "https://example.com"
+        };
+        
+        Assert.False(options.IsConfigured);
+    }
+
+    [Fact]
+    public void IsConfigured_ReturnsFalse_WhenRefererMissing()
+    {
+        var options = new AllAnimeOptions
+        {
+            Enabled = true,
+            ApiBase = "https://api.example.com",
+            BaseHost = "example.com",
+            Referer = null
+        };
+        
+        Assert.False(options.IsConfigured);
+    }
+
+    [Fact]
+    public void IsConfigured_ReturnsTrue_WhenFullyConfigured()
+    {
+        var options = new AllAnimeOptions
+        {
+            Enabled = true,
+            ApiBase = "https://api.example.com",
+            BaseHost = "example.com",
+            Referer = "https://example.com"
+        };
+        
+        Assert.True(options.IsConfigured);
+    }
+
+    [Fact]
+    public async Task SearchAsync_ReturnsEmpty_WhenNotConfigured()
+    {
+        var handler = new StubHttpMessageHandler();
+        var httpClient = new HttpClient(handler);
+        var options = Options.Create(new AllAnimeOptions
+        {
+            Enabled = false,  // Not enabled
+            ApiBase = "https://api.example.com",
+            BaseHost = "example.com",
+            Referer = "https://example.com"
+        });
+
+        var catalog = new AllAnimeCatalog(httpClient, options, NullLogger<AllAnimeCatalog>.Instance);
+        var results = await catalog.SearchAsync("test", CancellationToken.None);
+
+        Assert.Empty(results);
+        Assert.Empty(handler.Requests); // No HTTP requests should be made
+    }
+
+    [Fact]
+    public void IsConfigured_Property_MatchesOptions()
+    {
+        var handler = new StubHttpMessageHandler();
+        var httpClient = new HttpClient(handler);
+        
+        var configuredOptions = Options.Create(DefaultOptions());
+        var configuredCatalog = new AllAnimeCatalog(httpClient, configuredOptions, NullLogger<AllAnimeCatalog>.Instance);
+        Assert.True(configuredCatalog.IsConfigured);
+        
+        var unconfiguredOptions = Options.Create(new AllAnimeOptions { Enabled = false });
+        var unconfiguredCatalog = new AllAnimeCatalog(httpClient, unconfiguredOptions, NullLogger<AllAnimeCatalog>.Instance);
+        Assert.False(unconfiguredCatalog.IsConfigured);
+    }
+
     private static AllAnimeOptions DefaultOptions() => new()
     {
+        Enabled = true,
         ApiBase = "https://api.allanime.day",
         BaseHost = "allanime.day",
         Referer = "https://allmanga.to",
