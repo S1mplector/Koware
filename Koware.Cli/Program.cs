@@ -2928,9 +2928,12 @@ static string GenerateReaderHtml(IReadOnlyCollection<ChapterPage> pages, string 
 static string? ResolveReaderExecutable(ReaderOptions options)
 {
     var command = options.Command;
+    var isDefaultWindowsReader = string.IsNullOrWhiteSpace(command) || 
+        command.Equals("Koware.Reader.Win.exe", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("Koware.Reader.Win", StringComparison.OrdinalIgnoreCase);
     
-    // On macOS, default to using the open command with Safari
-    if (string.IsNullOrWhiteSpace(command) && OperatingSystem.IsMacOS())
+    // On macOS, use browser-based reader unless user explicitly set a custom reader
+    if (isDefaultWindowsReader && OperatingSystem.IsMacOS())
     {
         // Return a special marker that LaunchReader will handle
         return "macos-browser";

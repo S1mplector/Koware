@@ -19,6 +19,7 @@ OUTPUT_DIR="$REPO_ROOT/publish"
 DMG_NAME="Koware-Installer-${APP_VERSION}-${RUNTIME}.dmg"
 
 info() { echo -e "\033[36m[INFO]\033[0m $1"; }
+warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 err()  { echo -e "\033[31m[ERR ]\033[0m $1"; exit 1; }
 
 # Parse arguments
@@ -59,10 +60,47 @@ dotnet publish "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj" \
 mv "$PUBLISH_DIR/Koware.Cli" "$PUBLISH_DIR/koware"
 chmod +x "$PUBLISH_DIR/koware"
 
-# Step 2: Create the Installer.app bundle
+# Step 2: Create macOS icon from PNG
+info "Creating app icon..."
+LOGO_PNG="$REPO_ROOT/Assets/Logo/logo.png"
+ICONSET_DIR="$BUILD_DIR/AppIcon.iconset"
+
+if [ -f "$LOGO_PNG" ]; then
+    mkdir -p "$ICONSET_DIR"
+    
+    # Generate all required icon sizes using sips
+    sips -z 16 16     "$LOGO_PNG" --out "$ICONSET_DIR/icon_16x16.png" 2>/dev/null
+    sips -z 32 32     "$LOGO_PNG" --out "$ICONSET_DIR/icon_16x16@2x.png" 2>/dev/null
+    sips -z 32 32     "$LOGO_PNG" --out "$ICONSET_DIR/icon_32x32.png" 2>/dev/null
+    sips -z 64 64     "$LOGO_PNG" --out "$ICONSET_DIR/icon_32x32@2x.png" 2>/dev/null
+    sips -z 128 128   "$LOGO_PNG" --out "$ICONSET_DIR/icon_128x128.png" 2>/dev/null
+    sips -z 256 256   "$LOGO_PNG" --out "$ICONSET_DIR/icon_128x128@2x.png" 2>/dev/null
+    sips -z 256 256   "$LOGO_PNG" --out "$ICONSET_DIR/icon_256x256.png" 2>/dev/null
+    sips -z 512 512   "$LOGO_PNG" --out "$ICONSET_DIR/icon_256x256@2x.png" 2>/dev/null
+    sips -z 512 512   "$LOGO_PNG" --out "$ICONSET_DIR/icon_512x512.png" 2>/dev/null
+    sips -z 1024 1024 "$LOGO_PNG" --out "$ICONSET_DIR/icon_512x512@2x.png" 2>/dev/null
+    
+    # Convert iconset to icns
+    iconutil -c icns "$ICONSET_DIR" -o "$BUILD_DIR/AppIcon.icns" 2>/dev/null
+    
+    if [ -f "$BUILD_DIR/AppIcon.icns" ]; then
+        info "App icon created successfully"
+    else
+        warn "Failed to create .icns icon, app will use default icon"
+    fi
+else
+    warn "Logo not found at $LOGO_PNG, app will use default icon"
+fi
+
+# Step 3: Create the Installer.app bundle
 APP_BUNDLE="$BUILD_DIR/Koware Installer.app"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
+
+# Copy icon if created
+if [ -f "$BUILD_DIR/AppIcon.icns" ]; then
+    cp "$BUILD_DIR/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/"
+fi
 
 # Create Info.plist
 cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
@@ -78,6 +116,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
     <string>Koware Installer</string>
     <key>CFBundleDisplayName</key>
     <string>Koware Installer</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleVersion</key>
     <string>$APP_VERSION</string>
     <key>CFBundleShortVersionString</key>
@@ -297,7 +337,7 @@ SCRIPT
 sed -i '' "s/__VERSION__/$APP_VERSION/g" "$APP_BUNDLE/Contents/MacOS/installer"
 chmod +x "$APP_BUNDLE/Contents/MacOS/installer"
 
-# Step 3: Create DMG staging
+# Step 4: Create DMG staging
 info "Creating DMG..."
 DMG_STAGING="$BUILD_DIR/dmg-staging"
 mkdir -p "$DMG_STAGING"
@@ -321,6 +361,13 @@ Config location:  ~/.config/koware/
 For more information, visit the project repository.
 EOF
 
+# Add volume icon (shows when DMG is mounted)
+if [ -f "$BUILD_DIR/AppIcon.icns" ]; then
+    cp "$BUILD_DIR/AppIcon.icns" "$DMG_STAGING/.VolumeIcon.icns"
+    # Set custom icon flag on the folder
+    SetFile -a C "$DMG_STAGING" 2>/dev/null || true
+fi
+
 # Create DMG
 DMG_PATH="$OUTPUT_DIR/$DMG_NAME"
 rm -f "$DMG_PATH"
@@ -333,6 +380,16 @@ hdiutil create \
     "$DMG_PATH"
 
 info "DMG created: $DMG_PATH"
+
+# Set custom icon on DMG file (requires Xcode Command Line Tools)
+if [ -f "$BUILD_DIR/AppIcon.icns" ] && command -v Rez &>/dev/null; then
+    info "Setting DMG file icon..."
+    # Create Rez script to embed icon
+    echo "read 'icns' (-16455) \"$BUILD_DIR/AppIcon.icns\";" > "$BUILD_DIR/icon.r"
+    Rez -append "$BUILD_DIR/icon.r" -o "$DMG_PATH" 2>/dev/null && \
+        SetFile -a C "$DMG_PATH" 2>/dev/null || true
+    rm -f "$BUILD_DIR/icon.r" 2>/dev/null
+fi
 
 # Copy to Desktop if requested
 if [ "$COPY_TO_DESKTOP" = "true" ]; then
