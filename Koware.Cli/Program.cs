@@ -96,7 +96,6 @@ static IHost BuildHost(string[] args)
     builder.Services.AddSingleton<IMangaListStore, SqliteMangaListStore>();
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware", LogLevel.Information);
-    builder.Logging.AddFilter("Koware.Infrastructure.Scraping.GogoAnimeCatalog", LogLevel.Error);
     builder.Logging.AddFilter("Koware.Infrastructure.Scraping.AllAnimeCatalog", LogLevel.Error);
 
     return builder.Build();
@@ -238,7 +237,6 @@ static async Task<int> RunAsync(IHost host, string[] args)
 static bool CheckProvidersConfigured(IServiceProvider services, CliMode mode, ILogger logger)
 {
     var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
-    var gogoAnime = services.GetRequiredService<IOptions<GogoAnimeOptions>>().Value;
     var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
 
     bool hasConfiguredProvider;
@@ -251,7 +249,7 @@ static bool CheckProvidersConfigured(IServiceProvider services, CliMode mode, IL
     }
     else
     {
-        hasConfiguredProvider = allAnime.IsConfigured || gogoAnime.IsConfigured;
+        hasConfiguredProvider = allAnime.IsConfigured;
         modeLabel = "anime";
     }
 
@@ -574,34 +572,28 @@ static void WriteStatus(string label, bool success, string? detail = null)
 /// <param name="cancellationToken">Cancellation token.</param>
 /// <returns>Exit code: 0 if all providers reachable, 1 otherwise.</returns>
 /// <remarks>
-/// Checks DNS resolution and HTTP connectivity to AllAnime and GogoAnime.
+/// Checks DNS resolution and HTTP connectivity to AllAnime.
 /// Also checks for external tools: ffmpeg, yt-dlp, aria2c, and configured player.
 /// </remarks>
 static async Task<int> HandleDoctorAsync(IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
 {
     var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
-    var gogo = services.GetRequiredService<IOptions<GogoAnimeOptions>>().Value;
     var results = new List<(string name, ProviderCheckResult result)>();
-    foreach (var (name, target) in new[] { ("allanime", allAnime.ApiBase), ("gogoanime", $"{gogo.ApiBase}/anime/gogoanime") })
+    
+    var step = ConsoleStep.Start("Checking allanime");
+    try
     {
-        var step = ConsoleStep.Start($"Checking {name}");
-        try
-        {
-            var diagnostics = new ProviderDiagnostics(new HttpClient());
-            var options = name == "allanime"
-                ? new AllAnimeOptions { ApiBase = allAnime.ApiBase, Referer = allAnime.Referer, UserAgent = allAnime.UserAgent }
-                : new AllAnimeOptions { ApiBase = gogo.ApiBase, Referer = gogo.SiteBase, UserAgent = gogo.UserAgent };
-
-            var result = await diagnostics.CheckAsync(options, cancellationToken);
-            results.Add((name, result));
-            step.Succeed("Check complete");
-        }
-        catch (Exception ex)
-        {
-            step.Fail("Check failed");
-            logger.LogError(ex, "{Provider} doctor check failed.", name);
-            results.Add((name, new ProviderCheckResult { Target = target ?? "not configured", HttpError = ex.Message }));
-        }
+        var diagnostics = new ProviderDiagnostics(new HttpClient());
+        var options = new AllAnimeOptions { ApiBase = allAnime.ApiBase, Referer = allAnime.Referer, UserAgent = allAnime.UserAgent };
+        var result = await diagnostics.CheckAsync(options, cancellationToken);
+        results.Add(("allanime", result));
+        step.Succeed("Check complete");
+    }
+    catch (Exception ex)
+    {
+        step.Fail("Check failed");
+        logger.LogError(ex, "allanime doctor check failed.");
+        results.Add(("allanime", new ProviderCheckResult { Target = allAnime.ApiBase ?? "not configured", HttpError = ex.Message }));
     }
 
     Console.WriteLine();
@@ -758,7 +750,6 @@ static async Task<int> HandleUpdateAsync(ILogger logger, CancellationToken cance
 static Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
 {
     var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
-    var gogoAnime = services.GetRequiredService<IOptions<GogoAnimeOptions>>().Value;
     var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
     var configPath = GetUserConfigFilePath();
 
@@ -768,7 +759,7 @@ static Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
     switch (subcommand)
     {
         case "list":
-            return Task.FromResult(HandleProviderList(allAnime, gogoAnime, allManga));
+            return Task.FromResult(HandleProviderList(allAnime, allManga));
             
         case "add":
             var providerToAdd = args.Length > 2 ? args[2] : null;
@@ -782,7 +773,7 @@ static Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
             
         case "test":
             var providerToTest = args.Length > 2 ? args[2] : null;
-            return HandleProviderTestAsync(providerToTest, allAnime, gogoAnime, allManga);
+            return HandleProviderTestAsync(providerToTest, allAnime, allManga);
             
         case "--enable":
         case "--disable":
@@ -809,7 +800,7 @@ static Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
 /// <summary>
 /// List all providers with their configuration status.
 /// </summary>
-static int HandleProviderList(AllAnimeOptions allAnime, GogoAnimeOptions gogoAnime, AllMangaOptions allManga)
+static int HandleProviderList(AllAnimeOptions allAnime, AllMangaOptions allManga)
 {
     Console.WriteLine("Provider Status:");
     Console.WriteLine(new string('─', 60));
@@ -817,7 +808,6 @@ static int HandleProviderList(AllAnimeOptions allAnime, GogoAnimeOptions gogoAni
     var providers = new[]
     {
         ("AllAnime", allAnime.IsConfigured, allAnime.Enabled, allAnime.ApiBase, "Anime"),
-        ("GogoAnime", gogoAnime.IsConfigured, gogoAnime.Enabled, gogoAnime.ApiBase, "Anime"),
         ("AllManga", allManga.IsConfigured, allManga.Enabled, allManga.ApiBase, "Manga"),
     };
     
@@ -869,7 +859,7 @@ static int HandleProviderList(AllAnimeOptions allAnime, GogoAnimeOptions gogoAni
 /// </summary>
 static Task<int> HandleProviderAddAsync(string? providerName, string configPath)
 {
-    var validProviders = new[] { "allanime", "allmanga", "gogoanime" };
+    var validProviders = new[] { "allanime", "allmanga" };
     
     if (string.IsNullOrWhiteSpace(providerName))
     {
@@ -921,35 +911,23 @@ static Task<int> HandleProviderAddAsync(string? providerName, string configPath)
     }
     providerNode["ApiBase"] = apiBase;
     
-    if (providerName == "allanime" || providerName == "allmanga")
+    Console.Write("Base Host (e.g., example.com): ");
+    var baseHost = Console.ReadLine()?.Trim();
+    if (!string.IsNullOrWhiteSpace(baseHost))
     {
-        Console.Write("Base Host (e.g., example.com): ");
-        var baseHost = Console.ReadLine()?.Trim();
-        if (!string.IsNullOrWhiteSpace(baseHost))
-        {
-            providerNode["BaseHost"] = baseHost;
-        }
-        
-        Console.Write("Referer URL: ");
-        var referer = Console.ReadLine()?.Trim();
-        if (!string.IsNullOrWhiteSpace(referer))
-        {
-            providerNode["Referer"] = referer;
-        }
-        
-        Console.Write("Translation type (sub/dub) [sub]: ");
-        var transType = Console.ReadLine()?.Trim();
-        providerNode["TranslationType"] = string.IsNullOrWhiteSpace(transType) ? "sub" : transType;
+        providerNode["BaseHost"] = baseHost;
     }
-    else if (providerName == "gogoanime")
+    
+    Console.Write("Referer URL: ");
+    var referer = Console.ReadLine()?.Trim();
+    if (!string.IsNullOrWhiteSpace(referer))
     {
-        Console.Write("Site Base URL: ");
-        var siteBase = Console.ReadLine()?.Trim();
-        if (!string.IsNullOrWhiteSpace(siteBase))
-        {
-            providerNode["SiteBase"] = siteBase;
-        }
+        providerNode["Referer"] = referer;
     }
+    
+    Console.Write("Translation type (sub/dub) [sub]: ");
+    var transType = Console.ReadLine()?.Trim();
+    providerNode["TranslationType"] = string.IsNullOrWhiteSpace(transType) ? "sub" : transType;
     
     Console.Write("Enable this provider? [Y/n]: ");
     var enableInput = Console.ReadLine()?.Trim();
@@ -961,7 +939,6 @@ static Task<int> HandleProviderAddAsync(string? providerName, string configPath)
     {
         "allanime" => "AllAnime",
         "allmanga" => "AllManga",
-        "gogoanime" => "GogoAnime",
         _ => providerName
     };
     
@@ -1065,12 +1042,6 @@ static int HandleProviderInit(string configPath)
             ["ApiBase"] = "https://api.your-manga-host.example",
             ["Referer"] = "https://your-manga-host.example",
             ["TranslationType"] = "sub"
-        },
-        ["GogoAnime"] = new JsonObject
-        {
-            ["Enabled"] = false,
-            ["ApiBase"] = "https://api.your-alt-source.example",
-            ["SiteBase"] = "https://your-alt-source.example"
         }
     };
     
@@ -1097,12 +1068,11 @@ static int HandleProviderInit(string configPath)
 /// <summary>
 /// Test provider connectivity.
 /// </summary>
-static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOptions allAnime, GogoAnimeOptions gogoAnime, AllMangaOptions allManga)
+static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOptions allAnime, AllMangaOptions allManga)
 {
     var providers = new Dictionary<string, (bool configured, string? apiBase)>(StringComparer.OrdinalIgnoreCase)
     {
         ["allanime"] = (allAnime.IsConfigured, allAnime.ApiBase),
-        ["gogoanime"] = (gogoAnime.IsConfigured, gogoAnime.ApiBase),
         ["allmanga"] = (allManga.IsConfigured, allManga.ApiBase),
     };
     
@@ -1177,7 +1147,6 @@ static int HandleProviderToggle(string target, bool enable, string configPath)
     {
         "allanime" => "AllAnime",
         "allmanga" => "AllManga",
-        "gogoanime" => "GogoAnime",
         _ => target
     };
     
