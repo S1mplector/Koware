@@ -406,31 +406,45 @@ public partial class MainWindow : Window
     
     private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
-        if (!_isScrollTracking || _pageImages.Count == 0) return;
-        
-        // Find which page is most visible
-        var scrollOffset = ScrollViewer.Offset.Y;
-        var viewportHeight = ScrollViewer.Viewport.Height;
-        var viewportCenter = scrollOffset + viewportHeight / 2;
-        
-        for (int i = 0; i < _pageImages.Count; i++)
+        try
         {
-            var image = _pageImages[i];
-            var bounds = image.Bounds;
-            var imageTop = bounds.Top;
-            var imageBottom = bounds.Bottom;
+            if (!_isScrollTracking || _pageImages.Count == 0) return;
             
-            if (viewportCenter >= imageTop && viewportCenter <= imageBottom)
+            // Throttle scroll updates
+            var now = DateTime.UtcNow;
+            if ((now - _lastScrollTime).TotalMilliseconds < 100) return;
+            _lastScrollTime = now;
+            
+            // Find which page is most visible
+            var scrollOffset = ScrollViewer.Offset.Y;
+            var viewportHeight = ScrollViewer.Viewport.Height;
+            var viewportCenter = scrollOffset + viewportHeight / 2;
+            
+            for (int i = 0; i < _pageImages.Count; i++)
             {
-                var newPage = i + 1;
-                if (newPage != _currentPage)
+                var image = _pageImages[i];
+                if (image.Parent == null) continue; // Skip if not attached
+                
+                var bounds = image.Bounds;
+                var imageTop = bounds.Top;
+                var imageBottom = bounds.Bottom;
+                
+                if (viewportCenter >= imageTop && viewportCenter <= imageBottom)
                 {
-                    _currentPage = newPage;
-                    PageSlider.Value = newPage;
-                    UpdatePageIndicator();
+                    var newPage = i + 1;
+                    if (newPage != _currentPage)
+                    {
+                        _currentPage = newPage;
+                        PageSlider.Value = newPage;
+                        UpdatePageIndicator();
+                    }
+                    break;
                 }
-                break;
             }
+        }
+        catch
+        {
+            // Silently ignore scroll tracking errors
         }
     }
     
@@ -499,6 +513,15 @@ public partial class MainWindow : Window
     
     private void RebuildPageLayout()
     {
+        // First, detach all images from their current parents
+        foreach (var image in _pageImages)
+        {
+            if (image.Parent is Panel parent)
+            {
+                parent.Children.Remove(image);
+            }
+        }
+        
         PagesContainer.Children.Clear();
         
         if (_doublePageMode)
