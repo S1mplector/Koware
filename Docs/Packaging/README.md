@@ -42,6 +42,10 @@ xcode-select --install
 brew install create-dmg
 ```
 
+```bash
+# Build and copy the macOS installer (for convenience, not meant for production)
+cd ~/Desktop/Files/Projects/Koware && ./Scripts/build-installer-app.sh && cp ./publish/Koware-Installer-0.7.0-beta-osx-arm64.dmg ~/Desktop/
+```
 ---
 
 ## Project Structure
