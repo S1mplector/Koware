@@ -22,6 +22,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _isFullscreen;
     private bool _isDraggingProgress;
     private WindowState _previousWindowState;
+    
+    // Exit codes for episode navigation
+    public const int ExitCodeNormal = 0;
+    public const int ExitCodePrevEpisode = 10;
+    public const int ExitCodeNextEpisode = 11;
+    private int _exitCode = ExitCodeNormal;
 
     public string? StreamUrl { get; set; }
     public string? HttpReferer { get; set; }
@@ -144,7 +150,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Dispatcher.UIThread.Post(() =>
         {
             LoadingOverlay.IsVisible = false;
-            PlayPauseButton.Content = "⏸";
+            PlayPauseButton.Content = "II";
             _progressTimer?.Start();
         });
     }
@@ -153,7 +159,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         Dispatcher.UIThread.Post(() =>
         {
-            PlayPauseButton.Content = "▶";
+            PlayPauseButton.Content = ">";
         });
     }
 
@@ -161,7 +167,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         Dispatcher.UIThread.Post(() =>
         {
-            PlayPauseButton.Content = "▶";
+            PlayPauseButton.Content = ">";
             _progressTimer?.Stop();
         });
     }
@@ -261,6 +267,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void OnProgressPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         _isDraggingProgress = true;
+        
+        // Seek immediately on click
+        if (_mediaPlayer is not null && _mediaPlayer.Length > 0)
+        {
+            var point = e.GetPosition(ProgressSlider);
+            var ratio = Math.Clamp(point.X / ProgressSlider.Bounds.Width, 0, 1);
+            ProgressSlider.Value = ratio * 100;
+            _mediaPlayer.Position = (float)ratio;
+        }
     }
 
     private void OnProgressPointerReleased(object? sender, PointerReleasedEventArgs e)
@@ -274,6 +289,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var position = ProgressSlider.Value / 100.0;
         _mediaPlayer.Position = (float)position;
         _isDraggingProgress = false;
+    }
+    
+    private void OnRewindClick(object? sender, RoutedEventArgs e)
+    {
+        if (_mediaPlayer is null) return;
+        _mediaPlayer.Time = Math.Max(0, _mediaPlayer.Time - 10000);
+    }
+    
+    private void OnForwardClick(object? sender, RoutedEventArgs e)
+    {
+        if (_mediaPlayer is null) return;
+        _mediaPlayer.Time = Math.Min(_mediaPlayer.Length, _mediaPlayer.Time + 10000);
+    }
+    
+    private void OnPrevEpisodeClick(object? sender, RoutedEventArgs e)
+    {
+        _exitCode = ExitCodePrevEpisode;
+        Close();
+    }
+    
+    private void OnNextEpisodeClick(object? sender, RoutedEventArgs e)
+    {
+        _exitCode = ExitCodeNextEpisode;
+        Close();
     }
 
     private void OnVolumeChanged(object? sender, RangeBaseValueChangedEventArgs e)
@@ -402,6 +441,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _media?.Dispose();
         _mediaPlayer?.Dispose();
         _libVLC?.Dispose();
+        
+        // Set environment exit code for CLI to detect episode navigation
+        Environment.ExitCode = _exitCode;
     }
 
     protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)

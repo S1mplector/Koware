@@ -66,34 +66,88 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     
+                    <!-- Previous Episode -->
+                    <Button x:Name="PrevEpisodeButton" 
+                            Grid.Column="0"
+                            Content="|&lt;"
+                            FontSize="14"
+                            FontWeight="Bold"
+                            Width="40" Height="40"
+                            Click="OnPrevEpisodeClick"
+                            Background="Transparent"
+                            Foreground="White"
+                            ToolTip.Tip="Previous Episode" />
+                    
+                    <!-- Rewind 10s -->
+                    <Button x:Name="RewindButton" 
+                            Grid.Column="1"
+                            Content="-10"
+                            FontSize="12"
+                            FontWeight="Bold"
+                            Width="40" Height="40"
+                            Click="OnRewindClick"
+                            Background="Transparent"
+                            Foreground="White"
+                            ToolTip.Tip="Rewind 10 seconds" />
+                    
                     <!-- Play/Pause -->
                     <Button x:Name="PlayPauseButton" 
-                            Grid.Column="0"
-                            Content="⏸"
-                            FontSize="20"
+                            Grid.Column="2"
+                            Content="II"
+                            FontSize="16"
+                            FontWeight="Bold"
                             Width="48" Height="40"
                             Click="OnPlayPauseClick"
                             Background="Transparent"
                             Foreground="White" />
                     
+                    <!-- Forward 10s -->
+                    <Button x:Name="ForwardButton" 
+                            Grid.Column="3"
+                            Content="+10"
+                            FontSize="12"
+                            FontWeight="Bold"
+                            Width="40" Height="40"
+                            Click="OnForwardClick"
+                            Background="Transparent"
+                            Foreground="White"
+                            ToolTip.Tip="Forward 10 seconds" />
+                    
+                    <!-- Next Episode -->
+                    <Button x:Name="NextEpisodeButton" 
+                            Grid.Column="4"
+                            Content="&gt;|"
+                            FontSize="14"
+                            FontWeight="Bold"
+                            Width="40" Height="40"
+                            Click="OnNextEpisodeClick"
+                            Background="Transparent"
+                            Foreground="White"
+                            ToolTip.Tip="Next Episode" />
+                    
                     <!-- Time Display -->
                     <TextBlock x:Name="TimeDisplay"
-                               Grid.Column="1"
+                               Grid.Column="5"
                                Text="00:00 / 00:00"
                                Foreground="#aaa"
                                VerticalAlignment="Center"
                                Margin="12,0,0,0" />
                     
                     <!-- Spacer -->
-                    <Panel Grid.Column="2" />
+                    <Panel Grid.Column="7" />
                     
                     <!-- Volume -->
-                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                    <StackPanel Grid.Column="8" Orientation="Horizontal" VerticalAlignment="Center">
                         <Button x:Name="MuteButton"
                                 Content="🔊"
                                 FontSize="16"
@@ -110,7 +164,7 @@
                     
                     <!-- Fullscreen -->
                     <Button x:Name="FullscreenButton"
-                            Grid.Column="4"
+                            Grid.Column="9"
                             Content="⛶"
                             FontSize="18"
                             Width="48" Height="40"

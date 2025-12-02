@@ -8,9 +8,9 @@ namespace Koware.Cli.Configuration;
 public sealed class PlayerOptions
 {
     /// <summary>
-    /// Player executable to launch (Koware.Player.Win, mpv, vlc, etc.).
+    /// Player executable to launch (Koware.Player, mpv, vlc, etc.).
     /// </summary>
-    public string Command { get; set; } = "Koware.Player.Win.exe";
+    public string Command { get; set; } = "Koware.Player.exe";
 
     /// <summary>
     /// Additional arguments passed before the URL (e.g., --no-terminal).

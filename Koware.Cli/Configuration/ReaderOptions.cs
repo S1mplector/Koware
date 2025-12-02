@@ -8,9 +8,9 @@ namespace Koware.Cli.Configuration;
 public sealed class ReaderOptions
 {
     /// <summary>
-    /// Reader executable to launch (Koware.Reader.Win, etc.).
+    /// Reader executable to launch (Koware.Reader, etc.).
     /// </summary>
-    public string Command { get; set; } = "Koware.Reader.Win.exe";
+    public string Command { get; set; } = "Koware.Reader.exe";
 
     /// <summary>
     /// Additional arguments passed before the pages JSON.
