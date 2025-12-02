@@ -4,8 +4,8 @@
 
 Koware is an **open-source software tool** that functions as a search aggregator and media player launcher. It is designed to be a general-purpose utility that:
 
-- Does **not** host, store, or distribute any media content
-- Does **not** include any pre-configured sources or links to streaming services
+- Does **NOT** host, store, or distribute any media content
+- Does **NOT** include any pre-configured sources or links to streaming services
 - Requires users to manually configure their own source definitions
 - Acts purely as a client-side search interface
 

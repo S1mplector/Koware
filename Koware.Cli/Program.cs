@@ -667,69 +667,486 @@ static async Task<int> HandleUpdateAsync(ILogger logger, CancellationToken cance
 /// <summary>
 /// Implement the <c>koware provider</c> command.
 /// </summary>
-/// <param name="args">CLI arguments; supports --enable and --disable flags.</param>
+/// <param name="args">CLI arguments; supports subcommands: list, add, edit, init, test, --enable, --disable.</param>
 /// <param name="services">Service provider for provider toggle options.</param>
 /// <returns>Exit code: 0 on success.</returns>
 /// <remarks>
-/// With no flags, lists known providers and their enabled/disabled status.
-/// With --enable or --disable, updates the DisabledProviders list in appsettings.user.json.
+/// Subcommands:
+/// - list: Show all providers with configuration status
+/// - add [name]: Interactive wizard to configure a provider  
+/// - edit: Open config file in default editor
+/// - init: Create template configuration file
+/// - test [name]: Test provider connectivity
+/// - --enable/--disable: Toggle provider on/off
 /// </remarks>
 static async Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
 {
     var toggles = services.GetRequiredService<IOptions<ProviderToggleOptions>>().Value;
+    var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+    var gogoAnime = services.GetRequiredService<IOptions<GogoAnimeOptions>>().Value;
+    var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
     var configPath = GetUserConfigFilePath();
-    var json = File.Exists(configPath)
-        ? (JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? new JsonObject())
-        : new JsonObject();
-    var providersNode = json["Providers"] as JsonObject ?? new JsonObject();
-    var disabledNode = providersNode["DisabledProviders"] as JsonArray ?? new JsonArray();
 
-    if (args.Length == 1)
+    // Parse subcommand
+    var subcommand = args.Length > 1 ? args[1].ToLowerInvariant() : "list";
+
+    switch (subcommand)
     {
-        var known = new[]
-        {
-            ("allanime", "Primary (AllAnime)"),
-            ("gogoanime", "Fallback (GogoAnime)")
-        };
-        foreach (var (name, label) in known)
-        {
-            var enabled = toggles.IsEnabled(name);
-            Console.ForegroundColor = enabled ? ConsoleColor.Green : ConsoleColor.Red;
-            Console.Write($"{name,-10}");
-            Console.ResetColor();
-            Console.WriteLine($" - {label}");
-        }
-        return 0;
+        case "list":
+            return HandleProviderList(allAnime, gogoAnime, allManga);
+            
+        case "add":
+            var providerToAdd = args.Length > 2 ? args[2] : null;
+            return await HandleProviderAdd(providerToAdd, configPath);
+            
+        case "edit":
+            return HandleProviderEdit(configPath);
+            
+        case "init":
+            return HandleProviderInit(configPath);
+            
+        case "test":
+            var providerToTest = args.Length > 2 ? args[2] : null;
+            return await HandleProviderTest(providerToTest, allAnime, gogoAnime, allManga);
+            
+        case "--enable":
+        case "--disable":
+            if (args.Length < 3)
+            {
+                Console.WriteLine("Usage: koware provider --enable <name> | --disable <name>");
+                return 1;
+            }
+            return HandleProviderToggle(args[2], subcommand == "--enable", configPath);
+            
+        case "help":
+        case "--help":
+        case "-h":
+            PrintProviderHelp();
+            return 0;
+            
+        default:
+            // Legacy: if arg looks like a provider name, show its status
+            PrintProviderHelp();
+            return 1;
     }
+}
 
-    if (args.Length >= 3 && (args[1].Equals("--enable", StringComparison.OrdinalIgnoreCase) || args[1].Equals("--disable", StringComparison.OrdinalIgnoreCase)))
+/// <summary>
+/// List all providers with their configuration status.
+/// </summary>
+static int HandleProviderList(AllAnimeOptions allAnime, GogoAnimeOptions gogoAnime, AllMangaOptions allManga)
+{
+    Console.WriteLine("Provider Status:");
+    Console.WriteLine(new string('─', 60));
+    
+    var providers = new[]
     {
-        var target = args[2].ToLowerInvariant();
-        var enable = args[1].Equals("--enable", StringComparison.OrdinalIgnoreCase);
-        var set = new HashSet<string>(disabledNode.OfType<JsonNode?>().Select(n => n?.ToString() ?? string.Empty).Where(s => !string.IsNullOrWhiteSpace(s)), StringComparer.OrdinalIgnoreCase);
-        if (enable)
+        ("AllAnime", allAnime.IsConfigured, allAnime.Enabled, allAnime.ApiBase, "Anime"),
+        ("GogoAnime", gogoAnime.IsConfigured, gogoAnime.Enabled, gogoAnime.ApiBase, "Anime"),
+        ("AllManga", allManga.IsConfigured, allManga.Enabled, allManga.ApiBase, "Manga"),
+    };
+    
+    foreach (var (name, isConfigured, isEnabled, apiBase, type) in providers)
+    {
+        Console.Write($"  {name,-12} ");
+        
+        if (!isConfigured)
         {
-            set.Remove(target);
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.Write("✗ Not configured");
+            Console.ResetColor();
+        }
+        else if (!isEnabled)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.Write("○ Disabled     ");
+            Console.ResetColor();
         }
         else
         {
-            set.Add(target);
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.Write("✓ Ready        ");
+            Console.ResetColor();
         }
-
-        var newArray = new JsonArray(set.Select(v => (JsonNode?)JsonValue.Create(v)).ToArray());
-        providersNode["DisabledProviders"] = newArray;
-        json["Providers"] = providersNode;
-        File.WriteAllText(configPath, JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = true }));
-
-        Console.ForegroundColor = enable ? ConsoleColor.Green : ConsoleColor.Red;
-        Console.WriteLine($"{(enable ? "Enabled" : "Disabled")} provider '{target}'.");
+        
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write($" [{type}]");
+        if (!string.IsNullOrWhiteSpace(apiBase))
+        {
+            Console.Write($" {apiBase}");
+        }
         Console.ResetColor();
-        Console.WriteLine("Restart your session for changes to take effect.");
+        Console.WriteLine();
+    }
+    
+    Console.WriteLine();
+    Console.WriteLine("Commands:");
+    Console.WriteLine("  koware provider add <name>    Configure a provider");
+    Console.WriteLine("  koware provider edit          Open config file");
+    Console.WriteLine("  koware provider init          Create template config");
+    Console.WriteLine("  koware provider test [name]   Test connectivity");
+    
+    return 0;
+}
+
+/// <summary>
+/// Interactive wizard to add/configure a provider.
+/// </summary>
+static async Task<int> HandleProviderAdd(string? providerName, string configPath)
+{
+    var validProviders = new[] { "allanime", "allmanga", "gogoanime" };
+    
+    if (string.IsNullOrWhiteSpace(providerName))
+    {
+        Console.WriteLine("Available providers:");
+        foreach (var p in validProviders)
+        {
+            Console.WriteLine($"  - {p}");
+        }
+        Console.WriteLine();
+        Console.Write("Enter provider name: ");
+        providerName = Console.ReadLine()?.Trim().ToLowerInvariant();
+    }
+    else
+    {
+        providerName = providerName.ToLowerInvariant();
+    }
+    
+    if (string.IsNullOrWhiteSpace(providerName) || !validProviders.Contains(providerName))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"Invalid provider. Choose from: {string.Join(", ", validProviders)}");
+        Console.ResetColor();
+        return 1;
+    }
+    
+    // Load existing config
+    var json = File.Exists(configPath)
+        ? (JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? new JsonObject())
+        : new JsonObject();
+    
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine($"Configuring {providerName}...");
+    Console.ResetColor();
+    Console.WriteLine("(Leave blank to skip optional fields)");
+    Console.WriteLine();
+    
+    var providerNode = new JsonObject();
+    
+    // Common fields
+    Console.Write("API Base URL: ");
+    var apiBase = Console.ReadLine()?.Trim();
+    if (string.IsNullOrWhiteSpace(apiBase))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("API Base URL is required.");
+        Console.ResetColor();
+        return 1;
+    }
+    providerNode["ApiBase"] = apiBase;
+    
+    if (providerName == "allanime" || providerName == "allmanga")
+    {
+        Console.Write("Base Host (e.g., example.com): ");
+        var baseHost = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(baseHost))
+        {
+            providerNode["BaseHost"] = baseHost;
+        }
+        
+        Console.Write("Referer URL: ");
+        var referer = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(referer))
+        {
+            providerNode["Referer"] = referer;
+        }
+        
+        Console.Write("Translation type (sub/dub) [sub]: ");
+        var transType = Console.ReadLine()?.Trim();
+        providerNode["TranslationType"] = string.IsNullOrWhiteSpace(transType) ? "sub" : transType;
+    }
+    else if (providerName == "gogoanime")
+    {
+        Console.Write("Site Base URL: ");
+        var siteBase = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(siteBase))
+        {
+            providerNode["SiteBase"] = siteBase;
+        }
+    }
+    
+    Console.Write("Enable this provider? [Y/n]: ");
+    var enableInput = Console.ReadLine()?.Trim();
+    var enabled = string.IsNullOrWhiteSpace(enableInput) || enableInput.Equals("y", StringComparison.OrdinalIgnoreCase) || enableInput.Equals("yes", StringComparison.OrdinalIgnoreCase);
+    providerNode["Enabled"] = enabled;
+    
+    // Map to correct section name
+    var sectionName = providerName switch
+    {
+        "allanime" => "AllAnime",
+        "allmanga" => "AllManga",
+        "gogoanime" => "GogoAnime",
+        _ => providerName
+    };
+    
+    json[sectionName] = providerNode;
+    
+    // Ensure directory exists
+    var configDir = Path.GetDirectoryName(configPath);
+    if (!string.IsNullOrWhiteSpace(configDir) && !Directory.Exists(configDir))
+    {
+        Directory.CreateDirectory(configDir);
+    }
+    
+    File.WriteAllText(configPath, JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = true }));
+    
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine($"✓ Provider '{sectionName}' configured successfully!");
+    Console.ResetColor();
+    Console.WriteLine($"Config saved to: {configPath}");
+    
+    return 0;
+}
+
+/// <summary>
+/// Open the config file in the default editor.
+/// </summary>
+static int HandleProviderEdit(string configPath)
+{
+    // Ensure file exists with at least empty JSON
+    var configDir = Path.GetDirectoryName(configPath);
+    if (!string.IsNullOrWhiteSpace(configDir) && !Directory.Exists(configDir))
+    {
+        Directory.CreateDirectory(configDir);
+    }
+    
+    if (!File.Exists(configPath))
+    {
+        File.WriteAllText(configPath, "{\n}\n");
+    }
+    
+    Console.WriteLine($"Opening: {configPath}");
+    
+    try
+    {
+        if (OperatingSystem.IsMacOS())
+        {
+            Process.Start("open", $"-e \"{configPath}\"");
+        }
+        else if (OperatingSystem.IsWindows())
+        {
+            Process.Start(new ProcessStartInfo { FileName = configPath, UseShellExecute = true });
+        }
+        else
+        {
+            // Linux - try common editors
+            var editor = Environment.GetEnvironmentVariable("EDITOR") ?? "nano";
+            Process.Start(editor, configPath);
+        }
         return 0;
     }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"Failed to open editor: {ex.Message}");
+        Console.ResetColor();
+        Console.WriteLine($"Manually edit: {configPath}");
+        return 1;
+    }
+}
 
-    Console.WriteLine("Usage: koware provider [--enable <name> | --disable <name>]");
-    return 1;
+/// <summary>
+/// Create a template configuration file.
+/// </summary>
+static int HandleProviderInit(string configPath)
+{
+    if (File.Exists(configPath))
+    {
+        Console.Write($"Config file already exists at {configPath}. Overwrite? [y/N]: ");
+        var confirm = Console.ReadLine()?.Trim();
+        if (!confirm?.Equals("y", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            Console.WriteLine("Cancelled.");
+            return 0;
+        }
+    }
+    
+    var template = new JsonObject
+    {
+        ["AllAnime"] = new JsonObject
+        {
+            ["Enabled"] = false,
+            ["BaseHost"] = "your-host.example",
+            ["ApiBase"] = "https://api.your-host.example",
+            ["Referer"] = "https://your-host.example",
+            ["TranslationType"] = "sub"
+        },
+        ["AllManga"] = new JsonObject
+        {
+            ["Enabled"] = false,
+            ["BaseHost"] = "your-manga-host.example",
+            ["ApiBase"] = "https://api.your-manga-host.example",
+            ["Referer"] = "https://your-manga-host.example",
+            ["TranslationType"] = "sub"
+        },
+        ["GogoAnime"] = new JsonObject
+        {
+            ["Enabled"] = false,
+            ["ApiBase"] = "https://api.your-alt-source.example",
+            ["SiteBase"] = "https://your-alt-source.example"
+        }
+    };
+    
+    var configDir = Path.GetDirectoryName(configPath);
+    if (!string.IsNullOrWhiteSpace(configDir) && !Directory.Exists(configDir))
+    {
+        Directory.CreateDirectory(configDir);
+    }
+    
+    File.WriteAllText(configPath, JsonSerializer.Serialize(template, new JsonSerializerOptions { WriteIndented = true }));
+    
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine($"✓ Template config created: {configPath}");
+    Console.ResetColor();
+    Console.WriteLine();
+    Console.WriteLine("Next steps:");
+    Console.WriteLine("  1. Edit the config file with your source URLs");
+    Console.WriteLine("  2. Set 'Enabled' to true for sources you want to use");
+    Console.WriteLine("  3. Run 'koware provider list' to verify");
+    
+    return 0;
+}
+
+/// <summary>
+/// Test provider connectivity.
+/// </summary>
+static async Task<int> HandleProviderTest(string? providerName, AllAnimeOptions allAnime, GogoAnimeOptions gogoAnime, AllMangaOptions allManga)
+{
+    var providers = new Dictionary<string, (bool configured, string? apiBase)>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["allanime"] = (allAnime.IsConfigured, allAnime.ApiBase),
+        ["gogoanime"] = (gogoAnime.IsConfigured, gogoAnime.ApiBase),
+        ["allmanga"] = (allManga.IsConfigured, allManga.ApiBase),
+    };
+    
+    var toTest = string.IsNullOrWhiteSpace(providerName)
+        ? providers.Keys.ToList()
+        : new List<string> { providerName.ToLowerInvariant() };
+    
+    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+    var allPassed = true;
+    
+    foreach (var name in toTest)
+    {
+        if (!providers.TryGetValue(name, out var info))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"Unknown provider: {name}");
+            Console.ResetColor();
+            continue;
+        }
+        
+        Console.Write($"Testing {name}... ");
+        
+        if (!info.configured || string.IsNullOrWhiteSpace(info.apiBase))
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("⚠ Not configured");
+            Console.ResetColor();
+            continue;
+        }
+        
+        try
+        {
+            var response = await http.GetAsync(info.apiBase);
+            if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            {
+                // BadRequest is okay - means API is reachable but needs proper query
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"✓ Connected ({(int)response.StatusCode})");
+                Console.ResetColor();
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"✗ HTTP {(int)response.StatusCode}");
+                Console.ResetColor();
+                allPassed = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"✗ {ex.Message}");
+            Console.ResetColor();
+            allPassed = false;
+        }
+    }
+    
+    return allPassed ? 0 : 1;
+}
+
+/// <summary>
+/// Toggle provider enabled/disabled state.
+/// </summary>
+static int HandleProviderToggle(string target, bool enable, string configPath)
+{
+    var json = File.Exists(configPath)
+        ? (JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? new JsonObject())
+        : new JsonObject();
+    
+    // Map provider name to section
+    var sectionName = target.ToLowerInvariant() switch
+    {
+        "allanime" => "AllAnime",
+        "allmanga" => "AllManga",
+        "gogoanime" => "GogoAnime",
+        _ => target
+    };
+    
+    var providerNode = json[sectionName] as JsonObject ?? new JsonObject();
+    providerNode["Enabled"] = enable;
+    json[sectionName] = providerNode;
+    
+    var configDir = Path.GetDirectoryName(configPath);
+    if (!string.IsNullOrWhiteSpace(configDir) && !Directory.Exists(configDir))
+    {
+        Directory.CreateDirectory(configDir);
+    }
+    
+    File.WriteAllText(configPath, JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = true }));
+    
+    Console.ForegroundColor = enable ? ConsoleColor.Green : ConsoleColor.Yellow;
+    Console.WriteLine($"{(enable ? "✓ Enabled" : "○ Disabled")} provider '{sectionName}'.");
+    Console.ResetColor();
+    
+    return 0;
+}
+
+/// <summary>
+/// Print help for the provider command.
+/// </summary>
+static void PrintProviderHelp()
+{
+    Console.WriteLine("Usage: koware provider <command> [options]");
+    Console.WriteLine();
+    Console.WriteLine("Commands:");
+    Console.WriteLine("  list              Show all providers and their status (default)");
+    Console.WriteLine("  add [name]        Configure a provider interactively");
+    Console.WriteLine("  edit              Open config file in default editor");
+    Console.WriteLine("  init              Create template configuration file");
+    Console.WriteLine("  test [name]       Test provider connectivity");
+    Console.WriteLine("  --enable <name>   Enable a provider");
+    Console.WriteLine("  --disable <name>  Disable a provider");
+    Console.WriteLine();
+    Console.WriteLine("Examples:");
+    Console.WriteLine("  koware provider list");
+    Console.WriteLine("  koware provider add allanime");
+    Console.WriteLine("  koware provider init");
+    Console.WriteLine("  koware provider test");
+    Console.WriteLine("  koware provider --enable allanime");
 }
 
 /// <summary>
