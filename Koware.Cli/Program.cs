@@ -1333,6 +1333,20 @@ static async Task<int> HandleListAddAsync(string[] args, IAnimeListStore animeLi
         return 1;
     }
 
+    // Display matches with colored formatting
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine($"Anime matches for \"{query}\":");
+    Console.ResetColor();
+
+    for (var i = 0; i < matches.Count; i++)
+    {
+        var color = TextColorer.ForMatchIndex(i, matches.Count);
+        Console.ForegroundColor = color;
+        Console.Write($"  [{i + 1}] {matches[i].Title}");
+        Console.ResetColor();
+        Console.WriteLine($" -> {matches[i].DetailPage}");
+    }
+
     string animeId;
     string animeTitle;
 
@@ -1345,29 +1359,35 @@ static async Task<int> HandleListAddAsync(string[] args, IAnimeListStore animeLi
     else
     {
         // Multiple matches - let user choose
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine($"Found {matches.Count} matches:");
+        Console.Write($"Select anime [1-{matches.Count}] (Enter for 1, ");
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.Write("c to cancel");
         Console.ResetColor();
-
-        for (var i = 0; i < matches.Count; i++)
-        {
-            Console.WriteLine($"  {i + 1,2}. {matches[i].Title}");
-        }
-
-        Console.Write("Select anime to add (number): ");
+        Console.Write("): ");
         var input = Console.ReadLine()?.Trim();
 
-        if (!int.TryParse(input, out var choice) || choice < 1 || choice > matches.Count)
+        if (string.IsNullOrEmpty(input))
         {
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("Invalid selection. Cancelled.");
-            Console.ResetColor();
+            // Default to first match
+            animeId = matches[0].Id.Value;
+            animeTitle = matches[0].Title;
+        }
+        else if (input.Equals("c", StringComparison.OrdinalIgnoreCase))
+        {
+            WriteColoredLine("Cancelled.", ConsoleColor.Yellow);
             return 1;
         }
-
-        var selected = matches[choice - 1];
-        animeId = selected.Id.Value;
-        animeTitle = selected.Title;
+        else if (!int.TryParse(input, out var choice) || choice < 1 || choice > matches.Count)
+        {
+            WriteColoredLine("Invalid selection. Cancelled.", ConsoleColor.Yellow);
+            return 1;
+        }
+        else
+        {
+            var selected = matches[choice - 1];
+            animeId = selected.Id.Value;
+            animeTitle = selected.Title;
+        }
     }
 
     // Check if already in list
@@ -1718,6 +1738,20 @@ static async Task<int> HandleMangaListAddAsync(string[] args, IMangaListStore ma
         return 1;
     }
 
+    // Display matches with colored formatting
+    Console.ForegroundColor = ConsoleColor.Magenta;
+    Console.WriteLine($"Manga matches for \"{query}\":");
+    Console.ResetColor();
+
+    for (var i = 0; i < matches.Count; i++)
+    {
+        var color = TextColorer.ForMatchIndex(i, matches.Count);
+        Console.ForegroundColor = color;
+        Console.Write($"  [{i + 1}] {matches[i].Title}");
+        Console.ResetColor();
+        Console.WriteLine($" -> {matches[i].DetailPage}");
+    }
+
     string mangaId;
     string mangaTitle;
 
@@ -1728,24 +1762,34 @@ static async Task<int> HandleMangaListAddAsync(string[] args, IMangaListStore ma
     }
     else
     {
-        WriteColoredLine($"Found {matches.Count} matches:", ConsoleColor.Cyan);
-        for (var i = 0; i < matches.Count; i++)
-        {
-            Console.WriteLine($"  {i + 1,2}. {matches[i].Title}");
-        }
-
-        Console.Write("Select manga to add (number): ");
+        Console.Write($"Select manga [1-{matches.Count}] (Enter for 1, ");
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.Write("c to cancel");
+        Console.ResetColor();
+        Console.Write("): ");
         var input = Console.ReadLine()?.Trim();
 
-        if (!int.TryParse(input, out var choice) || choice < 1 || choice > matches.Count)
+        if (string.IsNullOrEmpty(input))
+        {
+            mangaId = matches[0].Id.Value;
+            mangaTitle = matches[0].Title;
+        }
+        else if (input.Equals("c", StringComparison.OrdinalIgnoreCase))
+        {
+            WriteColoredLine("Cancelled.", ConsoleColor.Yellow);
+            return 1;
+        }
+        else if (!int.TryParse(input, out var choice) || choice < 1 || choice > matches.Count)
         {
             WriteColoredLine("Invalid selection. Cancelled.", ConsoleColor.Yellow);
             return 1;
         }
-
-        var selected = matches[choice - 1];
-        mangaId = selected.Id.Value;
-        mangaTitle = selected.Title;
+        else
+        {
+            var selected = matches[choice - 1];
+            mangaId = selected.Id.Value;
+            mangaTitle = selected.Title;
+        }
     }
 
     var existing = await mangaList.GetByTitleAsync(mangaTitle, cancellationToken);
