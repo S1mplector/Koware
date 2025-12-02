@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage Notice
+    url: https://github.com/S1mplector/Koware/blob/master/Usage-Notice.md
+    about: Please read the usage notice before using Koware
+  - name: DMCA Policy
+    url: https://github.com/S1mplector/Koware/blob/master/DMCA.md
+    about: Our DMCA and takedown policy
