@@ -2752,6 +2752,12 @@ static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> 
         return 1;
     }
 
+    // Handle macOS browser-based reader
+    if (readerPath == "macos-browser")
+    {
+        return LaunchMacOSBrowserReader(pages, logger, displayTitle);
+    }
+
     // Build pages JSON
     var pagesData = pages.Select(p => new { url = p.ImageUrl.ToString(), pageNumber = p.PageNumber }).ToArray();
     var pagesJson = JsonSerializer.Serialize(pagesData);
@@ -2781,6 +2787,140 @@ static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> 
 }
 
 /// <summary>
+/// Launch a browser-based manga reader on macOS by creating a temporary HTML file.
+/// </summary>
+static int LaunchMacOSBrowserReader(IReadOnlyCollection<ChapterPage> pages, ILogger logger, string? displayTitle)
+{
+    var title = string.IsNullOrWhiteSpace(displayTitle) ? "Koware Reader" : displayTitle;
+    var htmlContent = GenerateReaderHtml(pages, title!);
+    
+    // Create temp HTML file
+    var tempDir = Path.Combine(Path.GetTempPath(), "koware-reader");
+    Directory.CreateDirectory(tempDir);
+    var htmlPath = Path.Combine(tempDir, $"reader-{Guid.NewGuid():N}.html");
+    File.WriteAllText(htmlPath, htmlContent);
+    
+    logger.LogInformation("Opening reader in browser: {Path}", htmlPath);
+    
+    // Open in default browser using macOS 'open' command
+    var start = new ProcessStartInfo
+    {
+        FileName = "open",
+        Arguments = $"\"{htmlPath}\"",
+        UseShellExecute = false
+    };
+    
+    try
+    {
+        Process.Start(start);
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine("📖 Reader opened in browser. Press Enter when done reading...");
+        Console.ResetColor();
+        Console.ReadLine();
+        
+        // Cleanup temp file
+        try { File.Delete(htmlPath); } catch { }
+        
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to open browser reader");
+        return 1;
+    }
+}
+
+/// <summary>
+/// Generate an HTML page for reading manga in the browser.
+/// </summary>
+static string GenerateReaderHtml(IReadOnlyCollection<ChapterPage> pages, string title)
+{
+    var escapedTitle = System.Net.WebUtility.HtmlEncode(title);
+    var imagesHtml = string.Join("\n", pages.OrderBy(p => p.PageNumber).Select(p => 
+        $"        <img src=\"{p.ImageUrl}\" alt=\"Page {p.PageNumber}\" loading=\"lazy\" />"));
+    
+    return $@"<!DOCTYPE html>
+<html lang=""en"">
+<head>
+    <meta charset=""UTF-8"">
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+    <title>{escapedTitle}</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            background: #1a1a2e;
+            color: #eee;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+        }}
+        header {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(26, 26, 46, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 100;
+            border-bottom: 1px solid #333;
+        }}
+        h1 {{ font-size: 1.1rem; font-weight: 500; }}
+        .page-info {{ color: #888; font-size: 0.9rem; }}
+        .container {{
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 70px 10px 20px;
+        }}
+        .page {{
+            margin-bottom: 4px;
+            display: flex;
+            justify-content: center;
+        }}
+        img {{
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }}
+        .controls {{
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            gap: 8px;
+        }}
+        button {{
+            background: #38bdf8;
+            color: #000;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }}
+        button:hover {{ background: #7dd3fc; }}
+    </style>
+</head>
+<body>
+    <header>
+        <h1>{escapedTitle}</h1>
+        <span class=""page-info"">{pages.Count} pages</span>
+    </header>
+    <div class=""container"">
+{imagesHtml}
+    </div>
+    <div class=""controls"">
+        <button onclick=""window.scrollTo({{top: 0, behavior: 'smooth'}})"">↑ Top</button>
+    </div>
+</body>
+</html>";
+}
+
+/// <summary>
 /// Resolve the reader executable path from options.
 /// </summary>
 /// <param name="options">Reader options.</param>
@@ -2788,6 +2928,14 @@ static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> 
 static string? ResolveReaderExecutable(ReaderOptions options)
 {
     var command = options.Command;
+    
+    // On macOS, default to using the open command with Safari
+    if (string.IsNullOrWhiteSpace(command) && OperatingSystem.IsMacOS())
+    {
+        // Return a special marker that LaunchReader will handle
+        return "macos-browser";
+    }
+    
     if (string.IsNullOrWhiteSpace(command))
     {
         command = "Koware.Reader.Win.exe";
@@ -3783,7 +3931,18 @@ static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
     {
         candidates.Add(options.Command);
     }
-    candidates.AddRange(new[] { "Koware.Player.Win", "Koware.Player.Win.exe", "vlc", "mpv" });
+    
+    if (OperatingSystem.IsMacOS())
+    {
+        // macOS: prefer IINA (native), then mpv, then VLC
+        candidates.AddRange(new[] { "iina", "mpv", "vlc" });
+    }
+    else
+    {
+        // Windows: prefer bundled player, then VLC, then mpv
+        candidates.AddRange(new[] { "Koware.Player.Win", "Koware.Player.Win.exe", "vlc", "mpv" });
+    }
+    
     candidates = candidates
         .Where(c => !string.IsNullOrWhiteSpace(c))
         .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -3820,7 +3979,10 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
 
     if (resolution.Path is null)
     {
-        logger.LogError("No supported player found (tried {Candidates}). Build Koware.Player.Win or set Player:Command in appsettings.json.", string.Join(", ", resolution.Candidates));
+        var hint = OperatingSystem.IsMacOS() 
+            ? "Install IINA (brew install --cask iina) or mpv (brew install mpv), or set Player:Command in config."
+            : "Build Koware.Player.Win or set Player:Command in appsettings.json.";
+        logger.LogError("No supported player found (tried {Candidates}). {Hint}", string.Join(", ", resolution.Candidates), hint);
         return 1;
     }
 
@@ -3866,11 +4028,14 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
     }
 
     var defaultArgs = string.Empty;
+    var isMpvLike = string.Equals(playerName, "mpv", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(playerName, "iina", StringComparison.OrdinalIgnoreCase);
+    
     if (string.Equals(playerName, "vlc", StringComparison.OrdinalIgnoreCase))
     {
         defaultArgs = "--play-and-exit --quiet";
     }
-    else if (string.Equals(playerName, "mpv", StringComparison.OrdinalIgnoreCase))
+    else if (isMpvLike)
     {
         defaultArgs = "--no-terminal --force-window=yes";
     }
@@ -3884,7 +4049,7 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
         {
             headerArgs.Add($"--http-referrer=\"{httpReferrer}\"");
         }
-        else if (string.Equals(playerName, "mpv", StringComparison.OrdinalIgnoreCase))
+        else if (isMpvLike)
         {
             headerArgs.Add($"--referrer=\"{httpReferrer}\"");
         }
@@ -3896,7 +4061,7 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
         {
             headerArgs.Add($"--http-user-agent=\"{httpUserAgent}\"");
         }
-        else if (string.Equals(playerName, "mpv", StringComparison.OrdinalIgnoreCase))
+        else if (isMpvLike)
         {
             headerArgs.Add($"--user-agent=\"{httpUserAgent}\"");
         }
