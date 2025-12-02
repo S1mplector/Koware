@@ -88,23 +88,44 @@
                             ToolTip.Tip="Toggle double-page view (D)" />
                     
                     <Button x:Name="FullscreenButton"
-                            Content="⛶"
-                            FontSize="16"
                             Click="OnFullscreenClick"
                             Background="#2a2a4a"
                             Foreground="White"
                             Width="36" Height="32"
+                            Padding="0"
                             Margin="0,0,8,0"
-                            ToolTip.Tip="Fullscreen (F)" />
+                            HorizontalContentAlignment="Center"
+                            VerticalContentAlignment="Center"
+                            ToolTip.Tip="Fullscreen (F)">
+                        <Viewbox Width="16" Height="16" Stretch="Uniform">
+                            <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  StrokeThickness="2"
+                                  StrokeLineCap="Round"
+                                  Data="M5 9V5h4M5 15v4h4M19 9V5h-4M19 15v4h-4" />
+                        </Viewbox>
+                    </Button>
                     
                     <Button Content="?"
-                            FontSize="14"
-                            FontWeight="Bold"
                             Click="OnHelpCloseClick"
                             Background="#3a3a5a"
                             Foreground="#aaa"
                             Width="32" Height="32"
-                            ToolTip.Tip="Keyboard shortcuts (H)" />
+                            Padding="0"
+                            HorizontalContentAlignment="Center"
+                            VerticalContentAlignment="Center"
+                            ToolTip.Tip="Keyboard shortcuts (H)">
+                        <Viewbox Width="16" Height="16" Stretch="Uniform">
+                            <Canvas Width="24" Height="24">
+                                <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                      StrokeThickness="2"
+                                      StrokeLineCap="Round"
+                                      Data="M8 8a4 4 0 1 1 8 0c0 1.38-.86 2.59-2.06 3.26-.43.25-.87.51-1.25.84-.4.36-.64.88-.64 1.42v1.48" />
+                                <Ellipse Width="2" Height="2"
+                                         Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                         Canvas.Left="11" Canvas.Top="18" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>
