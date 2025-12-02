@@ -138,8 +138,35 @@ static async Task<int> RunAsync(IHost host, string[] args)
     var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
     var command = args[0].ToLowerInvariant();
 
+    // Commands that require configured providers
+    var providerRequiredCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "search", "plan", "stream", "watch", "play", "download", "read", "last", "continue", "list"
+    };
+
     try
     {
+        // Check providers early for commands that need them
+        if (providerRequiredCommands.Contains(command))
+        {
+            var mode = defaults.GetMode();
+            // For anime-only commands (plan/stream/play/download), use anime mode
+            if (command is "plan" or "stream" or "watch" or "play" or "download")
+            {
+                mode = CliMode.Anime;
+            }
+            // For manga-only commands (read), use manga mode
+            else if (command == "read")
+            {
+                mode = CliMode.Manga;
+            }
+            
+            if (!CheckProvidersConfigured(services, mode, logger))
+            {
+                return 1;
+            }
+        }
+
         switch (command)
         {
             case "search":
@@ -202,6 +229,55 @@ static async Task<int> RunAsync(IHost host, string[] args)
         logger.LogError(ex, "Unhandled exception during command execution.");
         return 1;
     }
+}
+
+/// <summary>
+/// Check if any providers are configured for the given mode (anime or manga).
+/// Returns true if at least one provider is ready; otherwise prints guidance and returns false.
+/// </summary>
+static bool CheckProvidersConfigured(IServiceProvider services, CliMode mode, ILogger logger)
+{
+    var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+    var gogoAnime = services.GetRequiredService<IOptions<GogoAnimeOptions>>().Value;
+    var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+
+    bool hasConfiguredProvider;
+    string modeLabel;
+
+    if (mode == CliMode.Manga)
+    {
+        hasConfiguredProvider = allManga.IsConfigured;
+        modeLabel = "manga";
+    }
+    else
+    {
+        hasConfiguredProvider = allAnime.IsConfigured || gogoAnime.IsConfigured;
+        modeLabel = "anime";
+    }
+
+    if (!hasConfiguredProvider)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"⚠ No {modeLabel} providers configured.");
+        Console.ResetColor();
+        Console.WriteLine();
+        Console.WriteLine("Koware requires you to configure external sources before use.");
+        Console.WriteLine("This is by design - we do not bundle or endorse any specific sources.");
+        Console.WriteLine();
+        Console.WriteLine("To get started:");
+        Console.WriteLine("  koware provider list          View available providers");
+        Console.WriteLine("  koware provider init          Create a template config file");
+        Console.WriteLine("  koware provider add <name>    Configure a provider interactively");
+        Console.WriteLine("  koware provider edit          Open config file in editor");
+        Console.WriteLine();
+        Console.WriteLine("After configuring, test connectivity with:");
+        Console.WriteLine("  koware provider test");
+        Console.WriteLine();
+        logger.LogWarning("No {Mode} providers configured. Run 'koware provider init' to create a config template.", modeLabel);
+        return false;
+    }
+
+    return true;
 }
 
 /// <summary>
