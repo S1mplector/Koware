@@ -1,6 +1,8 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Koware.Reader"
         x:Class="Koware.Reader.MainWindow"
+        x:DataType="local:MainWindow"
         Title="Koware Reader"
         Width="1000" Height="800"
         MinWidth="600" MinHeight="500"

@@ -1,6 +1,7 @@
 // Author: Ilgaz Mehmetoğlu
 // Main window for the cross-platform Koware video player using LibVLCSharp.
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
