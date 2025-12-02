@@ -1,0 +1,146 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vlc="clr-namespace:LibVLCSharp.Avalonia;assembly=LibVLCSharp.Avalonia"
+        x:Class="Koware.Player.MainWindow"
+        Title="Koware Player"
+        Width="1280" Height="720"
+        MinWidth="640" MinHeight="480"
+        WindowStartupLocation="CenterScreen"
+        Background="#1a1a2e"
+        KeyDown="OnKeyDown">
+    
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        
+        <!-- Video View -->
+        <vlc:VideoView x:Name="VideoView" 
+                       Grid.Row="0"
+                       MediaPlayer="{Binding MediaPlayer}"
+                       DoubleTapped="OnVideoDoubleTapped" />
+        
+        <!-- Loading Overlay -->
+        <Border x:Name="LoadingOverlay" 
+                Grid.Row="0" 
+                Background="#80000000"
+                IsVisible="True">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="Loading..." 
+                           Foreground="White" 
+                           FontSize="24"
+                           HorizontalAlignment="Center" />
+                <TextBlock x:Name="StatusText"
+                           Text=""
+                           Foreground="#888"
+                           FontSize="14"
+                           HorizontalAlignment="Center"
+                           Margin="0,10,0,0" />
+            </StackPanel>
+        </Border>
+        
+        <!-- Controls Panel -->
+        <Border x:Name="ControlsPanel"
+                Grid.Row="1"
+                Background="#cc1a1a2e"
+                Padding="16,12">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                
+                <!-- Progress Bar -->
+                <Grid Grid.Row="0" Margin="0,0,0,8">
+                    <Slider x:Name="ProgressSlider"
+                            Minimum="0" Maximum="100" Value="0"
+                            PointerPressed="OnProgressPointerPressed"
+                            PointerReleased="OnProgressPointerReleased" />
+                </Grid>
+                
+                <!-- Control Buttons -->
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    
+                    <!-- Play/Pause -->
+                    <Button x:Name="PlayPauseButton" 
+                            Grid.Column="0"
+                            Content="⏸"
+                            FontSize="20"
+                            Width="48" Height="40"
+                            Click="OnPlayPauseClick"
+                            Background="Transparent"
+                            Foreground="White" />
+                    
+                    <!-- Time Display -->
+                    <TextBlock x:Name="TimeDisplay"
+                               Grid.Column="1"
+                               Text="00:00 / 00:00"
+                               Foreground="#aaa"
+                               VerticalAlignment="Center"
+                               Margin="12,0,0,0" />
+                    
+                    <!-- Spacer -->
+                    <Panel Grid.Column="2" />
+                    
+                    <!-- Volume -->
+                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="MuteButton"
+                                Content="🔊"
+                                FontSize="16"
+                                Width="40" Height="40"
+                                Click="OnMuteClick"
+                                Background="Transparent"
+                                Foreground="White" />
+                        <Slider x:Name="VolumeSlider"
+                                Width="100"
+                                Minimum="0" Maximum="100" Value="100"
+                                VerticalAlignment="Center"
+                                ValueChanged="OnVolumeChanged" />
+                    </StackPanel>
+                    
+                    <!-- Fullscreen -->
+                    <Button x:Name="FullscreenButton"
+                            Grid.Column="4"
+                            Content="⛶"
+                            FontSize="18"
+                            Width="48" Height="40"
+                            Click="OnFullscreenClick"
+                            Background="Transparent"
+                            Foreground="White"
+                            Margin="8,0,0,0" />
+                </Grid>
+            </Grid>
+        </Border>
+        
+        <!-- Error Overlay -->
+        <Border x:Name="ErrorOverlay"
+                Grid.Row="0" Grid.RowSpan="2"
+                Background="#ee1a1a2e"
+                IsVisible="False">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="⚠"
+                           Foreground="#f87171"
+                           FontSize="48"
+                           HorizontalAlignment="Center" />
+                <TextBlock x:Name="ErrorText"
+                           Text="Failed to play stream"
+                           Foreground="#f87171"
+                           FontSize="18"
+                           HorizontalAlignment="Center"
+                           Margin="0,16,0,0" />
+                <Button Content="Close"
+                        Click="OnCloseClick"
+                        Margin="0,24,0,0"
+                        HorizontalAlignment="Center" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

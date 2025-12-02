@@ -1,0 +1,154 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Koware.Reader.MainWindow"
+        Title="Koware Reader"
+        Width="1000" Height="800"
+        MinWidth="600" MinHeight="500"
+        WindowStartupLocation="CenterScreen"
+        Background="#1a1a2e"
+        KeyDown="OnKeyDown">
+    
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        
+        <!-- Header -->
+        <Border Grid.Row="0" 
+                Background="#0d0d1a"
+                Padding="16,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                
+                <TextBlock x:Name="TitleText"
+                           Grid.Column="0"
+                           Text="Koware Reader"
+                           FontSize="16"
+                           FontWeight="SemiBold"
+                           Foreground="White"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+                
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <TextBlock x:Name="PageIndicator"
+                               Text="Page 1 / 1"
+                               Foreground="#888"
+                               VerticalAlignment="Center"
+                               Margin="0,0,16,0" />
+                    
+                    <Button x:Name="FitModeButton"
+                            Content="Fit Width"
+                            Click="OnFitModeClick"
+                            Background="#2a2a4a"
+                            Foreground="White"
+                            Padding="12,6"
+                            Margin="0,0,8,0" />
+                    
+                    <Button x:Name="FullscreenButton"
+                            Content="⛶"
+                            FontSize="16"
+                            Click="OnFullscreenClick"
+                            Background="#2a2a4a"
+                            Foreground="White"
+                            Width="36" Height="32" />
+                </StackPanel>
+            </Grid>
+        </Border>
+        
+        <!-- Main Content -->
+        <ScrollViewer x:Name="ScrollViewer"
+                      Grid.Row="1"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto"
+                      Background="#1a1a2e">
+            <StackPanel x:Name="PagesContainer"
+                        HorizontalAlignment="Center"
+                        Margin="0,8">
+                <!-- Pages will be added dynamically -->
+            </StackPanel>
+        </ScrollViewer>
+        
+        <!-- Loading Overlay -->
+        <Border x:Name="LoadingOverlay"
+                Grid.Row="1"
+                Background="#cc1a1a2e"
+                IsVisible="True">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="Loading pages..."
+                           Foreground="White"
+                           FontSize="20"
+                           HorizontalAlignment="Center" />
+                <TextBlock x:Name="LoadingProgress"
+                           Text="0 / 0"
+                           Foreground="#888"
+                           FontSize="14"
+                           HorizontalAlignment="Center"
+                           Margin="0,8,0,0" />
+            </StackPanel>
+        </Border>
+        
+        <!-- Footer Navigation -->
+        <Border Grid.Row="2"
+                Background="#0d0d1a"
+                Padding="16,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                
+                <Button Grid.Column="0"
+                        Content="← Previous"
+                        Click="OnPreviousClick"
+                        Background="#2a2a4a"
+                        Foreground="White"
+                        Padding="16,8" />
+                
+                <Slider x:Name="PageSlider"
+                        Grid.Column="1"
+                        Minimum="1" Maximum="1" Value="1"
+                        Margin="16,0"
+                        VerticalAlignment="Center"
+                        ValueChanged="OnPageSliderChanged" />
+                
+                <Button Grid.Column="2"
+                        Content="Next →"
+                        Click="OnNextClick"
+                        Background="#2a2a4a"
+                        Foreground="White"
+                        Padding="16,8" />
+            </Grid>
+        </Border>
+        
+        <!-- Error Overlay -->
+        <Border x:Name="ErrorOverlay"
+                Grid.RowSpan="3"
+                Background="#ee1a1a2e"
+                IsVisible="False">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="⚠"
+                           Foreground="#f87171"
+                           FontSize="48"
+                           HorizontalAlignment="Center" />
+                <TextBlock x:Name="ErrorText"
+                           Text="Failed to load pages"
+                           Foreground="#f87171"
+                           FontSize="18"
+                           HorizontalAlignment="Center"
+                           Margin="0,16,0,0"
+                           TextWrapping="Wrap"
+                           MaxWidth="400" />
+                <Button Content="Close"
+                        Click="OnCloseClick"
+                        Margin="0,24,0,0"
+                        HorizontalAlignment="Center" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

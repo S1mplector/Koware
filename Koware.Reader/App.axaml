@@ -1,0 +1,11 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Koware.Reader.App"
+             RequestedThemeVariant="Dark">
+    <Application.Styles>
+        <FluentTheme />
+        <Style Selector="ScrollViewer">
+            <Setter Property="AllowAutoHide" Value="True" />
+        </Style>
+    </Application.Styles>
+</Application>
