@@ -30,7 +30,7 @@ public sealed class InstallerEngine
 
         var installDir = Path.GetFullPath(options.InstallDir);
         var cliProject = Path.Combine(_repoRoot, "Koware.Cli");
-        var playerProject = Path.Combine(_repoRoot, "Koware.Player.Win");
+        var playerProject = Path.Combine(_repoRoot, "Koware.Player");
 
         EnsureDirectory(installDir, options.CleanTarget, progress);
 
