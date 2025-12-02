@@ -3401,6 +3401,23 @@ static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> 
     {
         return LaunchMacOSBrowserReader(pages, logger, displayTitle);
     }
+    
+    // Show which reader is being used
+    var readerName = Path.GetFileNameWithoutExtension(readerPath);
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.Write("📖 ");
+    Console.ResetColor();
+    Console.Write($"Launching ");
+    Console.ForegroundColor = ConsoleColor.White;
+    Console.Write(readerName);
+    Console.ResetColor();
+    Console.Write($" ({pages.Count} pages)");
+    if (!string.IsNullOrWhiteSpace(displayTitle))
+    {
+        Console.Write($" — {displayTitle}");
+    }
+    Console.WriteLine();
 
     // Build pages JSON
     var pagesData = pages.Select(p => new { url = p.ImageUrl.ToString(), pageNumber = p.PageNumber }).ToArray();
@@ -4645,6 +4662,21 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
     var playerPath = resolution.Path;
     var playerName = resolution.Name;
     var subtitle = stream.Subtitles.FirstOrDefault();
+    
+    // Show which player is being used
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.Write("▶ ");
+    Console.ResetColor();
+    Console.Write($"Launching ");
+    Console.ForegroundColor = ConsoleColor.White;
+    Console.Write(playerName);
+    Console.ResetColor();
+    if (!string.IsNullOrWhiteSpace(displayTitle))
+    {
+        Console.Write($" — {displayTitle}");
+    }
+    Console.WriteLine();
 
     // Handle bundled Koware players (Windows and cross-platform Avalonia)
     if (string.Equals(playerName, "Koware.Player.Win", StringComparison.OrdinalIgnoreCase) ||

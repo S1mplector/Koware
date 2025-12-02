@@ -43,13 +43,40 @@
                                VerticalAlignment="Center"
                                Margin="0,0,16,0" />
                     
+                    <!-- Zoom Controls -->
+                    <Button Content="−"
+                            FontSize="16"
+                            FontWeight="Bold"
+                            Click="OnZoomOutClick"
+                            Background="#2a2a4a"
+                            Foreground="White"
+                            Width="32" Height="32"
+                            Margin="0,0,4,0"
+                            ToolTip.Tip="Zoom out (−)" />
+                    <TextBlock x:Name="ZoomIndicator"
+                               Text="100%"
+                               Foreground="#888"
+                               VerticalAlignment="Center"
+                               Width="45"
+                               TextAlignment="Center" />
+                    <Button Content="+"
+                            FontSize="16"
+                            FontWeight="Bold"
+                            Click="OnZoomInClick"
+                            Background="#2a2a4a"
+                            Foreground="White"
+                            Width="32" Height="32"
+                            Margin="0,0,12,0"
+                            ToolTip.Tip="Zoom in (+)" />
+                    
                     <Button x:Name="FitModeButton"
                             Content="Fit Width"
                             Click="OnFitModeClick"
                             Background="#2a2a4a"
                             Foreground="White"
                             Padding="12,6"
-                            Margin="0,0,8,0" />
+                            Margin="0,0,8,0"
+                            ToolTip.Tip="Cycle fit mode (W)" />
                     
                     <Button x:Name="FullscreenButton"
                             Content="⛶"
@@ -57,7 +84,18 @@
                             Click="OnFullscreenClick"
                             Background="#2a2a4a"
                             Foreground="White"
-                            Width="36" Height="32" />
+                            Width="36" Height="32"
+                            Margin="0,0,8,0"
+                            ToolTip.Tip="Fullscreen (F)" />
+                    
+                    <Button Content="?"
+                            FontSize="14"
+                            FontWeight="Bold"
+                            Click="OnHelpCloseClick"
+                            Background="#3a3a5a"
+                            Foreground="#aaa"
+                            Width="32" Height="32"
+                            ToolTip.Tip="Keyboard shortcuts (H)" />
                 </StackPanel>
             </Grid>
         </Border>
@@ -80,17 +118,22 @@
                 Grid.Row="1"
                 Background="#cc1a1a2e"
                 IsVisible="True">
-            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="300">
                 <TextBlock Text="Loading pages..."
                            Foreground="White"
                            FontSize="20"
                            HorizontalAlignment="Center" />
+                <ProgressBar x:Name="LoadingProgressBar"
+                             Minimum="0" Maximum="100" Value="0"
+                             Height="8"
+                             Margin="0,16,0,8"
+                             Background="#333"
+                             Foreground="#60a5fa" />
                 <TextBlock x:Name="LoadingProgress"
                            Text="0 / 0"
                            Foreground="#888"
                            FontSize="14"
-                           HorizontalAlignment="Center"
-                           Margin="0,8,0,0" />
+                           HorizontalAlignment="Center" />
             </StackPanel>
         </Border>
         
@@ -126,6 +169,75 @@
                         Foreground="White"
                         Padding="16,8" />
             </Grid>
+        </Border>
+        
+        <!-- Help Overlay -->
+        <Border x:Name="HelpOverlay"
+                Grid.RowSpan="3"
+                Background="#ee0d0d1a"
+                IsVisible="False">
+            <Border Background="#1a1a2e"
+                    CornerRadius="12"
+                    Padding="32"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center"
+                    MinWidth="400">
+                <StackPanel>
+                    <TextBlock Text="Keyboard Shortcuts"
+                               Foreground="White"
+                               FontSize="20"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center"
+                               Margin="0,0,0,20" />
+                    
+                    <StackPanel Spacing="6">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="← / →" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
+                            <TextBlock Text="Previous / Next page" Foreground="#ccc" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Home / End" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
+                            <TextBlock Text="First / Last page" Foreground="#ccc" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Space" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
+                            <TextBlock Text="Next page" Foreground="#ccc" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="+ / −" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
+                            <TextBlock Text="Zoom in / out" Foreground="#ccc" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="0" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
+                            <TextBlock Text="Reset zoom to 100%" Foreground="#ccc" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="W" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
+                            <TextBlock Text="Cycle fit mode" Foreground="#ccc" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="F / F11" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
+                            <TextBlock Text="Toggle fullscreen" Foreground="#ccc" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="H / ?" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
+                            <TextBlock Text="Show/hide this help" Foreground="#ccc" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Esc / Q" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
+                            <TextBlock Text="Close reader" Foreground="#ccc" />
+                        </StackPanel>
+                    </StackPanel>
+                    
+                    <Button Content="Got it"
+                            Click="OnHelpCloseClick"
+                            Background="#3a3a5a"
+                            Foreground="White"
+                            Padding="24,8"
+                            Margin="0,24,0,0"
+                            HorizontalAlignment="Center" />
+                </StackPanel>
+            </Border>
         </Border>
         
         <!-- Error Overlay -->

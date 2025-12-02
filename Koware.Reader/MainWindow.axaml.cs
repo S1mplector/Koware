@@ -29,6 +29,9 @@ public partial class MainWindow : Window
     private WindowState _previousWindowState;
     private int _currentPage = 1;
     private FitMode _fitMode = FitMode.FitWidth;
+    private double _zoomLevel = 1.0;
+    private bool _showHelp;
+    private bool _isScrollTracking = true;
 
     public List<PageInfo> Pages { get; set; } = new();
     public string? HttpReferer { get; set; }
@@ -51,6 +54,9 @@ public partial class MainWindow : Window
         Opened += OnWindowOpened;
         Closing += OnWindowClosing;
         SizeChanged += OnSizeChanged;
+        
+        // Track scroll position to update current page
+        ScrollViewer.ScrollChanged += OnScrollChanged;
     }
 
     private void OnWindowOpened(object? sender, EventArgs e)
@@ -122,6 +128,7 @@ public partial class MainWindow : Window
                         
                         loadedCount++;
                         LoadingProgress.Text = $"{loadedCount} / {totalPages}";
+                        LoadingProgressBar.Value = (loadedCount * 100.0) / totalPages;
                         
                         if (loadedCount >= totalPages)
                         {
@@ -180,16 +187,16 @@ public partial class MainWindow : Window
         switch (_fitMode)
         {
             case FitMode.FitWidth:
-                image.Width = containerWidth;
+                image.Width = containerWidth * _zoomLevel;
                 image.Height = double.NaN;
                 break;
             case FitMode.FitHeight:
                 image.Width = double.NaN;
-                image.Height = containerHeight;
+                image.Height = containerHeight * _zoomLevel;
                 break;
             case FitMode.Original:
-                image.Width = bitmap.PixelSize.Width;
-                image.Height = bitmap.PixelSize.Height;
+                image.Width = bitmap.PixelSize.Width * _zoomLevel;
+                image.Height = bitmap.PixelSize.Height * _zoomLevel;
                 break;
         }
     }
@@ -209,23 +216,7 @@ public partial class MainWindow : Window
 
     private void OnFitModeClick(object? sender, RoutedEventArgs e)
     {
-        _fitMode = _fitMode switch
-        {
-            FitMode.FitWidth => FitMode.FitHeight,
-            FitMode.FitHeight => FitMode.Original,
-            FitMode.Original => FitMode.FitWidth,
-            _ => FitMode.FitWidth
-        };
-
-        FitModeButton.Content = _fitMode switch
-        {
-            FitMode.FitWidth => "Fit Width",
-            FitMode.FitHeight => "Fit Height",
-            FitMode.Original => "Original",
-            _ => "Fit Width"
-        };
-
-        ApplyFitModeToAll();
+        CycleFitMode();
     }
 
     private void OnFullscreenClick(object? sender, RoutedEventArgs e)
@@ -327,7 +318,11 @@ public partial class MainWindow : Window
                 break;
                 
             case Key.Escape:
-                if (_isFullscreen)
+                if (_showHelp)
+                {
+                    ToggleHelp();
+                }
+                else if (_isFullscreen)
                 {
                     ToggleFullscreen();
                 }
@@ -342,7 +337,135 @@ public partial class MainWindow : Window
                 Close();
                 e.Handled = true;
                 break;
+                
+            // Zoom controls
+            case Key.OemPlus:
+            case Key.Add:
+                ZoomIn();
+                e.Handled = true;
+                break;
+                
+            case Key.OemMinus:
+            case Key.Subtract:
+                ZoomOut();
+                e.Handled = true;
+                break;
+                
+            case Key.D0:
+            case Key.NumPad0:
+                ResetZoom();
+                e.Handled = true;
+                break;
+                
+            // Help toggle
+            case Key.OemQuestion:
+            case Key.H:
+                ToggleHelp();
+                e.Handled = true;
+                break;
+                
+            // Fit mode cycling
+            case Key.W:
+                CycleFitMode();
+                e.Handled = true;
+                break;
         }
+    }
+    
+    private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (!_isScrollTracking || _pageImages.Count == 0) return;
+        
+        // Find which page is most visible
+        var scrollOffset = ScrollViewer.Offset.Y;
+        var viewportHeight = ScrollViewer.Viewport.Height;
+        var viewportCenter = scrollOffset + viewportHeight / 2;
+        
+        for (int i = 0; i < _pageImages.Count; i++)
+        {
+            var image = _pageImages[i];
+            var bounds = image.Bounds;
+            var imageTop = bounds.Top;
+            var imageBottom = bounds.Bottom;
+            
+            if (viewportCenter >= imageTop && viewportCenter <= imageBottom)
+            {
+                var newPage = i + 1;
+                if (newPage != _currentPage)
+                {
+                    _currentPage = newPage;
+                    PageSlider.Value = newPage;
+                    UpdatePageIndicator();
+                }
+                break;
+            }
+        }
+    }
+    
+    private void ZoomIn()
+    {
+        _zoomLevel = Math.Min(_zoomLevel + 0.1, 3.0);
+        ApplyZoom();
+    }
+    
+    private void ZoomOut()
+    {
+        _zoomLevel = Math.Max(_zoomLevel - 0.1, 0.3);
+        ApplyZoom();
+    }
+    
+    private void ResetZoom()
+    {
+        _zoomLevel = 1.0;
+        ApplyZoom();
+    }
+    
+    private void ApplyZoom()
+    {
+        ZoomIndicator.Text = $"{(int)(_zoomLevel * 100)}%";
+        ApplyFitModeToAll();
+    }
+    
+    private void CycleFitMode()
+    {
+        _fitMode = _fitMode switch
+        {
+            FitMode.FitWidth => FitMode.FitHeight,
+            FitMode.FitHeight => FitMode.Original,
+            FitMode.Original => FitMode.FitWidth,
+            _ => FitMode.FitWidth
+        };
+        
+        FitModeButton.Content = _fitMode switch
+        {
+            FitMode.FitWidth => "Fit Width",
+            FitMode.FitHeight => "Fit Height",
+            FitMode.Original => "Original",
+            _ => "Fit Width"
+        };
+        
+        ApplyFitModeToAll();
+    }
+    
+    private void ToggleHelp()
+    {
+        _showHelp = !_showHelp;
+        HelpOverlay.IsVisible = _showHelp;
+    }
+    
+    private void OnHelpCloseClick(object? sender, RoutedEventArgs e)
+    {
+        ToggleHelp();
+    }
+    
+    private void OnZoomInClick(object? sender, RoutedEventArgs e)
+    {
+        ZoomIn();
+    }
+    
+    private void OnZoomOutClick(object? sender, RoutedEventArgs e)
+    {
+        ZoomOut();
     }
 
     private void ShowError(string message)
