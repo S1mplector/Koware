@@ -28,7 +28,6 @@
         <Style Selector="Button.toolbar:pointerover">
             <Setter Property="Background" Value="#343a62" />
             <Setter Property="BorderBrush" Value="#55639a" />
-            <Setter Property="BoxShadow" Value="0 4 10 0 #0b0f1f" />
         </Style>
         <Style Selector="Button.toolbar:pressed">
             <Setter Property="Background" Value="#2a2f54" />
@@ -39,7 +38,6 @@
         </Style>
         <Style Selector="Button.toolbar:focus-visible">
             <Setter Property="BorderBrush" Value="#7ec4ff" />
-            <Setter Property="BoxShadow" Value="0 0 0 2 #2a4d7c" />
         </Style>
         
         <!-- Page slider -->
@@ -53,7 +51,6 @@
             <Setter Property="BorderBrush" Value="#9acbff" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="9" />
-            <Setter Property="BoxShadow" Value="0 3 8 0 #0b0f1f" />
         </Style>
         
         <!-- Overlays -->
@@ -283,8 +280,7 @@
                     VerticalAlignment="Center"
                     HorizontalAlignment="Center"
                     MinWidth="400"
-                    MaxWidth="640"
-                    BoxShadow="0 12 30 0 #0b0f1f">
+                    MaxWidth="640">
                 <StackPanel Spacing="16">
                     <TextBlock Text="Keyboard Shortcuts"
                                Foreground="White"
@@ -379,7 +375,6 @@
                                 <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                                       StrokeThickness="2"
                                       StrokeLineCap="Round"
-                                      StrokeLineJoin="Round"
                                       Data="M5 12l4 4 10-10" />
                             </Viewbox>
                             <TextBlock Text="Got it" FontWeight="SemiBold" />
@@ -398,7 +393,6 @@
             <Border Background="#23263f"
                     CornerRadius="14"
                     Padding="28"
-                    BoxShadow="0 12 30 0 #0b0f1f"
                     VerticalAlignment="Center"
                     HorizontalAlignment="Center">
                 <StackPanel VerticalAlignment="Center"
