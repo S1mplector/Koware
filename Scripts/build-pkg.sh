@@ -71,27 +71,15 @@ dotnet publish "$CLI_PROJ" \
 cp "$PUBLISH_DIR/Koware.Cli" "$PKG_ROOT/bin/koware"
 chmod +x "$PKG_ROOT/bin/koware"
 
-# Copy config if exists
-if [ -f "$PUBLISH_DIR/appsettings.json" ]; then
-    mkdir -p "$PKG_ROOT/share/koware"
-    cp "$PUBLISH_DIR/appsettings.json" "$PKG_ROOT/share/koware/"
-fi
+# Note: appsettings.json is bundled in the executable; user config created on first run
 
 # Step 2: Create post-install script
+# NOTE: postinstall runs as root, so we cannot create user config here.
+# Koware will auto-create ~/.config/koware/ on first run with correct permissions.
 cat > "$PKG_SCRIPTS/postinstall" << 'EOF'
 #!/bin/bash
 # Post-installation script for Koware
-
-# Create config directory for user
-CONFIG_DIR="$HOME/.config/koware"
-mkdir -p "$CONFIG_DIR"
-
-# Copy default config if not exists
-if [ ! -f "$CONFIG_DIR/appsettings.json" ] && [ -f "/usr/local/share/koware/appsettings.json" ]; then
-    cp "/usr/local/share/koware/appsettings.json" "$CONFIG_DIR/"
-fi
-
-# Ensure /usr/local/bin is in PATH (it usually is on macOS)
+# Config directory will be created by koware on first run with correct user permissions.
 exit 0
 EOF
 chmod +x "$PKG_SCRIPTS/postinstall"
@@ -104,7 +92,8 @@ Koware is a console-first link/stream aggregator that helps you search for anime
 
 This installer will install:
 • koware command to /usr/local/bin
-• Default configuration to /usr/local/share/koware
+
+Configuration will be created at ~/.config/koware/ on first run.
 
 After installation, open Terminal and run:
   koware --help

@@ -211,11 +211,7 @@ EOF
         return 1
     fi
 
-    # Create config directory (user-level, no sudo needed)
-    mkdir -p "$CONFIG_DIR"
-    if [ -f "$RESOURCES_DIR/appsettings.json" ] && [ ! -f "$CONFIG_DIR/appsettings.json" ]; then
-        cp "$RESOURCES_DIR/appsettings.json" "$CONFIG_DIR/"
-    fi
+    # Note: Config directory will be created by koware on first run with correct permissions
 
     osascript << 'EOF'
 display dialog "Koware installed successfully!
