@@ -4984,12 +4984,22 @@ static ScrapePlan ParsePlan(string[] args, DefaultCliOptions defaults)
 /// <param name="matches">Collection of matching anime results.</param>
 static void RenderSearch(string query, IReadOnlyCollection<Anime> matches)
 {
+    Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine($"Matches for \"{query}\":");
+    Console.Write("🔍 ");
     Console.ResetColor();
+    Console.Write($"Search results for ");
+    Console.ForegroundColor = ConsoleColor.White;
+    Console.Write($"\"{query}\"");
+    Console.ResetColor();
+    Console.WriteLine($" ({matches.Count} found)");
+    Console.WriteLine(new string('─', Math.Min(60, Console.WindowWidth - 2)));
+    
     if (matches.Count == 0)
     {
-        Console.WriteLine("  No results yet. Try a different query.");
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("  No results found. Try a different query.");
+        Console.ResetColor();
         return;
     }
 
@@ -4998,11 +5008,17 @@ static void RenderSearch(string query, IReadOnlyCollection<Anime> matches)
     {
         var color = TextColorer.ForMatchIndex(index - 1, matches.Count);
         Console.ForegroundColor = color;
-        Console.Write($"  [{index}] {anime.Title}");
+        Console.Write($"  [{index,2}] ");
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.WriteLine(anime.Title);
         Console.ResetColor();
-        Console.WriteLine($" -> {anime.DetailPage}");
         index++;
     }
+    
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine($"  Use: koware watch \"{query}\" --index <n>");
+    Console.ResetColor();
 }
 
 /// <summary>
@@ -5012,12 +5028,22 @@ static void RenderSearch(string query, IReadOnlyCollection<Anime> matches)
 /// <param name="matches">Collection of matching manga results.</param>
 static void RenderMangaSearch(string query, IReadOnlyCollection<Manga> matches)
 {
+    Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Magenta;
-    Console.WriteLine($"Manga matches for \"{query}\":");
+    Console.Write("📚 ");
     Console.ResetColor();
+    Console.Write($"Manga results for ");
+    Console.ForegroundColor = ConsoleColor.White;
+    Console.Write($"\"{query}\"");
+    Console.ResetColor();
+    Console.WriteLine($" ({matches.Count} found)");
+    Console.WriteLine(new string('─', Math.Min(60, Console.WindowWidth - 2)));
+    
     if (matches.Count == 0)
     {
+        Console.ForegroundColor = ConsoleColor.Yellow;
         Console.WriteLine("  No results found. Try a different query.");
+        Console.ResetColor();
         return;
     }
 
@@ -5026,11 +5052,25 @@ static void RenderMangaSearch(string query, IReadOnlyCollection<Manga> matches)
     {
         var color = TextColorer.ForMatchIndex(index - 1, matches.Count);
         Console.ForegroundColor = color;
-        Console.Write($"  [{index}] {manga.Title}");
+        Console.Write($"  [{index,2}] ");
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.Write(manga.Title);
         Console.ResetColor();
-        Console.WriteLine($" -> {manga.DetailPage}");
+        if (!string.IsNullOrWhiteSpace(manga.Synopsis))
+        {
+            var synopsis = manga.Synopsis.Length > 50 ? manga.Synopsis[..47] + "..." : manga.Synopsis;
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.Write($" — {synopsis}");
+            Console.ResetColor();
+        }
+        Console.WriteLine();
         index++;
     }
+    
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine($"  Use: koware read \"{query}\" --index <n>");
+    Console.ResetColor();
 }
 
 /// <summary>

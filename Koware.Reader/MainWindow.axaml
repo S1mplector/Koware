@@ -78,6 +78,15 @@
                             Margin="0,0,8,0"
                             ToolTip.Tip="Cycle fit mode (W)" />
                     
+                    <Button x:Name="DoublePageButton"
+                            Content="Single"
+                            Click="OnDoublePageClick"
+                            Background="#2a2a4a"
+                            Foreground="White"
+                            Padding="12,6"
+                            Margin="0,0,8,0"
+                            ToolTip.Tip="Toggle double-page view (D)" />
+                    
                     <Button x:Name="FullscreenButton"
                             Content="⛶"
                             FontSize="16"
@@ -191,6 +200,7 @@
                                Margin="0,0,0,20" />
                     
                     <StackPanel Spacing="6">
+                        <TextBlock Text="Navigation" Foreground="#888" FontWeight="SemiBold" Margin="0,0,0,4" />
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="← / →" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
                             <TextBlock Text="Previous / Next page" Foreground="#ccc" />
@@ -200,12 +210,18 @@
                             <TextBlock Text="First / Last page" Foreground="#ccc" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Space" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
-                            <TextBlock Text="Next page" Foreground="#ccc" />
+                            <TextBlock Text="1-9" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
+                            <TextBlock Text="Jump to position in chapter" Foreground="#ccc" />
                         </StackPanel>
+                        
+                        <TextBlock Text="View" Foreground="#888" FontWeight="SemiBold" Margin="0,12,0,4" />
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="+ / −" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
                             <TextBlock Text="Zoom in / out" Foreground="#ccc" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Ctrl+Scroll" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
+                            <TextBlock Text="Mouse wheel zoom" Foreground="#ccc" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="0" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
@@ -216,9 +232,15 @@
                             <TextBlock Text="Cycle fit mode" Foreground="#ccc" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="D" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
+                            <TextBlock Text="Toggle double-page view" Foreground="#ccc" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
                             <TextBlock Text="F / F11" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
                             <TextBlock Text="Toggle fullscreen" Foreground="#ccc" />
                         </StackPanel>
+                        
+                        <TextBlock Text="General" Foreground="#888" FontWeight="SemiBold" Margin="0,12,0,4" />
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="H / ?" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
                             <TextBlock Text="Show/hide this help" Foreground="#ccc" />

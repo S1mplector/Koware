@@ -32,6 +32,8 @@ public partial class MainWindow : Window
     private double _zoomLevel = 1.0;
     private bool _showHelp;
     private bool _isScrollTracking = true;
+    private bool _doublePageMode;
+    private DateTime _lastScrollTime = DateTime.MinValue;
 
     public List<PageInfo> Pages { get; set; } = new();
     public string? HttpReferer { get; set; }
@@ -57,6 +59,22 @@ public partial class MainWindow : Window
         
         // Track scroll position to update current page
         ScrollViewer.ScrollChanged += OnScrollChanged;
+        
+        // Mouse wheel zoom with Ctrl
+        ScrollViewer.PointerWheelChanged += OnPointerWheelChanged;
+    }
+    
+    private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    {
+        // Ctrl+Scroll for zoom
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            if (e.Delta.Y > 0)
+                ZoomIn();
+            else if (e.Delta.Y < 0)
+                ZoomOut();
+            e.Handled = true;
+        }
     }
 
     private void OnWindowOpened(object? sender, EventArgs e)
@@ -369,6 +387,20 @@ public partial class MainWindow : Window
                 CycleFitMode();
                 e.Handled = true;
                 break;
+                
+            // Double-page mode
+            case Key.D:
+                ToggleDoublePageMode();
+                e.Handled = true;
+                break;
+                
+            // Jump to specific page (number keys 1-9)
+            case Key.D1: NavigateToPage(1); e.Handled = true; break;
+            case Key.D2: NavigateToPage(Math.Max(1, Pages.Count / 4)); e.Handled = true; break;
+            case Key.D3: NavigateToPage(Math.Max(1, Pages.Count / 3)); e.Handled = true; break;
+            case Key.D4: NavigateToPage(Math.Max(1, Pages.Count / 2)); e.Handled = true; break;
+            case Key.D5: NavigateToPage(Math.Max(1, (Pages.Count * 2) / 3)); e.Handled = true; break;
+            case Key.D9: NavigateToPage(Pages.Count); e.Handled = true; break;
         }
     }
     
@@ -451,6 +483,53 @@ public partial class MainWindow : Window
     {
         _showHelp = !_showHelp;
         HelpOverlay.IsVisible = _showHelp;
+    }
+    
+    private void ToggleDoublePageMode()
+    {
+        _doublePageMode = !_doublePageMode;
+        DoublePageButton.Content = _doublePageMode ? "Double" : "Single";
+        RebuildPageLayout();
+    }
+    
+    private void OnDoublePageClick(object? sender, RoutedEventArgs e)
+    {
+        ToggleDoublePageMode();
+    }
+    
+    private void RebuildPageLayout()
+    {
+        PagesContainer.Children.Clear();
+        
+        if (_doublePageMode)
+        {
+            // Double-page layout: two images per row
+            PagesContainer.Orientation = Avalonia.Layout.Orientation.Vertical;
+            
+            for (int i = 0; i < _pageImages.Count; i += 2)
+            {
+                var row = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center };
+                row.Children.Add(_pageImages[i]);
+                
+                if (i + 1 < _pageImages.Count)
+                {
+                    row.Children.Add(_pageImages[i + 1]);
+                }
+                
+                PagesContainer.Children.Add(row);
+            }
+        }
+        else
+        {
+            // Single-page layout
+            PagesContainer.Orientation = Avalonia.Layout.Orientation.Vertical;
+            foreach (var image in _pageImages)
+            {
+                PagesContainer.Children.Add(image);
+            }
+        }
+        
+        ApplyFitModeToAll();
     }
     
     private void OnHelpCloseClick(object? sender, RoutedEventArgs e)
