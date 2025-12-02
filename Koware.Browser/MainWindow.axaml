@@ -1,0 +1,654 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:Koware.Browser.ViewModels"
+        xmlns:local="clr-namespace:Koware.Browser"
+        x:Class="Koware.Browser.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="Koware Browser"
+        Width="1200" Height="800"
+        MinWidth="800" MinHeight="600"
+        WindowStartupLocation="CenterScreen"
+        Background="#0f0f1a">
+    
+    <Window.Styles>
+        <!-- Sidebar button base style -->
+        <Style Selector="Button.sidebar-btn">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#8892b0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Margin" Value="6,2" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.sidebar-btn:pointerover">
+            <Setter Property="Background" Value="#1a1f35" />
+            <Setter Property="Foreground" Value="#ccd6f6" />
+        </Style>
+        <Style Selector="Button.sidebar-btn:pressed">
+            <Setter Property="Background" Value="#252d4a" />
+        </Style>
+        
+        <!-- Mode toggle buttons -->
+        <Style Selector="Button.mode-btn">
+            <Setter Property="Background" Value="#1a1f35" />
+            <Setter Property="Foreground" Value="#8892b0" />
+            <Setter Property="BorderThickness" Value="2" />
+            <Setter Property="BorderBrush" Value="#2a3050" />
+            <Setter Property="Padding" Value="16,12" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Margin" Value="6,4" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.mode-btn:pointerover">
+            <Setter Property="Background" Value="#252d4a" />
+            <Setter Property="BorderBrush" Value="#3a4570" />
+        </Style>
+        <Style Selector="Button.mode-btn.active">
+            <Setter Property="Background" Value="#2563eb" />
+            <Setter Property="BorderBrush" Value="#3b82f6" />
+            <Setter Property="Foreground" Value="White" />
+        </Style>
+        
+        <!-- Search box -->
+        <Style Selector="TextBox.search">
+            <Setter Property="Background" Value="#1a1f35" />
+            <Setter Property="Foreground" Value="#ccd6f6" />
+            <Setter Property="BorderBrush" Value="#2a3050" />
+            <Setter Property="BorderThickness" Value="2" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="16,12" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="CaretBrush" Value="#60a5fa" />
+        </Style>
+        <Style Selector="TextBox.search:focus">
+            <Setter Property="BorderBrush" Value="#3b82f6" />
+        </Style>
+        <Style Selector="TextBox.search /template/ TextBlock#PART_Watermark">
+            <Setter Property="Foreground" Value="#4a5568" />
+        </Style>
+        
+        <!-- Result cards -->
+        <Style Selector="Button.result-card">
+            <Setter Property="Background" Value="#151929" />
+            <Setter Property="BorderBrush" Value="#252d4a" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+        <Style Selector="Button.result-card:pointerover">
+            <Setter Property="Background" Value="#1c2236" />
+            <Setter Property="BorderBrush" Value="#3b82f6" />
+        </Style>
+        <Style Selector="Button.result-card:pressed">
+            <Setter Property="Background" Value="#252d4a" />
+        </Style>
+        
+        <!-- Episode/Chapter list items -->
+        <Style Selector="Button.list-item">
+            <Setter Property="Background" Value="#151929" />
+            <Setter Property="Foreground" Value="#ccd6f6" />
+            <Setter Property="BorderBrush" Value="#252d4a" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="16,12" />
+            <Setter Property="Margin" Value="0,4" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.list-item:pointerover">
+            <Setter Property="Background" Value="#1c2236" />
+            <Setter Property="BorderBrush" Value="#3b82f6" />
+        </Style>
+        
+        <!-- Back button -->
+        <Style Selector="Button.back-btn">
+            <Setter Property="Background" Value="#1a1f35" />
+            <Setter Property="Foreground" Value="#8892b0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.back-btn:pointerover">
+            <Setter Property="Background" Value="#252d4a" />
+            <Setter Property="Foreground" Value="#ccd6f6" />
+        </Style>
+    </Window.Styles>
+    
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        
+        <!-- Left Sidebar -->
+        <Border Grid.Column="0" 
+                Background="#12141f"
+                BorderBrush="#1e2235"
+                BorderThickness="0,0,1,0">
+            <Grid RowDefinitions="Auto,Auto,*,Auto">
+                
+                <!-- Logo / App Title -->
+                <Border Grid.Row="0" Padding="16,20,16,16">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Text="K" 
+                                   FontSize="24" 
+                                   FontWeight="Bold" 
+                                   Foreground="#3b82f6" />
+                        <TextBlock Text="Koware" 
+                                   FontSize="20" 
+                                   FontWeight="SemiBold" 
+                                   Foreground="#ccd6f6"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+                
+                <!-- Mode Toggle Buttons -->
+                <StackPanel Grid.Row="1" Margin="8,0,8,8">
+                    <Button Classes="mode-btn"
+                            Classes.active="{Binding IsMangaMode}"
+                            Command="{Binding SetMangaModeCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Viewbox Width="18" Height="18">
+                                <Canvas Width="24" Height="24">
+                                    <Path Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          Data="M4 19.5A2.5 2.5 0 0 1 6.5 17H20 M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z" />
+                                </Canvas>
+                            </Viewbox>
+                            <TextBlock Text="Manga Mode" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    
+                    <Button Classes="mode-btn"
+                            Classes.active="{Binding IsAnimeMode}"
+                            Command="{Binding SetAnimeModeCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Viewbox Width="18" Height="18">
+                                <Canvas Width="24" Height="24">
+                                    <Path Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          Data="M5 3l14 9-14 9V3z" />
+                                </Canvas>
+                            </Viewbox>
+                            <TextBlock Text="Anime Mode" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+                
+                <!-- Separator -->
+                <StackPanel Grid.Row="2" VerticalAlignment="Top">
+                    <Border Height="1" 
+                            Background="#252d4a" 
+                            Margin="16,8,16,16" />
+                    
+                    <!-- Navigation Buttons -->
+                    <Button Classes="sidebar-btn" Command="{Binding ShowSearchCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <Viewbox Width="18" Height="18">
+                                <Canvas Width="24" Height="24">
+                                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="2"
+                                          StrokeLineCap="Round"
+                                          Data="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </Canvas>
+                            </Viewbox>
+                            <TextBlock Text="Search" VerticalAlignment="Center" FontSize="14" />
+                        </StackPanel>
+                    </Button>
+                    
+                    <Button Classes="sidebar-btn" Command="{Binding ShowListCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <Viewbox Width="18" Height="18">
+                                <Canvas Width="24" Height="24">
+                                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="2"
+                                          StrokeLineCap="Round"
+                                          Data="M4 6h16M4 12h16M4 18h16" />
+                                </Canvas>
+                            </Viewbox>
+                            <TextBlock Text="My List" VerticalAlignment="Center" FontSize="14" />
+                        </StackPanel>
+                    </Button>
+                    
+                    <Button Classes="sidebar-btn" Command="{Binding ShowSettingsCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <Viewbox Width="18" Height="18">
+                                <Canvas Width="24" Height="24">
+                                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="2"
+                                          StrokeLineCap="Round"
+                                          Data="M12 15a3 3 0 100-6 3 3 0 000 6z M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+                                </Canvas>
+                            </Viewbox>
+                            <TextBlock Text="Settings" VerticalAlignment="Center" FontSize="14" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+                
+                <!-- Status Bar -->
+                <Border Grid.Row="3" Padding="16,12" Background="#0d0f18">
+                    <TextBlock Text="{Binding StatusMessage, FallbackValue='Ready'}"
+                               Foreground="#4a5568"
+                               FontSize="12"
+                               TextTrimming="CharacterEllipsis" />
+                </Border>
+            </Grid>
+        </Border>
+        
+        <!-- Main Content Area -->
+        <Grid Grid.Column="1">
+            <!-- Search View -->
+            <Grid IsVisible="{Binding IsSearchView}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                
+                <!-- Search Bar -->
+                <Border Grid.Row="0" Padding="24,20">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBox x:Name="SearchBox"
+                                 Grid.Column="0"
+                                 Classes="search"
+                                 Text="{Binding SearchQuery, Mode=TwoWay}"
+                                 Watermark="{Binding IsMangaMode, Converter={x:Static local:Converters.ModeToWatermark}}"
+                                 KeyDown="OnSearchKeyDown" />
+                        
+                        <Button Grid.Column="1"
+                                Margin="12,0,0,0"
+                                Background="#2563eb"
+                                Foreground="White"
+                                CornerRadius="12"
+                                Padding="20,12"
+                                Command="{Binding SearchCommand}"
+                                IsEnabled="{Binding !IsSearching}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Viewbox Width="16" Height="16">
+                                    <Canvas Width="24" Height="24">
+                                        <Path Stroke="White"
+                                              StrokeThickness="2.5"
+                                              StrokeLineCap="Round"
+                                              Data="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                    </Canvas>
+                                </Viewbox>
+                                <TextBlock Text="Search" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                </Border>
+                
+                <!-- Results Grid -->
+                <ScrollViewer Grid.Row="1" Padding="24,0,24,24">
+                    <StackPanel>
+                        <!-- Loading indicator -->
+                        <Border IsVisible="{Binding IsSearching}" Padding="40">
+                            <StackPanel HorizontalAlignment="Center" Spacing="12">
+                                <ProgressBar IsIndeterminate="True" 
+                                             Width="200"
+                                             Foreground="#3b82f6" />
+                                <TextBlock Text="Searching..." 
+                                           Foreground="#8892b0"
+                                           HorizontalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                        
+                        <!-- Manga Results -->
+                        <ItemsControl ItemsSource="{Binding MangaResults}"
+                                      IsVisible="{Binding IsMangaMode}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:MangaViewModel">
+                                    <Button Classes="result-card"
+                                            Width="200"
+                                            Margin="0,0,16,16"
+                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectMangaCommand}"
+                                            CommandParameter="{Binding}">
+                                        <StackPanel>
+                                            <!-- Cover Image Placeholder -->
+                                            <Border Height="260"
+                                                    Background="#1a1f35"
+                                                    CornerRadius="12,12,0,0">
+                                                <Panel>
+                                                    <!-- Placeholder icon -->
+                                                    <Viewbox Width="48" Height="48" 
+                                                             IsVisible="{Binding CoverImage, Converter={x:Static ObjectConverters.IsNull}}">
+                                                        <Canvas Width="24" Height="24">
+                                                            <Path Fill="#3a4570"
+                                                                  Data="M4 19.5A2.5 2.5 0 0 1 6.5 17H20 M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z" />
+                                                        </Canvas>
+                                                    </Viewbox>
+                                                    <!-- Actual cover image -->
+                                                    <Image Source="{Binding CoverImage}"
+                                                           Stretch="UniformToFill"
+                                                           IsVisible="{Binding CoverImage, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                                </Panel>
+                                            </Border>
+                                            <!-- Title -->
+                                            <Border Padding="12,10">
+                                                <TextBlock Text="{Binding Title}"
+                                                           Foreground="#ccd6f6"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="13"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           MaxLines="2"
+                                                           TextWrapping="Wrap"
+                                                           Height="38" />
+                                            </Border>
+                                        </StackPanel>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        
+                        <!-- Anime Results -->
+                        <ItemsControl ItemsSource="{Binding AnimeResults}"
+                                      IsVisible="{Binding IsAnimeMode}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:AnimeViewModel">
+                                    <Button Classes="result-card"
+                                            Width="200"
+                                            Margin="0,0,16,16"
+                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectAnimeCommand}"
+                                            CommandParameter="{Binding}">
+                                        <StackPanel>
+                                            <!-- Cover Placeholder -->
+                                            <Border Height="260"
+                                                    Background="#1a1f35"
+                                                    CornerRadius="12,12,0,0">
+                                                <Viewbox Width="48" Height="48">
+                                                    <Canvas Width="24" Height="24">
+                                                        <Path Fill="#3a4570"
+                                                              Data="M5 3l14 9-14 9V3z" />
+                                                    </Canvas>
+                                                </Viewbox>
+                                            </Border>
+                                            <!-- Title -->
+                                            <Border Padding="12,10">
+                                                <TextBlock Text="{Binding Title}"
+                                                           Foreground="#ccd6f6"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="13"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           MaxLines="2"
+                                                           TextWrapping="Wrap"
+                                                           Height="38" />
+                                            </Border>
+                                        </StackPanel>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        
+                        <!-- Empty state -->
+                        <Border IsVisible="{Binding !IsSearching}"
+                                Padding="40">
+                            <StackPanel HorizontalAlignment="Center"
+                                        IsVisible="{Binding MangaResults.Count, Converter={x:Static local:Converters.IsZero}}">
+                                <StackPanel IsVisible="{Binding AnimeResults.Count, Converter={x:Static local:Converters.IsZero}}">
+                                    <Viewbox Width="64" Height="64" Margin="0,0,0,16">
+                                        <Canvas Width="24" Height="24">
+                                            <Path Stroke="#3a4570"
+                                                  StrokeThickness="1.5"
+                                                  Data="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                        </Canvas>
+                                    </Viewbox>
+                                    <TextBlock Text="Search for manga or anime"
+                                               Foreground="#4a5568"
+                                               FontSize="16"
+                                               HorizontalAlignment="Center" />
+                                    <TextBlock Text="Type a title and press Enter or click Search"
+                                               Foreground="#3a4055"
+                                               FontSize="13"
+                                               Margin="0,8,0,0"
+                                               HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+            
+            <!-- Detail View -->
+            <Grid IsVisible="{Binding IsDetailView}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                
+                <!-- Header -->
+                <Border Grid.Row="0" Padding="24,20" Background="#12141f">
+                    <Grid ColumnDefinitions="Auto,*">
+                        <Button Grid.Column="0"
+                                Classes="back-btn"
+                                Command="{Binding GoBackCommand}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="←" FontSize="16" />
+                                <TextBlock Text="Back" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding SelectedManga.Title, FallbackValue=''}"
+                                   IsVisible="{Binding IsMangaMode}"
+                                   Foreground="#ccd6f6"
+                                   FontSize="20"
+                                   FontWeight="Bold"
+                                   VerticalAlignment="Center"
+                                   Margin="16,0,0,0"
+                                   TextTrimming="CharacterEllipsis" />
+                        
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding SelectedAnime.Title, FallbackValue=''}"
+                                   IsVisible="{Binding IsAnimeMode}"
+                                   Foreground="#ccd6f6"
+                                   FontSize="20"
+                                   FontWeight="Bold"
+                                   VerticalAlignment="Center"
+                                   Margin="16,0,0,0"
+                                   TextTrimming="CharacterEllipsis" />
+                    </Grid>
+                </Border>
+                
+                <!-- Chapters/Episodes List -->
+                <ScrollViewer Grid.Row="1" Padding="24">
+                    <StackPanel>
+                        <!-- Loading -->
+                        <Border IsVisible="{Binding IsLoadingDetail}" Padding="40">
+                            <StackPanel HorizontalAlignment="Center" Spacing="12">
+                                <ProgressBar IsIndeterminate="True" 
+                                             Width="200"
+                                             Foreground="#3b82f6" />
+                                <TextBlock Text="Loading..." 
+                                           Foreground="#8892b0"
+                                           HorizontalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                        
+                        <!-- Chapters (Manga) -->
+                        <ItemsControl ItemsSource="{Binding Chapters}"
+                                      IsVisible="{Binding IsMangaMode}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:ChapterViewModel">
+                                    <Button Classes="list-item"
+                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ReadChapterCommand}"
+                                            CommandParameter="{Binding}">
+                                        <Grid ColumnDefinitions="Auto,*,Auto">
+                                            <Border Grid.Column="0"
+                                                    Background="#2563eb"
+                                                    CornerRadius="6"
+                                                    Padding="10,6"
+                                                    Margin="0,0,16,0">
+                                                <TextBlock Text="{Binding Number, StringFormat='{}{0:0.##}'}"
+                                                           Foreground="White"
+                                                           FontWeight="Bold"
+                                                           FontSize="13" />
+                                            </Border>
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding Title}"
+                                                       Foreground="#ccd6f6"
+                                                       VerticalAlignment="Center"
+                                                       FontSize="14" />
+                                            <TextBlock Grid.Column="2"
+                                                       Text="Read →"
+                                                       Foreground="#3b82f6"
+                                                       VerticalAlignment="Center"
+                                                       FontSize="13" />
+                                        </Grid>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        
+                        <!-- Episodes (Anime) -->
+                        <ItemsControl ItemsSource="{Binding Episodes}"
+                                      IsVisible="{Binding IsAnimeMode}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:EpisodeViewModel">
+                                    <Button Classes="list-item"
+                                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).PlayEpisodeCommand}"
+                                            CommandParameter="{Binding}">
+                                        <Grid ColumnDefinitions="Auto,*,Auto">
+                                            <Border Grid.Column="0"
+                                                    Background="#2563eb"
+                                                    CornerRadius="6"
+                                                    Padding="10,6"
+                                                    Margin="0,0,16,0">
+                                                <TextBlock Text="{Binding Number}"
+                                                           Foreground="White"
+                                                           FontWeight="Bold"
+                                                           FontSize="13" />
+                                            </Border>
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding Title}"
+                                                       Foreground="#ccd6f6"
+                                                       VerticalAlignment="Center"
+                                                       FontSize="14" />
+                                            <TextBlock Grid.Column="2"
+                                                       Text="Play →"
+                                                       Foreground="#3b82f6"
+                                                       VerticalAlignment="Center"
+                                                       FontSize="13" />
+                                        </Grid>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+            
+            <!-- List View (Placeholder) -->
+            <Grid IsVisible="{Binding IsListView}">
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="16">
+                    <Viewbox Width="64" Height="64">
+                        <Canvas Width="24" Height="24">
+                            <Path Stroke="#3a4570"
+                                  StrokeThickness="1.5"
+                                  Data="M4 6h16M4 12h16M4 18h16" />
+                        </Canvas>
+                    </Viewbox>
+                    <TextBlock Text="My List"
+                               Foreground="#ccd6f6"
+                               FontSize="24"
+                               FontWeight="Bold"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Text="Your saved manga and anime will appear here"
+                               Foreground="#4a5568"
+                               FontSize="14"
+                               HorizontalAlignment="Center" />
+                    <Button Classes="back-btn"
+                            HorizontalAlignment="Center"
+                            Margin="0,16,0,0"
+                            Command="{Binding GoBackCommand}">
+                        <TextBlock Text="← Back to Search" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+            
+            <!-- Settings View (Placeholder) -->
+            <Grid IsVisible="{Binding IsSettingsView}">
+                <ScrollViewer Padding="24">
+                    <StackPanel MaxWidth="600">
+                        <TextBlock Text="Settings"
+                                   Foreground="#ccd6f6"
+                                   FontSize="24"
+                                   FontWeight="Bold"
+                                   Margin="0,0,0,24" />
+                        
+                        <!-- Provider Settings Section -->
+                        <Border Background="#151929"
+                                CornerRadius="12"
+                                Padding="20"
+                                Margin="0,0,0,16">
+                            <StackPanel>
+                                <TextBlock Text="Provider Configuration"
+                                           Foreground="#ccd6f6"
+                                           FontWeight="SemiBold"
+                                           FontSize="16"
+                                           Margin="0,0,0,12" />
+                                <TextBlock Text="Configure your anime and manga providers in:"
+                                           Foreground="#8892b0"
+                                           FontSize="13"
+                                           Margin="0,0,0,8" />
+                                <Border Background="#1a1f35"
+                                        CornerRadius="6"
+                                        Padding="12,8">
+                                    <TextBlock Text="~/.config/koware/appsettings.user.json"
+                                               Foreground="#60a5fa"
+                                               FontFamily="Consolas,Monaco,monospace"
+                                               FontSize="12" />
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                        
+                        <!-- About Section -->
+                        <Border Background="#151929"
+                                CornerRadius="12"
+                                Padding="20"
+                                Margin="0,0,0,16">
+                            <StackPanel>
+                                <TextBlock Text="About Koware Browser"
+                                           Foreground="#ccd6f6"
+                                           FontWeight="SemiBold"
+                                           FontSize="16"
+                                           Margin="0,0,0,12" />
+                                <TextBlock Text="A cross-platform GUI for browsing and streaming anime and manga."
+                                           Foreground="#8892b0"
+                                           FontSize="13"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Text="Version 0.7.0-beta"
+                                           Foreground="#4a5568"
+                                           FontSize="12"
+                                           Margin="0,8,0,0" />
+                            </StackPanel>
+                        </Border>
+                        
+                        <Button Classes="back-btn"
+                                HorizontalAlignment="Left"
+                                Margin="0,8,0,0"
+                                Command="{Binding GoBackCommand}">
+                            <TextBlock Text="← Back to Search" />
+                        </Button>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>
