@@ -60,6 +60,28 @@ dotnet publish "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj" \
 mv "$PUBLISH_DIR/Koware.Cli" "$PUBLISH_DIR/koware"
 chmod +x "$PUBLISH_DIR/koware"
 
+# Step 1b: Publish Avalonia Player
+info "Publishing Koware Player (Avalonia)..."
+PLAYER_DIR="$BUILD_DIR/player"
+dotnet publish "$REPO_ROOT/Koware.Player/Koware.Player.csproj" \
+    -c "$CONFIGURATION" \
+    -r "$RUNTIME" \
+    -o "$PLAYER_DIR" \
+    --self-contained true
+
+chmod +x "$PLAYER_DIR/Koware.Player" 2>/dev/null || true
+
+# Step 1c: Publish Avalonia Reader
+info "Publishing Koware Reader (Avalonia)..."
+READER_DIR="$BUILD_DIR/reader"
+dotnet publish "$REPO_ROOT/Koware.Reader/Koware.Reader.csproj" \
+    -c "$CONFIGURATION" \
+    -r "$RUNTIME" \
+    -o "$READER_DIR" \
+    --self-contained true
+
+chmod +x "$READER_DIR/Koware.Reader" 2>/dev/null || true
+
 # Step 2: Create macOS icon from PNG
 info "Creating app icon..."
 LOGO_PNG="$REPO_ROOT/Assets/Logo/logo.png"
@@ -136,6 +158,16 @@ EOF
 cp "$PUBLISH_DIR/koware" "$APP_BUNDLE/Contents/Resources/"
 if [ -f "$PUBLISH_DIR/appsettings.json" ]; then
     cp "$PUBLISH_DIR/appsettings.json" "$APP_BUNDLE/Contents/Resources/"
+fi
+
+# Copy Player and Reader to Resources
+if [ -d "$PLAYER_DIR" ]; then
+    mkdir -p "$APP_BUNDLE/Contents/Resources/player"
+    cp -r "$PLAYER_DIR/"* "$APP_BUNDLE/Contents/Resources/player/"
+fi
+if [ -d "$READER_DIR" ]; then
+    mkdir -p "$APP_BUNDLE/Contents/Resources/reader"
+    cp -r "$READER_DIR/"* "$APP_BUNDLE/Contents/Resources/reader/"
 fi
 
 # Copy Usage Notice
@@ -243,7 +275,7 @@ EOF
 do_install() {
     # Use AppleScript to get admin privileges and install
     osascript << EOF 2>/dev/null
-do shell script "mkdir -p '$INSTALL_DIR' && cp '$RESOURCES_DIR/koware' '$INSTALL_DIR/' && chmod +x '$INSTALL_DIR/koware'" with administrator privileges
+do shell script "mkdir -p '$INSTALL_DIR' && cp '$RESOURCES_DIR/koware' '$INSTALL_DIR/' && chmod +x '$INSTALL_DIR/koware' && mkdir -p '$INSTALL_DIR/koware-apps' && cp -r '$RESOURCES_DIR/player' '$INSTALL_DIR/koware-apps/' 2>/dev/null; cp -r '$RESOURCES_DIR/reader' '$INSTALL_DIR/koware-apps/' 2>/dev/null; chmod +x '$INSTALL_DIR/koware-apps/player/Koware.Player' 2>/dev/null; chmod +x '$INSTALL_DIR/koware-apps/reader/Koware.Reader' 2>/dev/null; true" with administrator privileges
 EOF
     
     if [ $? -ne 0 ]; then
@@ -280,7 +312,7 @@ EOF
 
     # Remove with admin privileges
     osascript << EOF 2>/dev/null
-do shell script "rm -f '$INSTALL_DIR/koware'" with administrator privileges
+do shell script "rm -f '$INSTALL_DIR/koware' && rm -rf '$INSTALL_DIR/koware-apps'" with administrator privileges
 EOF
 
     if [ $? -ne 0 ]; then

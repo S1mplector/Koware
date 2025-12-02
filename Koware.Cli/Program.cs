@@ -259,19 +259,20 @@ static bool CheckProvidersConfigured(IServiceProvider services, CliMode mode, IL
         Console.WriteLine($"⚠ No {modeLabel} providers configured.");
         Console.ResetColor();
         Console.WriteLine();
-        Console.WriteLine("Koware requires you to configure external sources before use.");
-        Console.WriteLine("This is by design - we do not bundle or endorse any specific sources.");
+        Console.WriteLine("Quick setup (recommended):");
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine("  koware provider autoconfig");
+        Console.ResetColor();
         Console.WriteLine();
-        Console.WriteLine("To get started:");
-        Console.WriteLine("  koware provider list          View available providers");
-        Console.WriteLine("  koware provider init          Create a template config file");
+        Console.WriteLine("Or configure manually:");
         Console.WriteLine("  koware provider add <name>    Configure a provider interactively");
+        Console.WriteLine("  koware provider init          Create a template config file");
         Console.WriteLine("  koware provider edit          Open config file in editor");
         Console.WriteLine();
         Console.WriteLine("After configuring, test connectivity with:");
         Console.WriteLine("  koware provider test");
         Console.WriteLine();
-        logger.LogWarning("No {Mode} providers configured. Run 'koware provider init' to create a config template.", modeLabel);
+        logger.LogWarning("No {Mode} providers configured. Run 'koware provider autoconfig' to set up.", modeLabel);
         return false;
     }
 
@@ -775,6 +776,12 @@ static Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
             var providerToTest = args.Length > 2 ? args[2] : null;
             return HandleProviderTestAsync(providerToTest, allAnime, allManga);
             
+        case "autoconfig":
+        case "auto":
+            var providerToAuto = args.Length > 2 ? args[2] : null;
+            var listOnly = args.Skip(2).Any(a => a.Equals("--list", StringComparison.OrdinalIgnoreCase));
+            return HandleProviderAutoConfigAsync(providerToAuto, listOnly, configPath);
+            
         case "--enable":
         case "--disable":
             if (args.Length < 3)
@@ -1070,10 +1077,10 @@ static int HandleProviderInit(string configPath)
 /// </summary>
 static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOptions allAnime, AllMangaOptions allManga)
 {
-    var providers = new Dictionary<string, (bool configured, string? apiBase)>(StringComparer.OrdinalIgnoreCase)
+    var providers = new Dictionary<string, (bool configured, string? apiBase, string? referer, string? userAgent)>(StringComparer.OrdinalIgnoreCase)
     {
-        ["allanime"] = (allAnime.IsConfigured, allAnime.ApiBase),
-        ["allmanga"] = (allManga.IsConfigured, allManga.ApiBase),
+        ["allanime"] = (allAnime.IsConfigured, allAnime.ApiBase, allAnime.Referer, allAnime.UserAgent),
+        ["allmanga"] = (allManga.IsConfigured, allManga.ApiBase, allManga.Referer, allManga.UserAgent),
     };
     
     var toTest = string.IsNullOrWhiteSpace(providerName)
@@ -1105,18 +1112,29 @@ static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOpt
         
         try
         {
-            var response = await http.GetAsync(info.apiBase);
-            if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            using var request = new HttpRequestMessage(HttpMethod.Get, info.apiBase);
+            if (!string.IsNullOrWhiteSpace(info.referer))
+                request.Headers.TryAddWithoutValidation("Referer", info.referer);
+            if (!string.IsNullOrWhiteSpace(info.userAgent))
+                request.Headers.TryAddWithoutValidation("User-Agent", info.userAgent);
+            
+            var response = await http.SendAsync(request);
+            var code = (int)response.StatusCode;
+            
+            // Success, BadRequest (API needs query), or Cloudflare codes (520-529) = reachable
+            if (response.IsSuccessStatusCode || code == 400 || (code >= 520 && code <= 529))
             {
-                // BadRequest is okay - means API is reachable but needs proper query
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"✓ Connected ({(int)response.StatusCode})");
+                if (code >= 520)
+                    Console.WriteLine($"✓ Reachable (Cloudflare {code})");
+                else
+                    Console.WriteLine($"✓ Connected ({code})");
                 Console.ResetColor();
             }
             else
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"✗ HTTP {(int)response.StatusCode}");
+                Console.WriteLine($"✗ HTTP {code}");
                 Console.ResetColor();
                 allPassed = false;
             }
@@ -1131,6 +1149,170 @@ static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOpt
     }
     
     return allPassed ? 0 : 1;
+}
+
+/// <summary>
+/// Auto-configure providers from the remote koware-providers repository.
+/// </summary>
+static async Task<int> HandleProviderAutoConfigAsync(string? providerName, bool listOnly, string configPath)
+{
+    const string repoBase = "https://raw.githubusercontent.com/S1mplector/koware-providers/main";
+    const string manifestUrl = $"{repoBase}/providers.json";
+    
+    using var http = new HttpClient();
+    http.DefaultRequestHeaders.Add("User-Agent", "Koware-CLI");
+    
+    // Fetch manifest
+    Console.Write("Fetching provider manifest... ");
+    JsonObject manifest;
+    try
+    {
+        var manifestJson = await http.GetStringAsync(manifestUrl);
+        manifest = JsonNode.Parse(manifestJson) as JsonObject ?? throw new Exception("Invalid manifest format");
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("✓");
+        Console.ResetColor();
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"✗ {ex.Message}");
+        Console.ResetColor();
+        Console.WriteLine();
+        Console.WriteLine("Could not fetch provider manifest. Check your internet connection.");
+        Console.WriteLine("Alternatively, configure providers manually with 'koware provider add <name>'.");
+        return 1;
+    }
+    
+    var providers = manifest["providers"] as JsonObject;
+    if (providers is null)
+    {
+        Console.WriteLine("No providers found in manifest.");
+        return 1;
+    }
+    
+    // List mode
+    if (listOnly || providerName == "--list")
+    {
+        Console.WriteLine();
+        Console.WriteLine("Available remote providers:");
+        Console.WriteLine(new string('─', 50));
+        foreach (var (key, value) in providers)
+        {
+            var info = value as JsonObject;
+            var name = info?["name"]?.GetValue<string>() ?? key;
+            var type = info?["type"]?.GetValue<string>() ?? "unknown";
+            var desc = info?["description"]?.GetValue<string>() ?? "";
+            Console.WriteLine($"  {name,-12} [{type,-6}] {desc}");
+        }
+        Console.WriteLine();
+        Console.WriteLine("Usage: koware provider autoconfig <name>  or  koware provider autoconfig (all)");
+        return 0;
+    }
+    
+    // Determine which providers to configure
+    var toConfig = string.IsNullOrWhiteSpace(providerName)
+        ? providers.Select(p => p.Key).ToList()
+        : new List<string> { providerName.ToLowerInvariant() };
+    
+    // Load existing config
+    var configJson = File.Exists(configPath)
+        ? (JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? new JsonObject())
+        : new JsonObject();
+    
+    var configured = 0;
+    
+    foreach (var key in toConfig)
+    {
+        if (!providers.ContainsKey(key))
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"⚠ Unknown provider: {key}");
+            Console.ResetColor();
+            continue;
+        }
+        
+        var providerInfo = providers[key] as JsonObject;
+        var configFile = providerInfo?["config"]?.GetValue<string>();
+        var displayName = providerInfo?["name"]?.GetValue<string>() ?? key;
+        
+        if (string.IsNullOrWhiteSpace(configFile))
+        {
+            Console.WriteLine($"⚠ No config file for {displayName}");
+            continue;
+        }
+        
+        Console.Write($"Configuring {displayName}... ");
+        
+        try
+        {
+            var providerConfigJson = await http.GetStringAsync($"{repoBase}/{configFile}");
+            var providerConfig = JsonNode.Parse(providerConfigJson) as JsonObject;
+            var config = providerConfig?["config"] as JsonObject;
+            
+            if (config is null)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("⚠ Invalid config format");
+                Console.ResetColor();
+                continue;
+            }
+            
+            // Map to section name
+            var sectionName = key switch
+            {
+                "allanime" => "AllAnime",
+                "allmanga" => "AllManga",
+                _ => displayName
+            };
+            
+            // Merge config (preserves user overrides for fields not in remote)
+            var existingSection = configJson[sectionName] as JsonObject ?? new JsonObject();
+            foreach (var (field, value) in config)
+            {
+                existingSection[field] = value?.DeepClone();
+            }
+            configJson[sectionName] = existingSection;
+            
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("✓");
+            Console.ResetColor();
+            configured++;
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"✗ {ex.Message}");
+            Console.ResetColor();
+        }
+    }
+    
+    if (configured > 0)
+    {
+        // Save config
+        var configDir = Path.GetDirectoryName(configPath);
+        if (!string.IsNullOrWhiteSpace(configDir) && !Directory.Exists(configDir))
+        {
+            Directory.CreateDirectory(configDir);
+        }
+        
+        File.WriteAllText(configPath, JsonSerializer.Serialize(configJson, new JsonSerializerOptions { WriteIndented = true }));
+        
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"✓ Configured {configured} provider(s).");
+        Console.ResetColor();
+        Console.WriteLine($"  Config saved to: {configPath}");
+        Console.WriteLine();
+        Console.WriteLine("Test connectivity with: koware provider test");
+    }
+    else
+    {
+        Console.WriteLine();
+        Console.WriteLine("No providers were configured.");
+    }
+    
+    return configured > 0 ? 0 : 1;
 }
 
 /// <summary>
@@ -1178,6 +1360,7 @@ static void PrintProviderHelp()
     Console.WriteLine();
     Console.WriteLine("Commands:");
     Console.WriteLine("  list              Show all providers and their status (default)");
+    Console.WriteLine("  autoconfig [name] Auto-configure from remote repository (recommended)");
     Console.WriteLine("  add [name]        Configure a provider interactively");
     Console.WriteLine("  edit              Open config file in default editor");
     Console.WriteLine("  init              Create template configuration file");
@@ -1186,11 +1369,11 @@ static void PrintProviderHelp()
     Console.WriteLine("  --disable <name>  Disable a provider");
     Console.WriteLine();
     Console.WriteLine("Examples:");
+    Console.WriteLine("  koware provider autoconfig           # Configure all providers");
+    Console.WriteLine("  koware provider autoconfig allanime  # Configure specific provider");
+    Console.WriteLine("  koware provider autoconfig --list    # List available providers");
     Console.WriteLine("  koware provider list");
-    Console.WriteLine("  koware provider add allanime");
-    Console.WriteLine("  koware provider init");
     Console.WriteLine("  koware provider test");
-    Console.WriteLine("  koware provider --enable allanime");
 }
 
 /// <summary>
@@ -3389,15 +3572,24 @@ static string GenerateReaderHtml(IReadOnlyCollection<ChapterPage> pages, string 
 static string? ResolveReaderExecutable(ReaderOptions options)
 {
     var command = options.Command;
-    var isDefaultWindowsReader = string.IsNullOrWhiteSpace(command) || 
+    var isDefaultReader = string.IsNullOrWhiteSpace(command) || 
         command.Equals("Koware.Reader.Win.exe", StringComparison.OrdinalIgnoreCase) ||
         command.Equals("Koware.Reader.Win", StringComparison.OrdinalIgnoreCase);
     
-    // On macOS, use browser-based reader unless user explicitly set a custom reader
-    if (isDefaultWindowsReader && OperatingSystem.IsMacOS())
+    if (OperatingSystem.IsMacOS())
     {
-        // Return a special marker that LaunchReader will handle
-        return "macos-browser";
+        // On macOS: try bundled Avalonia reader first, then fall back to browser
+        var macReader = "/usr/local/bin/koware-apps/reader/Koware.Reader";
+        if (File.Exists(macReader))
+        {
+            return macReader;
+        }
+        
+        // Fall back to browser-based reader if no bundled reader
+        if (isDefaultReader)
+        {
+            return "macos-browser";
+        }
     }
     
     if (string.IsNullOrWhiteSpace(command))
@@ -4398,8 +4590,8 @@ static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
     
     if (OperatingSystem.IsMacOS())
     {
-        // macOS: prefer IINA (native), then mpv, then VLC
-        candidates.AddRange(new[] { "iina", "mpv", "vlc" });
+        // macOS: prefer IINA/mpv (native, works best), bundled Avalonia player requires LibVLC which has ARM64 issues
+        candidates.AddRange(new[] { "iina", "mpv", "/usr/local/bin/koware-apps/player/Koware.Player", "vlc" });
     }
     else
     {
@@ -4454,7 +4646,9 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
     var playerName = resolution.Name;
     var subtitle = stream.Subtitles.FirstOrDefault();
 
-    if (string.Equals(playerName, "Koware.Player.Win", StringComparison.OrdinalIgnoreCase))
+    // Handle bundled Koware players (Windows and cross-platform Avalonia)
+    if (string.Equals(playerName, "Koware.Player.Win", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(playerName, "Koware.Player", StringComparison.OrdinalIgnoreCase))
     {
         var start = new ProcessStartInfo
         {
