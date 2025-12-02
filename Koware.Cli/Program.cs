@@ -3374,6 +3374,23 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
         logger.LogDebug(ex, "Failed to update read history.");
     }
 
+    // Update manga tracking list (auto-adds if not present, auto-completes if finished)
+    try
+    {
+        var mangaList = services.GetRequiredService<IMangaListStore>();
+        var totalChapters = chapters.Count;
+        await mangaList.RecordChapterReadAsync(
+            selectedManga.Id.Value,
+            selectedManga.Title,
+            selectedChapter.Number,
+            totalChapters,
+            cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        logger.LogDebug(ex, "Failed to update manga list tracking.");
+    }
+
     return exitCode;
 }
 

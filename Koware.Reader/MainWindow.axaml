@@ -10,6 +10,77 @@
         Background="#1a1a2e"
         KeyDown="OnKeyDown">
     
+    <Window.Styles>
+        <!-- Toolbar buttons -->
+        <Style Selector="Button.toolbar">
+            <Setter Property="Background" Value="#2b2b4c" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderBrush" Value="#3c446a" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="MinWidth" Value="36" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+        </Style>
+        <Style Selector="Button.toolbar:pointerover">
+            <Setter Property="Background" Value="#343a62" />
+            <Setter Property="BorderBrush" Value="#55639a" />
+            <Setter Property="BoxShadow" Value="0 4 10 0 #0b0f1f" />
+        </Style>
+        <Style Selector="Button.toolbar:pressed">
+            <Setter Property="Background" Value="#2a2f54" />
+            <Setter Property="BorderBrush" Value="#6c7ac0" />
+            <Setter Property="RenderTransform">
+                <ScaleTransform ScaleX="0.98" ScaleY="0.98" />
+            </Setter>
+        </Style>
+        <Style Selector="Button.toolbar:focus-visible">
+            <Setter Property="BorderBrush" Value="#7ec4ff" />
+            <Setter Property="BoxShadow" Value="0 0 0 2 #2a4d7c" />
+        </Style>
+        
+        <!-- Page slider -->
+        <Style Selector="Slider#PageSlider">
+            <Setter Property="Height" Value="28" />
+        </Style>
+        <Style Selector="Slider#PageSlider /template/ Thumb">
+            <Setter Property="Width" Value="18" />
+            <Setter Property="Height" Value="18" />
+            <Setter Property="Background" Value="#60a5fa" />
+            <Setter Property="BorderBrush" Value="#9acbff" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="BoxShadow" Value="0 3 8 0 #0b0f1f" />
+        </Style>
+        
+        <!-- Overlays -->
+        <Style Selector="Border.overlay">
+            <Setter Property="Opacity" Value="1" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.18" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Border.overlay:not(:visible)">
+            <Setter Property="Opacity" Value="0" />
+        </Style>
+        
+        <!-- Shortcut rows -->
+        <Style Selector="Border.shortcut-row">
+            <Setter Property="Background" Value="#12122b" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+        <Style Selector="Border.shortcut-row.alt">
+            <Setter Property="Background" Value="#141437" />
+        </Style>
+    </Window.Styles>
+    
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -20,7 +91,7 @@
         <!-- Header -->
         <Border Grid.Row="0" 
                 Background="#0d0d1a"
-                Padding="16,10">
+                Padding="12,8">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -30,72 +101,69 @@
                 <TextBlock x:Name="TitleText"
                            Grid.Column="0"
                            Text="Koware Reader"
-                           FontSize="16"
-                           FontWeight="SemiBold"
+                           FontSize="17"
+                           FontWeight="Bold"
                            Foreground="White"
                            VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis" />
                 
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <TextBlock x:Name="PageIndicator"
                                Text="Page 1 / 1"
-                               Foreground="#888"
+                               Foreground="#a3abc4"
                                VerticalAlignment="Center"
                                Margin="0,0,16,0" />
                     
                     <!-- Zoom Controls -->
-                    <Button Content="−"
-                            FontSize="16"
-                            FontWeight="Bold"
+                    <Button Classes="toolbar"
                             Click="OnZoomOutClick"
-                            Background="#2a2a4a"
-                            Foreground="White"
-                            Width="32" Height="32"
-                            Margin="0,0,4,0"
-                            ToolTip.Tip="Zoom out (−)" />
+                            ToolTip.Tip="Zoom out (−)"
+                            Padding="0">
+                        <Viewbox Width="16" Height="16" Stretch="Uniform">
+                            <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  StrokeThickness="2.4"
+                                  StrokeLineCap="Round"
+                                  Data="M5 12h14" />
+                        </Viewbox>
+                    </Button>
                     <TextBlock x:Name="ZoomIndicator"
                                Text="100%"
-                               Foreground="#888"
+                               Foreground="#a3abc4"
                                VerticalAlignment="Center"
                                Width="45"
-                               TextAlignment="Center" />
-                    <Button Content="+"
-                            FontSize="16"
-                            FontWeight="Bold"
+                                TextAlignment="Center" />
+                    <Button Classes="toolbar"
                             Click="OnZoomInClick"
-                            Background="#2a2a4a"
-                            Foreground="White"
-                            Width="32" Height="32"
-                            Margin="0,0,12,0"
-                            ToolTip.Tip="Zoom in (+)" />
+                            ToolTip.Tip="Zoom in (+)"
+                            Padding="0">
+                        <Viewbox Width="16" Height="16" Stretch="Uniform">
+                            <Canvas Width="24" Height="24">
+                                <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                      StrokeThickness="2.4"
+                                      StrokeLineCap="Round"
+                                      Data="M5 12h14" />
+                                <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                      StrokeThickness="2.4"
+                                      StrokeLineCap="Round"
+                                      Data="M12 5v14" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
                     
-                    <Button x:Name="FitModeButton"
+                    <Button x:Name="FitModeButton" Classes="toolbar"
                             Content="Fit Width"
                             Click="OnFitModeClick"
-                            Background="#2a2a4a"
-                            Foreground="White"
-                            Padding="12,6"
-                            Margin="0,0,8,0"
                             ToolTip.Tip="Cycle fit mode (W)" />
                     
-                    <Button x:Name="DoublePageButton"
+                    <Button x:Name="DoublePageButton" Classes="toolbar"
                             Content="Single"
                             Click="OnDoublePageClick"
-                            Background="#2a2a4a"
-                            Foreground="White"
-                            Padding="12,6"
-                            Margin="0,0,8,0"
                             ToolTip.Tip="Toggle double-page view (D)" />
                     
-                    <Button x:Name="FullscreenButton"
+                    <Button x:Name="FullscreenButton" Classes="toolbar"
                             Click="OnFullscreenClick"
-                            Background="#2a2a4a"
                             Foreground="White"
-                            Width="36" Height="32"
                             Padding="0"
-                            Margin="0,0,8,0"
-                            HorizontalContentAlignment="Center"
-                            VerticalContentAlignment="Center"
                             ToolTip.Tip="Fullscreen (F)">
                         <Viewbox Width="16" Height="16" Stretch="Uniform">
                             <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
@@ -105,14 +173,11 @@
                         </Viewbox>
                     </Button>
                     
-                    <Button Content="?"
+                    <Button Classes="toolbar"
+                            Content="?"
                             Click="OnHelpCloseClick"
-                            Background="#3a3a5a"
                             Foreground="#aaa"
-                            Width="32" Height="32"
                             Padding="0"
-                            HorizontalContentAlignment="Center"
-                            VerticalContentAlignment="Center"
                             ToolTip.Tip="Keyboard shortcuts (H)">
                         <Viewbox Width="16" Height="16" Stretch="Uniform">
                             <Canvas Width="24" Height="24">
@@ -183,13 +248,16 @@
                         Click="OnPreviousClick"
                         Background="#2a2a4a"
                         Foreground="White"
-                        Padding="16,8" />
+                        Padding="16,8"
+                        MinHeight="40"
+                        ToolTip.Tip="Previous page (←)" />
                 
                 <Slider x:Name="PageSlider"
                         Grid.Column="1"
                         Minimum="1" Maximum="1" Value="1"
                         Margin="16,0"
                         VerticalAlignment="Center"
+                        ToolTip.Tip="Scrub pages (drag or use ← / →)"
                         ValueChanged="OnPageSliderChanged" />
                 
                 <Button Grid.Column="2"
@@ -197,115 +265,165 @@
                         Click="OnNextClick"
                         Background="#2a2a4a"
                         Foreground="White"
-                        Padding="16,8" />
+                        Padding="16,8"
+                        MinHeight="40"
+                        ToolTip.Tip="Next page (→)" />
             </Grid>
         </Border>
         
         <!-- Help Overlay -->
         <Border x:Name="HelpOverlay"
+                Classes="overlay"
                 Grid.RowSpan="3"
-                Background="#ee0d0d1a"
+                Background="#f00d0d1a"
                 IsVisible="False">
-            <Border Background="#1a1a2e"
-                    CornerRadius="12"
-                    Padding="32"
+            <Border Background="#202442"
+                    CornerRadius="14"
+                    Padding="36"
                     VerticalAlignment="Center"
                     HorizontalAlignment="Center"
-                    MinWidth="400">
-                <StackPanel>
+                    MinWidth="400"
+                    MaxWidth="640"
+                    BoxShadow="0 12 30 0 #0b0f1f">
+                <StackPanel Spacing="16">
                     <TextBlock Text="Keyboard Shortcuts"
                                Foreground="White"
                                FontSize="20"
                                FontWeight="SemiBold"
-                               HorizontalAlignment="Center"
-                               Margin="0,0,0,20" />
+                               HorizontalAlignment="Center" />
                     
-                    <StackPanel Spacing="6">
-                        <TextBlock Text="Navigation" Foreground="#888" FontWeight="SemiBold" Margin="0,0,0,4" />
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="← / →" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
-                            <TextBlock Text="Previous / Next page" Foreground="#ccc" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Home / End" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
-                            <TextBlock Text="First / Last page" Foreground="#ccc" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="1-9" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
-                            <TextBlock Text="Jump to position in chapter" Foreground="#ccc" />
-                        </StackPanel>
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Navigation" Foreground="#888" FontWeight="SemiBold" />
+                        <Border Classes="shortcut-row">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="← / →" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Previous / Next page" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row alt">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Home / End" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="First / Last page" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="1-9" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Jump to position in chapter" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
                         
-                        <TextBlock Text="View" Foreground="#888" FontWeight="SemiBold" Margin="0,12,0,4" />
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="+ / −" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
-                            <TextBlock Text="Zoom in / out" Foreground="#ccc" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Ctrl+Scroll" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
-                            <TextBlock Text="Mouse wheel zoom" Foreground="#ccc" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="0" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
-                            <TextBlock Text="Reset zoom to 100%" Foreground="#ccc" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="W" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
-                            <TextBlock Text="Cycle fit mode" Foreground="#ccc" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="D" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
-                            <TextBlock Text="Toggle double-page view" Foreground="#ccc" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="F / F11" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
-                            <TextBlock Text="Toggle fullscreen" Foreground="#ccc" />
-                        </StackPanel>
+                        <TextBlock Text="View" Foreground="#888" FontWeight="SemiBold" Margin="0,8,0,0" />
+                        <Border Classes="shortcut-row alt">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="+ / −" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Zoom in / out" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Ctrl+Scroll" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Mouse wheel zoom" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row alt">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="0" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Reset zoom to 100%" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="W" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Cycle fit mode" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row alt">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="D" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Toggle double-page view" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="F / F11" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Toggle fullscreen" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
                         
-                        <TextBlock Text="General" Foreground="#888" FontWeight="SemiBold" Margin="0,12,0,4" />
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="H / ?" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
-                            <TextBlock Text="Show/hide this help" Foreground="#ccc" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Esc / Q" Foreground="#60a5fa" FontFamily="Consolas" Width="100" />
-                            <TextBlock Text="Close reader" Foreground="#ccc" />
-                        </StackPanel>
+                        <TextBlock Text="General" Foreground="#888" FontWeight="SemiBold" Margin="0,8,0,0" />
+                        <Border Classes="shortcut-row alt">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="H / ?" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Show/hide this help" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Esc / Q" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Close reader" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                     
-                    <Button Content="Got it"
-                            Click="OnHelpCloseClick"
+                    <Button Click="OnHelpCloseClick"
                             Background="#3a3a5a"
                             Foreground="White"
-                            Padding="24,8"
-                            Margin="0,24,0,0"
-                            HorizontalAlignment="Center" />
+                            Padding="20,10"
+                            Margin="0,8,0,0"
+                            CornerRadius="10"
+                            HorizontalAlignment="Center"
+                            ToolTip.Tip="Close shortcuts overlay">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Viewbox Width="16" Height="16" Stretch="Uniform">
+                                <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                      StrokeThickness="2"
+                                      StrokeLineCap="Round"
+                                      StrokeLineJoin="Round"
+                                      Data="M5 12l4 4 10-10" />
+                            </Viewbox>
+                            <TextBlock Text="Got it" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </Border>
         </Border>
         
         <!-- Error Overlay -->
         <Border x:Name="ErrorOverlay"
+                Classes="overlay"
                 Grid.RowSpan="3"
-                Background="#ee1a1a2e"
+                Background="#f01a1a2e"
                 IsVisible="False">
-            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <TextBlock Text="⚠"
-                           Foreground="#f87171"
-                           FontSize="48"
-                           HorizontalAlignment="Center" />
-                <TextBlock x:Name="ErrorText"
-                           Text="Failed to load pages"
-                           Foreground="#f87171"
-                           FontSize="18"
-                           HorizontalAlignment="Center"
-                           Margin="0,16,0,0"
-                           TextWrapping="Wrap"
-                           MaxWidth="400" />
-                <Button Content="Close"
-                        Click="OnCloseClick"
-                        Margin="0,24,0,0"
-                        HorizontalAlignment="Center" />
-            </StackPanel>
+            <Border Background="#23263f"
+                    CornerRadius="14"
+                    Padding="28"
+                    BoxShadow="0 12 30 0 #0b0f1f"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center">
+                <StackPanel VerticalAlignment="Center"
+                            HorizontalAlignment="Center"
+                            Spacing="12">
+                    <TextBlock Text="⚠"
+                               Foreground="#f87171"
+                               FontSize="48"
+                               HorizontalAlignment="Center" />
+                    <TextBlock x:Name="ErrorText"
+                               Text="Failed to load pages"
+                               Foreground="#f87171"
+                               FontSize="18"
+                               HorizontalAlignment="Center"
+                               TextWrapping="Wrap"
+                               MaxWidth="400" />
+                    <Button Content="Close"
+                            Click="OnCloseClick"
+                            Padding="18,10"
+                            CornerRadius="10"
+                            Margin="0,8,0,0"
+                            HorizontalAlignment="Center"
+                            ToolTip.Tip="Close reader" />
+                </StackPanel>
+            </Border>
         </Border>
     </Grid>
 </Window>
