@@ -42,15 +42,19 @@
         
         <!-- Page slider -->
         <Style Selector="Slider#PageSlider">
-            <Setter Property="Height" Value="28" />
+            <Setter Property="Height" Value="36" />
         </Style>
         <Style Selector="Slider#PageSlider /template/ Thumb">
-            <Setter Property="Width" Value="18" />
-            <Setter Property="Height" Value="18" />
-            <Setter Property="Background" Value="#60a5fa" />
+            <Setter Property="Width" Value="34" />
+            <Setter Property="Height" Value="14" />
+            <Setter Property="Background" Value="#6d7ea6" />
             <Setter Property="BorderBrush" Value="#9acbff" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="CornerRadius" Value="7" />
+        </Style>
+        <Style Selector="Slider#PageSlider /template/ Thumb:pointerover">
+            <Setter Property="Background" Value="#7ec4ff" />
+            <Setter Property="BorderBrush" Value="#d6e9ff" />
         </Style>
         
         <!-- Overlays -->
@@ -252,7 +256,7 @@
                 <Slider x:Name="PageSlider"
                         Grid.Column="1"
                         Minimum="1" Maximum="1" Value="1"
-                        Margin="16,0"
+                        Margin="16,6"
                         VerticalAlignment="Center"
                         ToolTip.Tip="Scrub pages (drag or use ← / →)"
                         ValueChanged="OnPageSliderChanged" />
