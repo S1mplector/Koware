@@ -27,8 +27,8 @@ Koware does **NOT** host any media. It only helps you discover and open links th
 
 ### Requirements
 
-- Windows 10 x64 or later.
-- PowerShell.
+- **Windows**: Windows 10 x64 or later, PowerShell.
+- **macOS**: macOS 11+ (Intel or Apple Silicon).
 - To run from source: **.NET 8 SDK**.
 
 ### Install globally from source
@@ -50,9 +50,32 @@ koware search "bleach"
 koware watch "haikyuu" --episode 1
 ```
 
-### Install via the installer 
+### Install via the installer (Windows)
 
 The installer package bundles everything needed to run Koware without needing to build from source. You can download the latest installer from the [releases page](https://github.com/S1mplector/Koware/releases).
+
+### Install on macOS
+
+#### Option 1: DMG Installer
+Download the DMG from the [releases page](https://github.com/S1mplector/Koware/releases), open it, and run `install.sh`.
+
+#### Option 2: Build from source
+```bash
+# Clone and navigate to repo
+cd Koware
+
+# Make the script executable and run it
+chmod +x Scripts/publish-macos.sh
+./Scripts/publish-macos.sh
+
+# For Apple Silicon (default)
+./Scripts/publish-macos.sh --runtime osx-arm64
+
+# For Intel Macs
+./Scripts/publish-macos.sh --runtime osx-x64
+```
+
+The script creates a DMG in `publish/` that you can distribute or install from.
 
 ### Run without installing globally
 
@@ -137,7 +160,8 @@ Key settings:
 
 Koware keeps a local watch history in a small SQLite database:
 
-- Path: `%APPDATA%\\koware\\history.db`
+- **Windows**: `%APPDATA%\koware\history.db`
+- **macOS**: `~/.config/koware/history.db`
 
 To learn more and see available history options, run:
 

@@ -32,6 +32,45 @@ var exitCode = await RunAsync(host, args);
 return exitCode;
 
 /// <summary>
+/// Gets the user-writable configuration directory for Koware.
+/// </summary>
+/// <returns>
+/// On Windows: %APPDATA%\koware
+/// On macOS/Linux: ~/.config/koware
+/// </returns>
+static string GetUserConfigDirectory()
+{
+    if (OperatingSystem.IsWindows())
+    {
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "koware");
+    }
+    else
+    {
+        // macOS and Linux: use XDG config directory
+        var configHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        if (string.IsNullOrEmpty(configHome))
+        {
+            configHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
+        }
+        return Path.Combine(configHome, "koware");
+    }
+}
+
+/// <summary>
+/// Gets the full path to the user configuration file (appsettings.user.json).
+/// Creates the directory if it doesn't exist.
+/// </summary>
+static string GetUserConfigFilePath()
+{
+    var dir = GetUserConfigDirectory();
+    if (!Directory.Exists(dir))
+    {
+        Directory.CreateDirectory(dir);
+    }
+    return Path.Combine(dir, "appsettings.user.json");
+}
+
+/// <summary>
 /// Configure and build the host that wires up dependency injection, configuration, and logging.
 /// </summary>
 /// <param name="args">Command-line arguments passed to the CLI.</param>
@@ -44,7 +83,8 @@ static IHost BuildHost(string[] args)
 {
     var builder = Host.CreateApplicationBuilder(args);
     builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.json"), optional: true, reloadOnChange: true);
-    builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.user.json"), optional: true, reloadOnChange: true);
+    // Load user config from user-writable directory (cross-platform)
+    builder.Configuration.AddJsonFile(GetUserConfigFilePath(), optional: true, reloadOnChange: true);
     builder.Services.AddApplication();
     builder.Services.AddInfrastructure(builder.Configuration);
     builder.Services.Configure<PlayerOptions>(builder.Configuration.GetSection("Player"));
@@ -637,7 +677,7 @@ static async Task<int> HandleUpdateAsync(ILogger logger, CancellationToken cance
 static async Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
 {
     var toggles = services.GetRequiredService<IOptions<ProviderToggleOptions>>().Value;
-    var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.user.json");
+    var configPath = GetUserConfigFilePath();
     var json = File.Exists(configPath)
         ? (JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? new JsonObject())
         : new JsonObject();
@@ -4566,7 +4606,7 @@ static int HandleVersion()
 /// </remarks>
 static Task<int> HandleModeAsync(string[] args, ILogger logger)
 {
-    var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.user.json");
+    var configPath = GetUserConfigFilePath();
     var root = File.Exists(configPath)
         ? (JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? new JsonObject())
         : new JsonObject();
@@ -4650,7 +4690,7 @@ static Task<int> HandleModeAsync(string[] args, ILogger logger)
 /// </remarks>
 static int HandleConfig(string[] args)
 {
-    var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.user.json");
+    var configPath = GetUserConfigFilePath();
     var root = File.Exists(configPath)
         ? (JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? new JsonObject())
         : new JsonObject();
