@@ -28,7 +28,10 @@ public sealed class CatalogService
 
         // Load user configuration
         var configPath = GetConfigPath();
+        Console.WriteLine($"[DEBUG] Loading config from: {configPath}");
         var (animeOptions, mangaOptions, gogoOptions, toggleOptions) = LoadConfiguration(configPath);
+        Console.WriteLine($"[DEBUG] AllAnime - Enabled: {animeOptions.Enabled}, ApiBase: {animeOptions.ApiBase}, BaseHost: {animeOptions.BaseHost}, Referer: {animeOptions.Referer}");
+        Console.WriteLine($"[DEBUG] AllManga - Enabled: {mangaOptions.Enabled}, ApiBase: {mangaOptions.ApiBase}, BaseHost: {mangaOptions.BaseHost}, Referer: {mangaOptions.Referer}");
 
         // Create HTTP clients
         var animeHttpClient = CreateHttpClient(animeOptions);
@@ -62,10 +65,14 @@ public sealed class CatalogService
     {
         try
         {
-            return await _animeCatalog.SearchAsync(query, ct);
+            Console.WriteLine($"[DEBUG] Searching anime for: {query}");
+            var results = await _animeCatalog.SearchAsync(query, ct);
+            Console.WriteLine($"[DEBUG] Found {results.Count} anime results");
+            return results;
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"[DEBUG] Anime search error: {ex.Message}");
             _logger.LogError(ex, "Failed to search anime for query: {Query}", query);
             return Array.Empty<Anime>();
         }
@@ -75,10 +82,14 @@ public sealed class CatalogService
     {
         try
         {
-            return await _mangaCatalog.SearchAsync(query, ct);
+            Console.WriteLine($"[DEBUG] Searching manga for: {query}");
+            var results = await _mangaCatalog.SearchAsync(query, ct);
+            Console.WriteLine($"[DEBUG] Found {results.Count} manga results");
+            return results;
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"[DEBUG] Manga search error: {ex.Message}");
             _logger.LogError(ex, "Failed to search manga for query: {Query}", query);
             return Array.Empty<Manga>();
         }
