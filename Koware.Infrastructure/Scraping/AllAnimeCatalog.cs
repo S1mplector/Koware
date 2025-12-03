@@ -47,13 +47,14 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             return Array.Empty<Anime>();
         }
 
-        var gql = "query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name thumbnail description availableEpisodes __typename } }}";
+        // Note: Removed translationType from search to show all anime regardless of translation availability.
+        // Translation type is still used when fetching episodes and streams.
+        var gql = "query( $search: SearchInput $limit: Int $page: Int $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page countryOrigin: $countryOrigin ) { edges { _id name thumbnail description availableEpisodes __typename } }}";
         var variables = new
         {
             search = new { allowAdult = false, allowUnknown = false, query },
             limit = _options.SearchLimit,
             page = 1,
-            translationType = _options.TranslationType,
             countryOrigin = "ALL"
         };
 

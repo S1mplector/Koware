@@ -1782,7 +1782,7 @@ static void RenderHistory(IReadOnlyList<WatchHistoryEntry> entries)
     var index = 1;
     foreach (var e in entries)
     {
-        Console.WriteLine($"{index,3} {Truncate(e.AnimeTitle,30),-30} {e.EpisodeNumber,4} {e.Quality ?? "?",-8} {e.WatchedAt:u,-20} {e.EpisodeTitle ?? string.Empty}");
+        Console.WriteLine($"{index,3} {Truncate(e.AnimeTitle,30),-30} {e.EpisodeNumber,4} {e.Quality ?? "?",-8} {e.WatchedAt,-20:u} {e.EpisodeTitle ?? string.Empty}");
         index++;
     }
 }
