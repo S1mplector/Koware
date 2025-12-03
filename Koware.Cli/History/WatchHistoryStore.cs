@@ -7,6 +7,7 @@ using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Diagnostics;
 using Microsoft.Data.Sqlite;
 
 namespace Koware.Cli.History;
@@ -440,8 +441,9 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
             await using var stream = File.OpenRead(_legacyFilePath);
             entries = await JsonSerializer.DeserializeAsync<List<WatchHistoryEntry>>(stream, _legacySerializerOptions, cancellationToken);
         }
-        catch
+        catch (Exception ex)
         {
+            Debug.WriteLine($"[WatchHistoryStore] Failed to read legacy history file: {ex.Message}");
             return;
         }
 
@@ -462,9 +464,10 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
             var backupPath = Path.ChangeExtension(_legacyFilePath, ".bak");
             File.Move(_legacyFilePath, backupPath, overwrite: true);
         }
-        catch
+        catch (Exception ex)
         {
-            // Best-effort migration; ignore if backup fails.
+            // Best-effort migration; log but don't fail if backup fails
+            Debug.WriteLine($"[WatchHistoryStore] Failed to backup legacy history file: {ex.Message}");
         }
     }
 

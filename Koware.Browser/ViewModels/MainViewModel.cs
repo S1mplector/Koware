@@ -315,7 +315,7 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    private async Task LaunchPlayerAsync(StreamLink stream)
+    private Task LaunchPlayerAsync(StreamLink stream)
     {
         // Try to find and launch Koware.Player
         var playerPath = FindExecutable("Koware.Player");
@@ -323,7 +323,7 @@ public partial class MainViewModel : ObservableObject
         {
             StatusMessage = "Player not found. Opening stream in browser...";
             OpenInBrowser(stream.Url.ToString());
-            return;
+            return Task.CompletedTask;
         }
 
         var args = $"\"{stream.Url}\"";
@@ -348,10 +348,10 @@ public partial class MainViewModel : ObservableObject
             StatusMessage = $"Failed to launch player: {ex.Message}";
         }
 
-        await Task.CompletedTask;
+        return Task.CompletedTask;
     }
 
-    private async Task LaunchReaderAsync(IReadOnlyCollection<ChapterPage> pages, string title)
+    private Task LaunchReaderAsync(IReadOnlyCollection<ChapterPage> pages, string title)
     {
         // Try to find and launch Koware.Reader
         var readerPath = FindExecutable("Koware.Reader");
@@ -362,7 +362,7 @@ public partial class MainViewModel : ObservableObject
             {
                 OpenInBrowser(pages.First().ImageUrl.ToString());
             }
-            return;
+            return Task.CompletedTask;
         }
 
         // Build JSON array of pages
@@ -394,7 +394,7 @@ public partial class MainViewModel : ObservableObject
             StatusMessage = $"Failed to launch reader: {ex.Message}";
         }
 
-        await Task.CompletedTask;
+        return Task.CompletedTask;
     }
 
     private static string? FindExecutable(string name)
@@ -456,9 +456,10 @@ public partial class MainViewModel : ObservableObject
             };
             System.Diagnostics.Process.Start(psi);
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore browser launch errors
+            // Log browser launch errors for debugging
+            System.Diagnostics.Debug.WriteLine($"[MainViewModel] Failed to open browser: {ex.Message}");
         }
     }
 }

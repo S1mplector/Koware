@@ -1,4 +1,5 @@
 // Author: Ilgaz Mehmetoğlu
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
@@ -226,9 +227,10 @@ public sealed class CatalogService
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore parse errors, use defaults
+            // Log parse errors but use defaults
+            Debug.WriteLine($"[CatalogService] Failed to parse config at {path}: {ex.Message}");
         }
 
         return (animeOptions, mangaOptions, gogoOptions, toggleOptions);
