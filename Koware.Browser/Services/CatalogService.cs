@@ -236,39 +236,17 @@ public sealed class CatalogService
         return (animeOptions, mangaOptions, gogoOptions, toggleOptions);
     }
 
-    private static HttpClient CreateHttpClient(AllAnimeOptions? options = null)
-    {
-        var handler = new HttpClientHandler
-        {
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
-        };
+    private static HttpClient CreateHttpClient(AllAnimeOptions options) =>
+        HttpClientBuilder.Create()
+            .WithUserAgent(options.UserAgent)
+            .Build();
 
-        var client = new HttpClient(handler);
-        client.DefaultRequestHeaders.UserAgent.ParseAdd(options?.UserAgent ?? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
-        client.DefaultRequestHeaders.Accept.ParseAdd("application/json, */*");
-        client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
-        client.Timeout = TimeSpan.FromSeconds(30);
+    private static HttpClient CreateHttpClient(AllMangaOptions options) =>
+        HttpClientBuilder.Create()
+            .WithUserAgent(options.UserAgent)
+            .WithReferer(options.Referer)
+            .Build();
 
-        return client;
-    }
-
-    private static HttpClient CreateHttpClient(AllMangaOptions options)
-    {
-        var handler = new HttpClientHandler
-        {
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
-        };
-
-        var client = new HttpClient(handler);
-        if (!string.IsNullOrWhiteSpace(options.Referer))
-        {
-            client.DefaultRequestHeaders.Referrer = new Uri(options.Referer);
-        }
-        client.DefaultRequestHeaders.UserAgent.ParseAdd(options.UserAgent);
-        client.DefaultRequestHeaders.Accept.ParseAdd("application/json, */*");
-        client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
-        client.Timeout = TimeSpan.FromSeconds(30);
-
-        return client;
-    }
+    private static HttpClient CreateHttpClient() =>
+        HttpClientBuilder.Create().Build();
 }
