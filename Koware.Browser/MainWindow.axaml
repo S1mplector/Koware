@@ -368,16 +368,24 @@
                                             Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectAnimeCommand}"
                                             CommandParameter="{Binding}">
                                         <StackPanel>
-                                            <!-- Cover Placeholder -->
+                                            <!-- Cover Image -->
                                             <Border Height="260"
                                                     Background="#1a1f35"
                                                     CornerRadius="12,12,0,0">
-                                                <Viewbox Width="48" Height="48">
-                                                    <Canvas Width="24" Height="24">
-                                                        <Path Fill="#3a4570"
-                                                              Data="M5 3l14 9-14 9V3z" />
-                                                    </Canvas>
-                                                </Viewbox>
+                                                <Panel>
+                                                    <!-- Placeholder icon -->
+                                                    <Viewbox Width="48" Height="48" 
+                                                             IsVisible="{Binding CoverImage, Converter={x:Static ObjectConverters.IsNull}}">
+                                                        <Canvas Width="24" Height="24">
+                                                            <Path Fill="#3a4570"
+                                                                  Data="M5 3l14 9-14 9V3z" />
+                                                        </Canvas>
+                                                    </Viewbox>
+                                                    <!-- Actual cover image -->
+                                                    <Image Source="{Binding CoverImage}"
+                                                           Stretch="UniformToFill"
+                                                           IsVisible="{Binding CoverImage, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                                </Panel>
                                             </Border>
                                             <!-- Title -->
                                             <Border Padding="12,10">

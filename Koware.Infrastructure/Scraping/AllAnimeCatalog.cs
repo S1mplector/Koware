@@ -47,7 +47,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             return Array.Empty<Anime>();
         }
 
-        var gql = "query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name availableEpisodes __typename } }}";
+        var gql = "query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name thumbnail description availableEpisodes __typename } }}";
         var variables = new
         {
             search = new { allowAdult = false, allowUnknown = false, query },
@@ -72,10 +72,21 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         {
             var id = edge.GetProperty("_id").GetString()!;
             var title = edge.GetProperty("name").GetString() ?? id;
+            var synopsis = edge.TryGetProperty("description", out var desc) ? desc.GetString() : null;
+            Uri? coverImage = null;
+            if (edge.TryGetProperty("thumbnail", out var thumb) && thumb.ValueKind == JsonValueKind.String)
+            {
+                var thumbUrl = thumb.GetString();
+                if (!string.IsNullOrWhiteSpace(thumbUrl))
+                {
+                    coverImage = new Uri(thumbUrl);
+                }
+            }
             results.Add(new Anime(
                 new AnimeId(id),
                 title,
-                synopsis: null,
+                synopsis: synopsis,
+                coverImage: coverImage,
                 detailPage: BuildDetailUri(id),
                 episodes: Array.Empty<Episode>()));
         }

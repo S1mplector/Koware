@@ -365,9 +365,18 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        // Pass page URLs as arguments
-        var pageUrls = string.Join(" ", pages.Select(p => $"\"{p.ImageUrl}\""));
-        var args = $"--title \"{title}\" {pageUrls}";
+        // Build JSON array of pages
+        var pagesJson = System.Text.Json.JsonSerializer.Serialize(
+            pages.Select(p => new { url = p.ImageUrl.ToString(), pageNumber = p.PageNumber }));
+        
+        // Get referer from first page (all pages typically use same referer)
+        var referer = pages.FirstOrDefault()?.Referrer;
+        
+        var args = $"'{pagesJson}' \"{title}\"";
+        if (!string.IsNullOrEmpty(referer))
+        {
+            args += $" --referer \"{referer}\"";
+        }
 
         try
         {
@@ -391,13 +400,47 @@ public partial class MainViewModel : ObservableObject
     private static string? FindExecutable(string name)
     {
         var basePath = AppContext.BaseDirectory;
-        var candidates = new[]
+        var candidates = new List<string>();
+        
+        // Get short name for folder (e.g., "player" from "Koware.Player")
+        var shortName = name.Replace("Koware.", "").ToLowerInvariant();
+        
+        if (OperatingSystem.IsMacOS())
         {
-            Path.Combine(basePath, name),
-            Path.Combine(basePath, $"{name}.exe"),
-            Path.Combine(basePath, "..", name, name),
-            Path.Combine(basePath, "..", name, $"{name}.exe")
-        };
+            // macOS app bundle structure:
+            // /Applications/Koware.app/Contents/MacOS/Koware.Browser (basePath = MacOS/)
+            // /Applications/Koware.app/Contents/Resources/reader/Koware.Reader
+            // /Applications/Koware.app/Contents/Resources/player/Koware.Player
+            
+            // Go up from MacOS/ to Contents/
+            var contentsDir = Path.GetFullPath(Path.Combine(basePath, ".."));
+            var resourcesDir = Path.Combine(contentsDir, "Resources");
+            
+            // Primary: bundled in app Resources
+            candidates.Add(Path.Combine(resourcesDir, shortName, name));
+            // Fallback: sibling folder (for dev builds)
+            candidates.Add(Path.Combine(basePath, "..", shortName, name));
+            // Fallback: same directory
+            candidates.Add(Path.Combine(basePath, name));
+            // Fallback: CLI install location
+            candidates.Add($"/usr/local/bin/koware/{shortName}/{name}");
+        }
+        else if (OperatingSystem.IsWindows())
+        {
+            // Windows: Check relative to app, then AppData install location
+            candidates.Add(Path.Combine(basePath, name + ".exe"));
+            candidates.Add(Path.Combine(basePath, "..", shortName, name + ".exe"));
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            candidates.Add(Path.Combine(appData, "Koware", shortName, name + ".exe"));
+        }
+        else
+        {
+            // Linux: similar to macOS
+            candidates.Add(Path.Combine(basePath, name));
+            candidates.Add(Path.Combine(basePath, "..", shortName, name));
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            candidates.Add(Path.Combine(home, ".local", "bin", "koware", shortName, name));
+        }
 
         return candidates.FirstOrDefault(File.Exists);
     }
@@ -426,6 +469,7 @@ public partial class AnimeViewModel : ObservableObject
 
     public string Title => Model.Title;
     public string? Synopsis => Model.Synopsis;
+    public Uri? CoverImage => Model.CoverImage;
     public Uri DetailPage => Model.DetailPage;
 
     public AnimeViewModel(Anime model)
