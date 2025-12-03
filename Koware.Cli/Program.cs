@@ -554,7 +554,7 @@ static void WriteStatus(string label, bool success, string? detail = null)
 {
     var prev = Console.ForegroundColor;
     Console.ForegroundColor = success ? ConsoleColor.Green : ConsoleColor.Red;
-    Console.Write($"  {label,-6}: ");
+    Console.Write($"  {label,-10}: ");
     Console.ForegroundColor = ConsoleColor.Gray;
     Console.Write(success ? "OK" : "FAIL");
     if (!string.IsNullOrWhiteSpace(detail))
@@ -571,65 +571,113 @@ static void WriteStatus(string label, bool success, string? detail = null)
 /// <param name="services">Service provider for provider options.</param>
 /// <param name="logger">Logger instance for errors.</param>
 /// <param name="cancellationToken">Cancellation token.</param>
-/// <returns>Exit code: 0 if all providers reachable, 1 otherwise.</returns>
+/// <returns>Exit code: 0 if all critical checks pass, 1 otherwise.</returns>
 /// <remarks>
-/// Checks DNS resolution and HTTP connectivity to AllAnime.
-/// Also checks for external tools: ffmpeg, yt-dlp, aria2c, and configured player.
+/// Runs a full health check: version, install/config paths, provider reachability (anime + manga),
+/// player/reader discovery, and external tool availability (ffmpeg/yt-dlp/aria2c).
 /// </remarks>
 static async Task<int> HandleDoctorAsync(IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
 {
+    var overallOk = true;
     var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
     var results = new List<(string name, ProviderCheckResult result)>();
-    
-    var step = ConsoleStep.Start("Checking allanime");
-    try
+    var diagnostics = new ProviderDiagnostics(new HttpClient());
+
+    Console.WriteLine("Koware Doctor");
+    Console.WriteLine(new string('─', 40));
+
+    var cliPath = Environment.ProcessPath ?? Assembly.GetEntryAssembly()?.Location;
+    WriteStatus("Version", true, GetVersionLabel());
+    WriteStatus("CLI Path", !string.IsNullOrWhiteSpace(cliPath) && File.Exists(cliPath!), cliPath ?? "(unknown)");
+
+    var configPath = GetUserConfigFilePath();
+    var configDir = Path.GetDirectoryName(configPath);
+    var configDirExists = !string.IsNullOrWhiteSpace(configDir) && Directory.Exists(configDir);
+    var configExists = File.Exists(configPath);
+    WriteStatus("Config dir", configDirExists, configDirExists ? configDir! : "Missing (create with any config command)");
+    WriteStatus("Config", configExists, configExists ? configPath : "Not created yet (will be written on first config change)");
+    Console.WriteLine();
+
+    Console.WriteLine("Providers");
+    var providerTargets = new List<(string name, bool configured, AllAnimeOptions opt)>();
+    var mangaOptions = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+    providerTargets.Add(("allanime", allAnime.IsConfigured, allAnime));
+    providerTargets.Add(("allmanga", mangaOptions.IsConfigured, new AllAnimeOptions
     {
-        var diagnostics = new ProviderDiagnostics(new HttpClient());
-        var options = new AllAnimeOptions { ApiBase = allAnime.ApiBase, Referer = allAnime.Referer, UserAgent = allAnime.UserAgent };
-        var result = await diagnostics.CheckAsync(options, cancellationToken);
-        results.Add(("allanime", result));
-        step.Succeed("Check complete");
+        ApiBase = mangaOptions.ApiBase,
+        Referer = mangaOptions.Referer,
+        UserAgent = mangaOptions.UserAgent,
+        Enabled = mangaOptions.Enabled,
+        BaseHost = mangaOptions.BaseHost
+    }));
+
+    foreach (var (name, isConfigured, opt) in providerTargets)
+    {
+        if (!isConfigured || string.IsNullOrWhiteSpace(opt.ApiBase))
+        {
+            WriteStatus(name, false, "Not configured");
+            overallOk = false;
+            continue;
+        }
+
+        try
+        {
+            var step = ConsoleStep.Start($"Checking {name}");
+            var result = await diagnostics.CheckAsync(opt, cancellationToken);
+            step.Succeed("done");
+            results.Add((name, result));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "{Provider} doctor check failed.", name);
+            results.Add((name, new ProviderCheckResult { Target = opt.ApiBase ?? "not configured", HttpError = ex.Message }));
+        }
     }
-    catch (Exception ex)
+
+    foreach (var (name, result) in results)
     {
-        step.Fail("Check failed");
-        logger.LogError(ex, "allanime doctor check failed.");
-        results.Add(("allanime", new ProviderCheckResult { Target = allAnime.ApiBase ?? "not configured", HttpError = ex.Message }));
+        var httpDetail = result.HttpError ?? (result.HttpStatus.HasValue ? $"HTTP {result.HttpStatus}" : "No response");
+        WriteStatus($"{name} DNS", result.DnsResolved, result.DnsError);
+        WriteStatus($"{name} HTTP", result.HttpSuccess, httpDetail);
+        overallOk &= result.Success;
     }
 
     Console.WriteLine();
-    foreach (var (name, result) in results)
-    {
-        Console.WriteLine($"{name} ({result.Target})");
-        WriteStatus("DNS", result.DnsResolved, result.DnsError);
-        var detail = result.HttpError ?? (result.HttpStatus.HasValue ? $"HTTP {result.HttpStatus}" : "No response");
-        WriteStatus("HTTP", result.HttpSuccess, detail);
-        Console.WriteLine();
-    }
-
-    var allOk = results.All(r => r.result.Success);
-    if (!allOk)
-    {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("One or more providers are unreachable. Check your connection, DNS, or try again later.");
-        Console.ResetColor();
-        return 1;
-    }
-
-    Console.WriteLine("Player / toolchain:");
+    Console.WriteLine("Toolchain");
     var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
+    var readerOptions = services.GetRequiredService<IOptions<ReaderOptions>>().Value;
+
     var playerResolution = ResolvePlayerExecutable(playerOptions);
-    WriteStatus("Player", playerResolution.Path is not null, playerResolution.Path ?? $"Not found (tried: {string.Join(", ", playerResolution.Candidates)})");
+    var playerVersion = TryGetFileVersion(playerResolution.Path);
+    WriteStatus("Player", playerResolution.Path is not null, playerResolution.Path is null
+        ? $"Not found (tried: {string.Join(", ", playerResolution.Candidates)})"
+        : $"{playerResolution.Path}{(playerVersion is null ? string.Empty : $" [{playerVersion}]")}");
+    overallOk &= playerResolution.Path is not null;
+
+    var readerPath = ResolveExecutablePath(readerOptions.Command);
+    var readerVersion = TryGetFileVersion(readerPath);
+    WriteStatus("Reader", !string.IsNullOrWhiteSpace(readerPath), readerPath is null ? "Not found" : $"{readerPath}{(readerVersion is null ? string.Empty : $" [{readerVersion}]")}");
+    overallOk &= !string.IsNullOrWhiteSpace(readerPath);
 
     foreach (var tool in new[] { "ffmpeg", "yt-dlp", "aria2c" })
     {
         var resolved = ResolveExecutablePath(tool);
-        WriteStatus(tool, !string.IsNullOrWhiteSpace(resolved), resolved ?? "Not found");
+        var version = resolved is null ? null : TryGetCommandVersion(resolved);
+        WriteStatus(tool, !string.IsNullOrWhiteSpace(resolved), resolved is null ? "Not found" : $"{resolved}{(version is null ? string.Empty : $" [{version}]")}");
+        overallOk &= !string.IsNullOrWhiteSpace(resolved);
     }
     Console.WriteLine();
 
+    if (!overallOk)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("Some checks failed. Address the FAIL entries above, then rerun 'koware doctor'.");
+        Console.ResetColor();
+        return 1;
+    }
+
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine("All providers reachable.");
+    Console.WriteLine("All systems look good.");
     Console.ResetColor();
     return 0;
 }
@@ -5202,7 +5250,7 @@ static void PrintUsage()
     WriteCommand("help [command]", "Show this guide or a command-specific help page.", ConsoleColor.Magenta);
     WriteCommand("config [show|set|get|path]", "View or edit appsettings.user.json (player/reader/defaults).", ConsoleColor.Magenta);
     WriteCommand("mode [anime|manga]", "Show or switch between anime and manga modes.", ConsoleColor.Magenta);
-    WriteCommand("doctor", "Check provider connectivity (DNS/HTTP).", ConsoleColor.Magenta);
+    WriteCommand("doctor", "Full health check: config, providers, player, external tools.", ConsoleColor.Magenta);
     WriteCommand("provider [options]", "List/enable/disable providers.", ConsoleColor.Magenta);
     WriteCommand("update", "Download and launch the latest Koware installer.", ConsoleColor.Magenta);
 }
@@ -5314,9 +5362,13 @@ static int HandleHelp(string[] args)
             Console.WriteLine("Behavior: lists providers; with flags, updates enablement.");
             break;
         case "doctor":
-            PrintTopicHeader("doctor", "Check connectivity to the anime provider.");
+            PrintTopicHeader("doctor", "Run a full health check (config, providers, tools).");
             Console.WriteLine("Usage: koware doctor");
-            Console.WriteLine("Behavior: pings api host, reports DNS + HTTP reachability.");
+            Console.WriteLine("Behavior:");
+            Console.WriteLine("  • Verifies CLI version/path and config file location.");
+            Console.WriteLine("  • Checks anime/manga provider reachability (DNS + HTTP).");
+            Console.WriteLine("  • Confirms player/reader binaries are discoverable.");
+            Console.WriteLine("  • Checks external tools: ffmpeg, yt-dlp, aria2c (with versions when available).");
             break;
         case "mode":
             PrintTopicHeader("mode", "Switch between anime and manga modes.");
@@ -5894,6 +5946,84 @@ static void PrintConfigSummary(JsonObject root, string configPath, bool rawJson)
     Console.WriteLine("  koware config set Player:Args \"--play-and-exit\"");
     Console.WriteLine("  koware config set Reader:Command \"./reader/Koware.Reader\"");
     Console.WriteLine("  koware config set Defaults:Quality \"1080p\"");
+}
+
+/// <summary>
+/// Try to read the file version from a PE/executable if available.
+/// </summary>
+static string? TryGetFileVersion(string? path)
+{
+    if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+    {
+        return null;
+    }
+
+    try
+    {
+        var info = FileVersionInfo.GetVersionInfo(path);
+        if (!string.IsNullOrWhiteSpace(info.ProductVersion))
+        {
+            return info.ProductVersion;
+        }
+
+        return string.IsNullOrWhiteSpace(info.FileVersion) ? null : info.FileVersion;
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+/// <summary>
+/// Try to execute a command with <c>--version</c> (or custom args) and return the first output line.
+/// </summary>
+static string? TryGetCommandVersion(string path, string args = "--version")
+{
+    if (string.IsNullOrWhiteSpace(path))
+    {
+        return null;
+    }
+
+    try
+    {
+        var start = new ProcessStartInfo
+        {
+            FileName = path,
+            Arguments = string.IsNullOrWhiteSpace(args) ? string.Empty : args,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = Process.Start(start);
+        if (process is null)
+        {
+            return null;
+        }
+
+        if (!process.WaitForExit(3000))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { }
+            return null;
+        }
+
+        var output = process.StandardOutput.ReadToEnd();
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            output = process.StandardError.ReadToEnd();
+        }
+
+        var firstLine = output
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault();
+
+        return firstLine;
+    }
+    catch
+    {
+        return null;
+    }
 }
 
 /// <summary>

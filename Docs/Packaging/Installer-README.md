@@ -24,7 +24,7 @@ Koware is a CLI-based anime discovery and playback tool with a custom Windows pl
 
 ## Using Koware
 - Run `koware watch "<title>" --episode <n>` to search, plan, and play.
-- Run `koware doctor` if you want to verify connectivity.
+- Run `koware doctor` for a full health check (providers, player, tools).
 - The custom player is included; no external player setup is required.
 
 ## Version
