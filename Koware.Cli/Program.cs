@@ -5200,7 +5200,7 @@ static void PrintUsage()
     WriteCommand("history [options]", "Browse/search history; play entries or show stats.", ConsoleColor.Yellow);
     WriteCommand("list [subcommand]", "Track anime: add, update status, mark complete.", ConsoleColor.Yellow);
     WriteCommand("help [command]", "Show this guide or a command-specific help page.", ConsoleColor.Magenta);
-    WriteCommand("config [options]", "Persist defaults (quality/index/player) to appsettings.user.json.", ConsoleColor.Magenta);
+    WriteCommand("config [show|set|get|path]", "View or edit appsettings.user.json (player/reader/defaults).", ConsoleColor.Magenta);
     WriteCommand("mode [anime|manga]", "Show or switch between anime and manga modes.", ConsoleColor.Magenta);
     WriteCommand("doctor", "Check provider connectivity (DNS/HTTP).", ConsoleColor.Magenta);
     WriteCommand("provider [options]", "List/enable/disable providers.", ConsoleColor.Magenta);
@@ -5291,12 +5291,22 @@ static int HandleHelp(string[] args)
             Console.WriteLine("  • --stats shows counts per anime/manga.");
             break;
         case "config":
-            PrintTopicHeader("config", "Persist preferred defaults to appsettings.user.json.");
-            Console.WriteLine("Usage: koware config [--quality <label>] [--index <n>] [--player <exe>] [--args <string>] [--show]");
-            Console.WriteLine("Examples:");
+            PrintTopicHeader("config", "View or update appsettings.user.json.");
+            Console.WriteLine("Usage:");
+            Console.WriteLine("  koware config                         Show summary");
+            Console.WriteLine("  koware config show [--json]           Show config (raw JSON with --json)");
+            Console.WriteLine("  koware config path                    Print config file path");
+            Console.WriteLine("  koware config get <path> [--json]     Read a value (e.g., Player:Command)");
+            Console.WriteLine("  koware config set <path> <value>      Write a value (creates sections)");
+            Console.WriteLine("  koware config unset <path>            Remove a value");
+            Console.WriteLine("Shortcuts:");
             Console.WriteLine("  koware config --quality 1080p --index 1");
             Console.WriteLine("  koware config --player vlc --args \"--play-and-exit\"");
-            Console.WriteLine("  koware config --show");
+            Console.WriteLine("Examples:");
+            Console.WriteLine("  koware config set Player:Command \"vlc\"");
+            Console.WriteLine("  koware config set Reader:Command \"./reader/Koware.Reader\"");
+            Console.WriteLine("  koware config show --json");
+            Console.WriteLine("  koware config path");
             break;
         case "provider":
             PrintTopicHeader("provider", "List or toggle providers.");
@@ -5615,11 +5625,17 @@ static Task<int> HandleModeAsync(string[] args, ILogger logger)
 /// <summary>
 /// Implement the <c>koware config</c> command.
 /// </summary>
-/// <param name="args">CLI arguments; supports --quality, --index, --player, --args, --show.</param>
+/// <param name="args">CLI arguments.</param>
 /// <returns>Exit code: 0 on success.</returns>
 /// <remarks>
-/// Reads/writes appsettings.user.json and updates Player/Defaults sections.
-/// With --show, prints current config as JSON.
+/// Reads/writes appsettings.user.json.
+/// Supports verbs for ease of use:
+/// - <c>show</c> (default): print summary; with --json prints raw config.
+/// - <c>path</c>: print config file location.
+/// - <c>get &lt;path&gt;</c>: read a value such as Player:Command.
+/// - <c>set &lt;path&gt; &lt;value&gt;</c>: update a value, creating sections as needed.
+/// - <c>unset &lt;path&gt;</c>: remove a value.
+/// Legacy flag-style shortcuts (--quality/--index/--player/--args/--show) remain supported.
 /// </remarks>
 static int HandleConfig(string[] args)
 {
@@ -5628,7 +5644,136 @@ static int HandleConfig(string[] args)
         ? (JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? new JsonObject())
         : new JsonObject();
 
+    if (args.Length == 1)
+    {
+        PrintConfigSummary(root, configPath, rawJson: false);
+        return 0;
+    }
+
+    var verb = args[1].ToLowerInvariant();
+    if (verb is "show" or "--show" or "--json")
+    {
+        var extraArgs = args.Skip(2)
+            .Where(a => !a.Equals("--json", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (extraArgs.Count == 0)
+        {
+            var raw = verb == "--json" || args.Skip(2).Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+            PrintConfigSummary(root, configPath, raw);
+            return 0;
+        }
+    }
+
+    switch (verb)
+    {
+        case "path":
+            Console.WriteLine($"Config file: {configPath}");
+            return 0;
+        case "get":
+            {
+                if (args.Length < 3)
+                {
+                    Console.WriteLine("Usage: koware config get <path> [--json]");
+                    return 1;
+                }
+
+                var targetPath = args[2];
+                var raw = args.Skip(3).Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+
+                if (!TryGetConfigValue(root, targetPath, out var value))
+                {
+                    Console.WriteLine($"Setting '{targetPath}' not found.");
+                    return 1;
+                }
+
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                if (raw || value is not JsonValue)
+                {
+                    Console.WriteLine(value?.ToJsonString(options) ?? "null");
+                }
+                else if (value is JsonValue val && val.TryGetValue<string>(out var textValue))
+                {
+                    Console.WriteLine(textValue ?? "null");
+                }
+                else
+                {
+                    Console.WriteLine(value?.ToJsonString(options) ?? "null");
+                }
+
+                return 0;
+            }
+        case "set":
+            {
+                if (args.Length < 4)
+                {
+                    Console.WriteLine("Usage: koware config set <path> <value>");
+                    return 1;
+                }
+
+                var targetPath = args[2];
+                var value = string.Join(' ', args.Skip(3));
+
+                if (!TrySetConfigValue(root, targetPath, value, out var error))
+                {
+                    Console.WriteLine(error ?? $"Could not set '{targetPath}'.");
+                    return 1;
+                }
+
+                SaveUserConfig(root, configPath);
+                Console.WriteLine($"✓ Set {targetPath} = {value}");
+                Console.WriteLine($"   Saved to {configPath}");
+                return 0;
+            }
+        case "unset":
+            {
+                if (args.Length < 3)
+                {
+                    Console.WriteLine("Usage: koware config unset <path>");
+                    return 1;
+                }
+
+                var targetPath = args[2];
+                if (!TryUnsetConfigValue(root, targetPath))
+                {
+                    Console.WriteLine($"Setting '{targetPath}' not found.");
+                    return 1;
+                }
+
+                SaveUserConfig(root, configPath);
+                Console.WriteLine($"✓ Removed {targetPath}");
+                Console.WriteLine($"   Saved to {configPath}");
+                return 0;
+            }
+    }
+
+    return HandleConfigLegacyOptions(args, root, configPath);
+}
+
+/// <summary>
+/// Print a short usage line for the <c>koware config</c> command.
+/// </summary>
+static void PrintConfigUsage()
+{
+    Console.WriteLine("Usage:");
+    Console.WriteLine("  koware config                         Show config summary");
+    Console.WriteLine("  koware config show [--json]           Show config (raw JSON with --json)");
+    Console.WriteLine("  koware config path                    Print config file path");
+    Console.WriteLine("  koware config get <path> [--json]     Read a value (e.g., Player:Command)");
+    Console.WriteLine("  koware config set <path> <value>      Write a value (creates sections)");
+    Console.WriteLine("  koware config unset <path>            Remove a value");
+    Console.WriteLine("Shortcuts:");
+    Console.WriteLine("  koware config --quality 1080p --index 1");
+    Console.WriteLine("  koware config --player vlc --args \"--play-and-exit\"");
+}
+
+/// <summary>
+/// Legacy flag-based configuration handler (kept for backwards compatibility).
+/// </summary>
+static int HandleConfigLegacyOptions(string[] args, JsonObject root, string configPath)
+{
     var player = root["Player"] as JsonObject ?? new JsonObject();
+    var reader = root["Reader"] as JsonObject ?? new JsonObject();
     var defaults = root["Defaults"] as JsonObject ?? new JsonObject();
 
     var showOnly = false;
@@ -5687,40 +5832,216 @@ static int HandleConfig(string[] args)
     }
 
     root["Player"] = player;
+    root["Reader"] = reader;
     root["Defaults"] = defaults;
 
     if (changed)
     {
-        var json = JsonSerializer.Serialize(root, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(configPath, json);
+        SaveUserConfig(root, configPath);
         Console.WriteLine($"Saved preferences to {configPath}");
     }
 
     if (showOnly || !changed)
     {
-        var summary = new
-        {
-            Player = new
-            {
-                Command = player["Command"]?.ToString() ?? "(default)",
-                Args = player["Args"]?.ToString()
-            },
-            Defaults = new
-            {
-                Quality = defaults["Quality"]?.ToString(),
-                PreferredMatchIndex = defaults["PreferredMatchIndex"]?.ToString()
-            }
-        };
-        Console.WriteLine(JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }));
+        PrintConfigSummary(root, configPath, rawJson: false);
     }
 
     return 0;
 }
 
 /// <summary>
-/// Print a short usage line for the <c>koware config</c> command.
+/// Pretty-print a summary of the user configuration or dump the raw JSON.
 /// </summary>
-static void PrintConfigUsage()
+static void PrintConfigSummary(JsonObject root, string configPath, bool rawJson)
 {
-    Console.WriteLine("Usage: koware config [--quality <label>] [--index <n>] [--player <exe>] [--args <string>] [--show]");
+    var options = new JsonSerializerOptions { WriteIndented = true };
+
+    if (rawJson)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(root, options));
+        return;
+    }
+
+    var defaults = root["Defaults"] as JsonObject ?? new JsonObject();
+    var player = root["Player"] as JsonObject ?? new JsonObject();
+    var reader = root["Reader"] as JsonObject ?? new JsonObject();
+
+    Console.WriteLine($"Config file: {configPath}");
+    Console.WriteLine();
+
+    Console.WriteLine("Defaults");
+    Console.WriteLine($"  Mode    : {defaults["Mode"]?.ToString() ?? "anime"}");
+    Console.WriteLine($"  Quality : {defaults["Quality"]?.ToString() ?? "(not set)"}");
+    Console.WriteLine($"  Index   : {defaults["PreferredMatchIndex"]?.ToString() ?? "(not set)"}");
+    Console.WriteLine();
+
+    Console.WriteLine("Player");
+    var playerCommand = player["Command"]?.ToString();
+    var playerArgs = player["Args"]?.ToString();
+    Console.WriteLine($"  Command : {(string.IsNullOrWhiteSpace(playerCommand) ? "(default)" : playerCommand)}");
+    Console.WriteLine($"  Args    : {(string.IsNullOrWhiteSpace(playerArgs) ? "(none)" : playerArgs)}");
+    Console.WriteLine();
+
+    Console.WriteLine("Reader");
+    var readerCommand = reader["Command"]?.ToString();
+    var readerArgs = reader["Args"]?.ToString();
+    Console.WriteLine($"  Command : {(string.IsNullOrWhiteSpace(readerCommand) ? "(default)" : readerCommand)}");
+    Console.WriteLine($"  Args    : {(string.IsNullOrWhiteSpace(readerArgs) ? "(none)" : readerArgs)}");
+    Console.WriteLine();
+
+    Console.WriteLine("Tips:");
+    Console.WriteLine("  koware config set Player:Command \"vlc\"");
+    Console.WriteLine("  koware config set Player:Args \"--play-and-exit\"");
+    Console.WriteLine("  koware config set Reader:Command \"./reader/Koware.Reader\"");
+    Console.WriteLine("  koware config set Defaults:Quality \"1080p\"");
+}
+
+/// <summary>
+/// Try to fetch a config value using a colon-separated path (case-insensitive).
+/// </summary>
+static bool TryGetConfigValue(JsonObject root, string path, out JsonNode? value)
+{
+    value = root;
+    foreach (var segment in path.Split(':', StringSplitOptions.RemoveEmptyEntries))
+    {
+        if (value is not JsonObject obj)
+        {
+            value = null;
+            return false;
+        }
+
+        var key = FindExistingKey(obj, segment);
+        if (key is null || !obj.TryGetPropertyValue(key, out value))
+        {
+            value = null;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/// <summary>
+/// Set a config value by path, creating intermediate objects as needed.
+/// </summary>
+static bool TrySetConfigValue(JsonObject root, string path, string rawValue, out string? error)
+{
+    error = null;
+    var segments = path.Split(':', StringSplitOptions.RemoveEmptyEntries);
+    if (segments.Length == 0)
+    {
+        error = "Setting path cannot be empty.";
+        return false;
+    }
+
+    JsonObject current = root;
+    for (var i = 0; i < segments.Length - 1; i++)
+    {
+        var key = FindExistingKey(current, segments[i]) ?? segments[i];
+        if (!current.TryGetPropertyValue(key, out var next) || next is not JsonObject nextObj)
+        {
+            nextObj = new JsonObject();
+            current[key] = nextObj;
+        }
+        current = nextObj;
+    }
+
+    var finalKey = FindExistingKey(current, segments[^1]) ?? segments[^1];
+    current[finalKey] = CreateJsonValue(rawValue);
+    return true;
+}
+
+/// <summary>
+/// Remove a config value by path.
+/// </summary>
+static bool TryUnsetConfigValue(JsonObject root, string path)
+{
+    var segments = path.Split(':', StringSplitOptions.RemoveEmptyEntries);
+    if (segments.Length == 0)
+    {
+        return false;
+    }
+
+    JsonObject? current = root;
+    for (var i = 0; i < segments.Length - 1; i++)
+    {
+        if (current is null)
+        {
+            return false;
+        }
+
+        var key = FindExistingKey(current, segments[i]);
+        if (key is null || !current.TryGetPropertyValue(key, out var next) || next is not JsonObject nextObj)
+        {
+            return false;
+        }
+
+        current = nextObj;
+    }
+
+    if (current is null)
+    {
+        return false;
+    }
+
+    var finalKey = FindExistingKey(current, segments[^1]);
+    return finalKey is not null && current.Remove(finalKey);
+}
+
+/// <summary>
+/// Find an existing property name using case-insensitive comparison.
+/// </summary>
+static string? FindExistingKey(JsonObject obj, string name)
+{
+    foreach (var kvp in obj)
+    {
+        if (kvp.Key.Equals(name, StringComparison.OrdinalIgnoreCase))
+        {
+            return kvp.Key;
+        }
+    }
+
+    return null;
+}
+
+/// <summary>
+/// Convert a raw string into a JsonNode with simple type inference.
+/// </summary>
+static JsonNode? CreateJsonValue(string raw)
+{
+    if (bool.TryParse(raw, out var boolValue))
+    {
+        return JsonValue.Create(boolValue);
+    }
+
+    if (int.TryParse(raw, out var intValue))
+    {
+        return JsonValue.Create(intValue);
+    }
+
+    if (double.TryParse(raw, out var doubleValue))
+    {
+        return JsonValue.Create(doubleValue);
+    }
+
+    if (raw.Equals("null", StringComparison.OrdinalIgnoreCase))
+    {
+        return JsonValue.Create<string?>(null);
+    }
+
+    return JsonValue.Create(raw);
+}
+
+/// <summary>
+/// Persist the user configuration to disk, ensuring the directory exists.
+/// </summary>
+static void SaveUserConfig(JsonObject root, string configPath)
+{
+    var configDir = Path.GetDirectoryName(configPath);
+    if (!string.IsNullOrWhiteSpace(configDir) && !Directory.Exists(configDir))
+    {
+        Directory.CreateDirectory(configDir);
+    }
+
+    File.WriteAllText(configPath, JsonSerializer.Serialize(root, new JsonSerializerOptions { WriteIndented = true }));
 }

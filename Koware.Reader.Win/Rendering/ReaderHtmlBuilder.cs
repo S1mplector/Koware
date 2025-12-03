@@ -285,6 +285,19 @@ internal static class ReaderHtmlBuilder
 
         .nav-btn {
             padding: 8px 16px;
+            transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.2s ease;
+        }
+
+        .nav-btn:hover:not(:disabled) {
+            box-shadow: 0 0 16px rgba(56, 189, 248, 0.5), 0 0 32px rgba(56, 189, 248, 0.25);
+            border-color: rgba(56, 189, 248, 0.6);
+            background: rgba(56, 189, 248, 0.15);
+            transform: scale(1.05);
+        }
+
+        .nav-btn:active:not(:disabled) {
+            transform: scale(0.98);
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
         }
 
         /* Page slider */

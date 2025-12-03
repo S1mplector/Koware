@@ -167,15 +167,18 @@ Simple positional form (as in the quick reference above):
 
 **Usage**
 
-`koware config [--json]`
+- `koware config` / `koware config show [--json]`
+- `koware config path`
+- `koware config get <path> [--json]`
+- `koware config set <path> <value>`
+- `koware config unset <path>`
+- Shortcuts: `koware config --quality 1080p --index 1`, `koware config --player vlc --args "--play-and-exit"`
 
 **Behavior**
 
-- Prints the effective configuration:
-  - provider defaults (sub/dub, search limit)
-  - player command/args
-  - history file location, etc.
+- Shows the effective configuration (defaults, player, reader) and the config file path.
 - With `--json`, prints raw configuration.
+- `get/set/unset` edit `appsettings.user.json` using colon-separated paths (e.g., `Player:Command`, `Defaults:Quality`).
 
 ---
 
