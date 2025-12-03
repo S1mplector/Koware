@@ -3614,11 +3614,22 @@ static string? ResolveReaderExecutable(ReaderOptions options)
     
     if (OperatingSystem.IsMacOS())
     {
-        // On macOS: try bundled Avalonia reader first, then fall back to browser
-        var macReader = "/usr/local/bin/koware-apps/reader/Koware.Reader";
-        if (File.Exists(macReader))
+        // On macOS: try bundled Avalonia reader from Koware.app bundle
+        var macReaderCandidates = new[]
         {
-            return macReader;
+            "/Applications/Koware.app/Contents/Resources/reader/Koware.Reader",
+            "/usr/local/bin/koware/reader/Koware.Reader",
+            Path.Combine(AppContext.BaseDirectory, "..", "Resources", "reader", "Koware.Reader"),
+            Path.Combine(AppContext.BaseDirectory, "reader", "Koware.Reader"),
+        };
+        
+        foreach (var candidate in macReaderCandidates)
+        {
+            var fullPath = Path.GetFullPath(candidate);
+            if (File.Exists(fullPath))
+            {
+                return fullPath;
+            }
         }
         
         // Fall back to browser-based reader if no bundled reader
@@ -4629,7 +4640,13 @@ static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
     if (OperatingSystem.IsMacOS())
     {
         // macOS: prefer IINA/mpv (native, works best), bundled Avalonia player requires LibVLC which has ARM64 issues
-        candidates.AddRange(new[] { "iina", "mpv", "/usr/local/bin/koware-apps/player/Koware.Player", "vlc" });
+        candidates.AddRange(new[] { 
+            "iina", 
+            "mpv", 
+            "/Applications/Koware.app/Contents/Resources/player/Koware.Player",
+            "/usr/local/bin/koware/player/Koware.Player",
+            "vlc" 
+        });
     }
     else
     {
