@@ -326,26 +326,48 @@
                 </StackPanel>
                 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <ComboBox x:Name="ThemeSelector"
-                              Width="120"
-                              SelectionChanged="OnThemeChanged">
-                        <ComboBoxItem Content="Dark" />
-                        <ComboBoxItem Content="Sepia" />
-                        <ComboBoxItem Content="Light" />
-                    </ComboBox>
-                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <TextBlock Text="Comfort" Foreground="#a3abc4" VerticalAlignment="Center"/>
-                        <Slider x:Name="ComfortSlider"
-                                Width="120"
-                                Minimum="0"
-                                Maximum="0.6"
-                                SmallChange="0.05"
-                                ValueChanged="OnComfortChanged"/>
-                    </StackPanel>
-                    <ToggleSwitch x:Name="AutoHideToggle"
-                                  Content="Hide UI on idle"
-                                  Checked="OnAutoHideToggled"
-                                  Unchecked="OnAutoHideToggled"/>
+                    <Button x:Name="SettingsButton"
+                            Classes="toolbar"
+                            Click="OnSettingsClick"
+                            ToolTip.Tip="Reader settings">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Viewbox Width="16" Height="16" Stretch="Uniform">
+                                <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                      StrokeThickness="2"
+                                      StrokeLineCap="Round"
+                                      Data="M12 8a4 4 0 1 1-4 4 4 4 0 0 1 4-4Zm0-6 2.3 2 2.7-.7 1.1 2.6 2.7.6-.3 2.8 2 2-2 2 .3 2.8-2.7.6-1.1 2.6-2.7-.7L12 26 9.7 24l-2.7.7-1.1-2.6-2.7-.6.3-2.8-2-2 2-2-.3-2.8 2.7-.6 1.1-2.6 2.7.7Z" />
+                            </Viewbox>
+                            <TextBlock Text="Settings" />
+                        </StackPanel>
+                        <Button.Flyout>
+                            <Flyout Placement="TopEdgeAlignedRight">
+                                <Border Background="#13162b" Padding="12" CornerRadius="8">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="Appearance" Foreground="#dfe6ff" FontWeight="SemiBold"/>
+                                        <ComboBox x:Name="ThemeSelector"
+                                                  Width="180"
+                                                  SelectionChanged="OnThemeChanged">
+                                            <ComboBoxItem Content="Dark" />
+                                            <ComboBoxItem Content="Sepia" />
+                                            <ComboBoxItem Content="Light" />
+                                        </ComboBox>
+                                        <StackPanel Orientation="Vertical" Spacing="4">
+                                            <TextBlock Text="Comfort" Foreground="#a3abc4" />
+                                            <Slider x:Name="ComfortSlider"
+                                                    Minimum="0"
+                                                    Maximum="0.6"
+                                                    SmallChange="0.05"
+                                                    ValueChanged="OnComfortChanged"/>
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="AutoHideToggle"
+                                                      Content="Hide UI on idle"
+                                                      Checked="OnAutoHideToggled"
+                                                      Unchecked="OnAutoHideToggled"/>
+                                    </StackPanel>
+                                </Border>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>

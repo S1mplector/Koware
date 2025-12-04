@@ -15,6 +15,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Controls.Primitives.PopupPositioning;
 
 namespace Koware.Reader;
 
@@ -700,6 +701,14 @@ public partial class MainWindow : Window
     private void OnZoomOutClick(object? sender, RoutedEventArgs e)
     {
         ZoomOut();
+    }
+
+    private void OnSettingsClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control control)
+        {
+            FlyoutBase.ShowAttachedFlyout(control);
+        }
     }
 
     private void OnThemeChanged(object? sender, SelectionChangedEventArgs e)
