@@ -52,3 +52,6 @@ Koware.Installer.Win/obj/
 # Publish bundles (script outputs)
 publish/
 **/publish/
+
+# External reference clones
+ani-cli/
