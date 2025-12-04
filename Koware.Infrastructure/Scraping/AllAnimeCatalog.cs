@@ -41,58 +41,77 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
 
     public async Task<IReadOnlyCollection<Anime>> SearchAsync(string query, CancellationToken cancellationToken = default)
     {
-        if (!_options.IsConfigured)
+        try
         {
-            _logger.LogWarning("AllAnime source not configured. Add configuration to ~/.config/koware/appsettings.user.json");
+            _logger.LogDebug("SearchAsync called. IsConfigured={IsConfigured}, ApiBase='{ApiBase}', BaseHost='{BaseHost}'",
+                _options.IsConfigured, _options.ApiBase ?? "(null)", _options.BaseHost ?? "(null)");
+
+            if (!_options.IsConfigured)
+            {
+                _logger.LogWarning("AllAnime source not configured. Add configuration to ~/.config/koware/appsettings.user.json");
+                return Array.Empty<Anime>();
+            }
+
+            // Note: Removed translationType from search to show all anime regardless of translation availability.
+            // Translation type is still used when fetching episodes and streams.
+            var gql = "query( $search: SearchInput $limit: Int $page: Int $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page countryOrigin: $countryOrigin ) { edges { _id name thumbnail description availableEpisodes __typename } }}";
+            var variables = new
+            {
+                search = new { allowAdult = false, allowUnknown = false, query },
+                limit = _options.SearchLimit,
+                page = 1,
+                countryOrigin = "ALL"
+            };
+
+            var uri = BuildApiUri(gql, variables);
+            using var response = await SendWithRetryAsync(uri, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+            var edges = json.RootElement
+                .GetProperty("data")
+                .GetProperty("shows")
+                .GetProperty("edges");
+
+            var results = new List<Anime>();
+            foreach (var edge in edges.EnumerateArray())
+            {
+                var id = edge.GetProperty("_id").GetString()!;
+                var title = edge.GetProperty("name").GetString() ?? id;
+                var synopsis = edge.TryGetProperty("description", out var desc) ? desc.GetString() : null;
+                Uri? coverImage = null;
+                if (edge.TryGetProperty("thumbnail", out var thumb) && thumb.ValueKind == JsonValueKind.String)
+                {
+                    var thumbUrl = thumb.GetString();
+                    if (!string.IsNullOrWhiteSpace(thumbUrl))
+                    {
+                        var absoluteThumb = EnsureAbsolute(thumbUrl);
+                        if (Uri.TryCreate(absoluteThumb, UriKind.Absolute, out var parsedThumb))
+                        {
+                            coverImage = parsedThumb;
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Skipping invalid thumbnail '{Thumb}' for anime {AnimeId}", thumbUrl, id);
+                        }
+                    }
+                }
+                results.Add(new Anime(
+                    new AnimeId(id),
+                    title,
+                    synopsis: synopsis,
+                    coverImage: coverImage,
+                    detailPage: BuildDetailUri(id),
+                    episodes: Array.Empty<Episode>()));
+            }
+
+            return results;
+        }
+        catch (UriFormatException ex)
+        {
+            _logger.LogError(ex, "Invalid URI during AllAnime search. ApiBase={ApiBase}, BaseHost={BaseHost}, Referer={Referer}", _options.ApiBase, _options.BaseHost, _options.Referer);
             return Array.Empty<Anime>();
         }
-
-        // Note: Removed translationType from search to show all anime regardless of translation availability.
-        // Translation type is still used when fetching episodes and streams.
-        var gql = "query( $search: SearchInput $limit: Int $page: Int $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page countryOrigin: $countryOrigin ) { edges { _id name thumbnail description availableEpisodes __typename } }}";
-        var variables = new
-        {
-            search = new { allowAdult = false, allowUnknown = false, query },
-            limit = _options.SearchLimit,
-            page = 1,
-            countryOrigin = "ALL"
-        };
-
-        var uri = BuildApiUri(gql, variables);
-        using var response = await SendWithRetryAsync(uri, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        var edges = json.RootElement
-            .GetProperty("data")
-            .GetProperty("shows")
-            .GetProperty("edges");
-
-        var results = new List<Anime>();
-        foreach (var edge in edges.EnumerateArray())
-        {
-            var id = edge.GetProperty("_id").GetString()!;
-            var title = edge.GetProperty("name").GetString() ?? id;
-            var synopsis = edge.TryGetProperty("description", out var desc) ? desc.GetString() : null;
-            Uri? coverImage = null;
-            if (edge.TryGetProperty("thumbnail", out var thumb) && thumb.ValueKind == JsonValueKind.String)
-            {
-                var thumbUrl = thumb.GetString();
-                if (!string.IsNullOrWhiteSpace(thumbUrl))
-                {
-                    coverImage = new Uri(thumbUrl);
-                }
-            }
-            results.Add(new Anime(
-                new AnimeId(id),
-                title,
-                synopsis: synopsis,
-                coverImage: coverImage,
-                detailPage: BuildDetailUri(id),
-                episodes: Array.Empty<Episode>()));
-        }
-
-        return results;
     }
 
     public async Task<IReadOnlyCollection<Episode>> GetEpisodesAsync(Anime anime, CancellationToken cancellationToken = default)
@@ -199,7 +218,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
     private async Task ResolveSourceAsync(ProviderSource source, ConcurrentBag<StreamLink> collector, ConcurrentBag<string> attempts, CancellationToken cancellationToken)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
         var host = "unknown";
 
         try
@@ -210,7 +229,16 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
 
             using var response = await SendWithRetryAsync(new Uri(absoluteUrl), timeoutCts.Token);
             response.EnsureSuccessStatusCode();
-            var payload = await response.Content.ReadAsStringAsync(timeoutCts.Token);
+            const int maxBytes = 10 * 1024 * 1024; // 10 MB safety cap
+            var length = response.Content.Headers.ContentLength;
+            if (length.HasValue && length.Value > maxBytes)
+            {
+                attempts.Add($"{source.Name}@{host}: payload-too-large");
+                _logger.LogDebug("Skipping source {Source} because payload length {Length} exceeds cap {Cap}", source.Name, length, maxBytes);
+                return;
+            }
+
+            var payload = await ReadContentWithLimitAsync(response.Content, maxBytes, timeoutCts.Token);
 
             var links = await ExtractLinksAsync(payload, absoluteUrl, source.Name, timeoutCts.Token);
             foreach (var link in links)
@@ -234,6 +262,30 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         {
             _logger.LogDebug(ex, "Failed to resolve source {Source}", source.Name);
             attempts.Add($"{source.Name}@{host}: error {ex.GetType().Name}");
+        }
+    }
+
+    private static async Task<string> ReadContentWithLimitAsync(HttpContent content, int maxBytes, CancellationToken cancellationToken)
+    {
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        await using var buffer = new MemoryStream();
+        var temp = new byte[8192];
+        try
+        {
+            int read;
+            while ((read = await stream.ReadAsync(temp.AsMemory(0, temp.Length), cancellationToken)) > 0)
+            {
+                if (buffer.Length + read > maxBytes)
+                {
+                    throw new HttpRequestException($"Content exceeded limit of {maxBytes} bytes");
+                }
+                buffer.Write(temp, 0, read);
+            }
+
+            return Encoding.UTF8.GetString(buffer.ToArray());
+        }
+        finally
+        {
         }
     }
 
@@ -604,11 +656,32 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
 
     private Uri BuildApiUri(string gql, object variables)
     {
+        if (string.IsNullOrWhiteSpace(_options.ApiBase))
+        {
+            throw new InvalidOperationException("AllAnime ApiBase is not configured. Check your appsettings.json or appsettings.user.json.");
+        }
+        
+        var apiBase = _options.ApiBase.Trim();
+        if (!Uri.TryCreate(apiBase, UriKind.Absolute, out var baseUri))
+        {
+            throw new InvalidOperationException($"AllAnime ApiBase '{apiBase}' is not a valid URI. It should be like 'https://api.example.com'.");
+        }
+        
+        var builder = new UriBuilder(baseUri)
+        {
+            Path = $"{baseUri.AbsolutePath.TrimEnd('/')}/api"
+        };
+
         var query = $"query={Uri.EscapeDataString(gql)}&variables={Uri.EscapeDataString(JsonSerializer.Serialize(variables, _serializerOptions))}";
-        return new Uri($"{_options.ApiBase.TrimEnd('/')}/api?{query}");
+        builder.Query = query;
+        return builder.Uri;
     }
 
-    private Uri BuildDetailUri(string id) => new($"https://{_options.BaseHost}/anime/{id}");
+    private Uri BuildDetailUri(string id)
+    {
+        var host = ResolveBaseHost();
+        return new UriBuilder("https", host, -1, $"anime/{id}").Uri;
+    }
 
     private static int ParseQualityScore(string quality)
     {
@@ -627,15 +700,49 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             return path;
         }
 
-        var baseUrl = $"https://{_options.BaseHost}";
-        return path.StartsWith('/') ? $"{baseUrl}{path}" : $"{baseUrl}/{path}";
+        var host = ResolveBaseHost();
+        var builder = new UriBuilder("https", host)
+        {
+            Path = path.StartsWith('/') ? path : $"/{path}"
+        };
+        return builder.Uri.ToString();
+    }
+
+    private string ResolveBaseHost()
+    {
+        if (!string.IsNullOrWhiteSpace(_options.BaseHost))
+        {
+            var hostText = _options.BaseHost.Trim();
+            if (hostText.Contains("://", StringComparison.Ordinal))
+            {
+                if (Uri.TryCreate(hostText, UriKind.Absolute, out var parsed))
+                {
+                    return parsed.Host;
+                }
+            }
+            hostText = hostText.TrimEnd('/');
+            if (!string.IsNullOrWhiteSpace(hostText))
+            {
+                return hostText;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_options.ApiBase) && Uri.TryCreate(_options.ApiBase, UriKind.Absolute, out var api))
+        {
+            return api.Host;
+        }
+
+        throw new InvalidOperationException("AllAnime BaseHost is not configured and ApiBase is invalid.");
     }
 
     private HttpRequestMessage BuildRequest(Uri uri)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Referrer = new Uri(_options.Referer);
-        request.Headers.TryAddWithoutValidation("Origin", _options.Referer.TrimEnd('/'));
+        if (Uri.TryCreate(_options.Referer, UriKind.Absolute, out var refUri))
+        {
+            request.Headers.Referrer = refUri;
+            request.Headers.TryAddWithoutValidation("Origin", refUri.GetLeftPart(UriPartial.Authority));
+        }
         request.Headers.UserAgent.ParseAdd(_options.UserAgent);
         request.Headers.Accept.ParseAdd("application/json, */*");
         request.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");

@@ -96,7 +96,7 @@ static IHost BuildHost(string[] args)
     builder.Services.AddSingleton<IMangaListStore, SqliteMangaListStore>();
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware", LogLevel.Information);
-    builder.Logging.AddFilter("Koware.Infrastructure.Scraping.AllAnimeCatalog", LogLevel.Error);
+    builder.Logging.AddFilter("Koware.Infrastructure.Scraping.AllAnimeCatalog", LogLevel.Debug);
 
     return builder.Build();
 }
