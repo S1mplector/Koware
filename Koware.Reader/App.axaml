@@ -7,5 +7,9 @@
         <Style Selector="ScrollViewer">
             <Setter Property="AllowAutoHide" Value="True" />
         </Style>
-    </Application.Styles>
+  </Application.Styles>
+  <Application.Resources>
+    <SolidColorBrush x:Key="ReaderBackground" Color="#1a1a2e" />
+    <SolidColorBrush x:Key="ReaderForeground" Color="#dfe6ff" />
+  </Application.Resources>
 </Application>

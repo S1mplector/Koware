@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private readonly HttpClient _httpClient;
     private readonly List<Image> _pageImages = new();
     private readonly Dictionary<int, Bitmap?> _loadedBitmaps = new();
+    private readonly Dictionary<int, Border> _pagePlaceholders = new();
     private CancellationTokenSource? _loadCts;
     
     private bool _isFullscreen;
@@ -34,16 +35,30 @@ public partial class MainWindow : Window
     private bool _isScrollTracking = true;
     private bool _doublePageMode;
     private DateTime _lastScrollTime = DateTime.MinValue;
+    private bool _autoHideUi;
+    private readonly DispatcherTimer _uiHideTimer;
+    private int _loadedCount;
+    private float _currentChapterNumber;
 
     public List<PageInfo> Pages { get; set; } = new();
+    public List<ChapterInfo> Chapters { get; set; } = new();
     public string? HttpReferer { get; set; }
     public string? HttpUserAgent { get; set; }
+    public ChapterNavigationRequest ChapterNavigation { get; private set; } = ChapterNavigationRequest.None;
+    public string? NavResultPath { get; set; }
 
     private enum FitMode
     {
         FitWidth,
         FitHeight,
         Original
+    }
+
+    public enum ChapterNavigationRequest
+    {
+        None,
+        Previous,
+        Next
     }
 
     public MainWindow()
@@ -62,6 +77,15 @@ public partial class MainWindow : Window
         
         // Mouse wheel zoom with Ctrl
         ScrollViewer.PointerWheelChanged += OnPointerWheelChanged;
+
+        // Auto-hide header/footer when idle
+        _uiHideTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(3)
+        };
+        _uiHideTimer.Tick += (_, _) => SetUiVisibility(false);
+        PointerMoved += (_, _) => ResetUiHideTimer();
+        KeyDown += (_, _) => ResetUiHideTimer();
     }
     
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
@@ -96,9 +120,21 @@ public partial class MainWindow : Window
         }
 
         TitleText.Text = Title;
+        ChapterLabel.Text = Title;
+        ChapterNameLabel.Text = Title;
+        _currentChapterNumber = Chapters.FirstOrDefault(c => !c.IsRead)?.Number
+                                 ?? Chapters.LastOrDefault()?.Number
+                                 ?? 0;
+        if (_currentChapterNumber > 0)
+        {
+            ChapterLabel.Text = $"Chapter {_currentChapterNumber}";
+            ChapterNameLabel.Text = $"Chapter {_currentChapterNumber}";
+        }
         PageSlider.Maximum = Pages.Count;
         PageSlider.Value = 1;
         UpdatePageIndicator();
+        UpdateProgressLabel();
+        ThemeSelector.SelectedIndex = 0;
 
         // Start loading pages
         _loadCts = new CancellationTokenSource();
@@ -107,22 +143,31 @@ public partial class MainWindow : Window
 
     private async Task LoadAllPagesAsync(CancellationToken cancellationToken)
     {
-        var loadedCount = 0;
         var totalPages = Pages.Count;
+        _loadedCount = 0;
 
         try
         {
             // Create placeholder images for all pages
             foreach (var page in Pages.OrderBy(p => p.PageNumber))
             {
+                var container = new Border
+                {
+                    Background = new SolidColorBrush(Color.Parse("#101020")),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(6),
+                    Margin = new Thickness(0, 2, 0, 2)
+                };
+
                 var image = new Image
                 {
                     Stretch = Stretch.Uniform,
-                    Margin = new Thickness(0, 2, 0, 2),
                     Tag = page.PageNumber
                 };
                 _pageImages.Add(image);
-                PagesContainer.Children.Add(image);
+                container.Child = image;
+                PagesContainer.Children.Add(container);
+                _pagePlaceholders[page.PageNumber] = container;
             }
 
             // Load images in parallel (limited concurrency)
@@ -140,17 +185,28 @@ public partial class MainWindow : Window
                         if (index >= 0 && index < _pageImages.Count)
                         {
                             _loadedBitmaps[page.PageNumber] = bitmap;
-                            _pageImages[index].Source = bitmap;
-                            ApplyFitMode(_pageImages[index]);
+                            if (bitmap is not null)
+                            {
+                                _pageImages[index].Source = bitmap;
+                                ClearPlaceholder(page.PageNumber);
+                                ApplyFitMode(_pageImages[index]);
+                            }
+                            else
+                            {
+                                ShowRetryPlaceholder(page.PageNumber, page.Url);
+                            }
                         }
-                        
-                        loadedCount++;
-                        LoadingProgress.Text = $"{loadedCount} / {totalPages}";
-                        LoadingProgressBar.Value = (loadedCount * 100.0) / totalPages;
-                        
-                        if (loadedCount >= totalPages)
+
+                        _loadedCount++;
+                        LoadingProgress.Text = $"{_loadedCount} / {totalPages}";
+                        LoadingProgressBar.Value = (_loadedCount * 100.0) / totalPages;
+                        PrefetchDot.Visibility = _loadedCount >= totalPages ? Avalonia.Controls.Visibility.Collapsed : Avalonia.Controls.Visibility.Visible;
+                        UpdateProgressLabel();
+
+                        if (_loadedCount >= totalPages)
                         {
                             LoadingOverlay.IsVisible = false;
+                            PrefetchDot.Visibility = Avalonia.Controls.Visibility.Collapsed;
                         }
                     });
                 }
@@ -193,6 +249,63 @@ public partial class MainWindow : Window
         {
             return null;
         }
+    }
+
+    private void ShowRetryPlaceholder(int pageNumber, string url)
+    {
+        if (!_pagePlaceholders.TryGetValue(pageNumber, out var container)) return;
+
+        var retryButton = new Button
+        {
+            Content = "Retry",
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+            Padding = new Thickness(10, 6),
+            Classes = { "toolbar" }
+        };
+        retryButton.Click += async (_, _) =>
+        {
+            retryButton.IsEnabled = false;
+            var bitmap = await LoadImageAsync(url, CancellationToken.None);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (bitmap is not null)
+                {
+                    var image = _pageImages[pageNumber - 1];
+                    _loadedBitmaps[pageNumber] = bitmap;
+                    image.Source = bitmap;
+                    ClearPlaceholder(pageNumber);
+                    ApplyFitMode(image);
+                }
+                else
+                {
+                    retryButton.IsEnabled = true;
+                }
+            });
+        };
+
+        container.Child = new StackPanel
+        {
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            Spacing = 6,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = "Failed to load page",
+                    Foreground = Brushes.LightGray,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
+                },
+                retryButton
+            }
+        };
+    }
+
+    private void ClearPlaceholder(int pageNumber)
+    {
+        if (!_pagePlaceholders.TryGetValue(pageNumber, out var container)) return;
+        var image = _pageImages[pageNumber - 1];
+        container.Child = image;
     }
 
     private void ApplyFitMode(Image image)
@@ -288,6 +401,7 @@ public partial class MainWindow : Window
         }
         
         UpdatePageIndicator();
+        UpdateProgressLabel();
         
         // Scroll to page
         if (page - 1 < _pageImages.Count)
@@ -300,6 +414,12 @@ public partial class MainWindow : Window
     private void UpdatePageIndicator()
     {
         PageIndicator.Text = $"Page {_currentPage} / {Pages.Count}";
+    }
+
+    private void UpdateProgressLabel()
+    {
+        var percent = (int)Math.Round((_currentPage / (double)Math.Max(1, Pages.Count)) * 100);
+        ProgressLabel.Text = $"{percent}%";
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
@@ -559,6 +679,18 @@ public partial class MainWindow : Window
     {
         ToggleHelp();
     }
+
+    private void OnPrevChapterClick(object? sender, RoutedEventArgs e)
+    {
+        ChapterNavigation = ChapterNavigationRequest.Previous;
+        Close();
+    }
+
+    private void OnNextChapterClick(object? sender, RoutedEventArgs e)
+    {
+        ChapterNavigation = ChapterNavigationRequest.Next;
+        Close();
+    }
     
     private void OnZoomInClick(object? sender, RoutedEventArgs e)
     {
@@ -570,6 +702,142 @@ public partial class MainWindow : Window
         ZoomOut();
     }
 
+    private void OnThemeChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        var selection = (ThemeSelector.SelectedItem as ComboBoxItem)?.Content?.ToString()?.ToLowerInvariant();
+        switch (selection)
+        {
+            case "sepia":
+                SetTheme("#f3e7d3", "#1b1307");
+                break;
+            case "light":
+                SetTheme("#f5f7fb", "#111827");
+                break;
+            default:
+                SetTheme("#1a1a2e", "#dfe6ff");
+                break;
+        }
+    }
+
+    private void SetTheme(string backgroundHex, string foregroundHex)
+    {
+        var bg = Color.Parse(backgroundHex);
+        var fg = Color.Parse(foregroundHex);
+
+        ContentWrapper.Background = new SolidColorBrush(bg);
+        ScrollViewer.Background = new SolidColorBrush(bg);
+        TitleText.Foreground = new SolidColorBrush(fg);
+        PageIndicator.Foreground = new SolidColorBrush(fg);
+        ChapterLabel.Foreground = new SolidColorBrush(fg);
+        ChapterNameLabel.Foreground = new SolidColorBrush(fg);
+    }
+
+    private void OnComfortChanged(object? sender, RangeBaseValueChangedEventArgs e)
+    {
+        ComfortOverlay.Opacity = e.NewValue;
+    }
+
+    private void OnAutoHideToggled(object? sender, RoutedEventArgs e)
+    {
+        _autoHideUi = AutoHideToggle.IsChecked == true;
+        if (_autoHideUi)
+        {
+            ResetUiHideTimer();
+        }
+        else
+        {
+            _uiHideTimer.Stop();
+            SetUiVisibility(true);
+        }
+    }
+
+    private void ResetUiHideTimer()
+    {
+        if (!_autoHideUi) return;
+        SetUiVisibility(true);
+        _uiHideTimer.Stop();
+        _uiHideTimer.Start();
+    }
+
+    private void SetUiVisibility(bool show)
+    {
+        HeaderBar.Opacity = show ? 1 : 0;
+        FooterBar.Opacity = show ? 1 : 0;
+        HeaderBar.IsHitTestVisible = show;
+        FooterBar.IsHitTestVisible = show;
+    }
+
+    private void OnChaptersClick(object? sender, RoutedEventArgs e)
+    {
+        if (Chapters.Count == 0)
+        {
+            var toast = new Window
+            {
+                Width = 300,
+                Height = 120,
+                Background = Brushes.Black,
+                Opacity = 0.8,
+                CanResize = false,
+                ShowInTaskbar = false,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Content = new TextBlock
+                {
+                    Text = "No chapter list provided.",
+                    Foreground = Brushes.White,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
+                }
+            };
+            toast.ShowDialog(this);
+            return;
+        }
+
+        var overlay = new Window
+        {
+            Title = "Chapters",
+            Width = 380,
+            Height = 500,
+            Background = new SolidColorBrush(Color.Parse("#111527")),
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ShowInTaskbar = false
+        };
+
+        var list = new StackPanel { Margin = new Thickness(12), Spacing = 8 };
+        foreach (var ch in Chapters.OrderBy(c => c.Number))
+        {
+            var row = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8 };
+            var badge = new Border
+            {
+                Background = ch.IsRead ? Brushes.Green : Brushes.Gray,
+                Width = 10,
+                Height = 10,
+                CornerRadius = new CornerRadius(5),
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
+            };
+            row.Children.Add(badge);
+            row.Children.Add(new TextBlock
+            {
+                Text = $"Ch {ch.Number}",
+                Foreground = Brushes.White,
+                Width = 70
+            });
+            row.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(ch.Title) ? "Untitled" : ch.Title,
+                Foreground = Brushes.White,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+            if (Math.Abs(ch.Number - _currentChapterNumber) < 0.001f)
+            {
+                row.Background = new SolidColorBrush(Color.Parse("#1f2a48"));
+            }
+            list.Children.Add(row);
+        }
+
+        var scroll = new ScrollViewer { Content = list };
+        overlay.Content = scroll;
+        overlay.ShowDialog(this);
+    }
     private void ShowError(string message)
     {
         ErrorText.Text = message;
@@ -584,12 +852,37 @@ public partial class MainWindow : Window
 
     private void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {
+        WriteNavigationResult();
         _loadCts?.Cancel();
         _httpClient.Dispose();
         
         foreach (var bitmap in _loadedBitmaps.Values)
         {
             bitmap?.Dispose();
+        }
+    }
+
+    private void WriteNavigationResult()
+    {
+        if (string.IsNullOrWhiteSpace(NavResultPath))
+        {
+            return;
+        }
+
+        var value = ChapterNavigation switch
+        {
+            ChapterNavigationRequest.Next => "next",
+            ChapterNavigationRequest.Previous => "prev",
+            _ => "none"
+        };
+
+        try
+        {
+            File.WriteAllText(NavResultPath, value);
+        }
+        catch
+        {
+            // ignore write errors
         }
     }
 }

@@ -3327,12 +3327,23 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
         return 1;
     }
 
-    // Launch reader
+    // Launch reader with navigation support
     var readerOptions = services.GetRequiredService<IOptions<ReaderOptions>>().Value;
     var allMangaOptions = services.GetService<IOptions<AllMangaOptions>>()?.Value;
     var displayTitle = $"{selectedManga.Title} - Chapter {selectedChapter.Number}";
 
-    var exitCode = LaunchReader(readerOptions, pages, logger, allMangaOptions?.Referer, allMangaOptions?.UserAgent, displayTitle);
+    var exitCode = await ReadWithNavigationAsync(
+        readerOptions,
+        selectedManga,
+        selectedChapter,
+        chapters,
+        pages,
+        mangaCatalog,
+        logger,
+        allMangaOptions?.Referer,
+        allMangaOptions?.UserAgent,
+        displayTitle,
+        cancellationToken);
 
     // Save to reading history
     try
@@ -3384,7 +3395,7 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
 /// <param name="httpUserAgent">Optional User-Agent header.</param>
 /// <param name="displayTitle">Window title for the reader.</param>
 /// <returns>Exit code from the reader process.</returns>
-static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> pages, ILogger logger, string? httpReferrer, string? httpUserAgent, string? displayTitle)
+static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> pages, IReadOnlyCollection<Chapter> chapters, Chapter currentChapter, ILogger logger, string? httpReferrer, string? httpUserAgent, string? displayTitle, string? navResultPath)
 {
     var readerPath = ResolveReaderExecutable(options);
     if (readerPath is null)
@@ -3419,6 +3430,8 @@ static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> 
     // Build pages JSON
     var pagesData = pages.Select(p => new { url = p.ImageUrl.ToString(), pageNumber = p.PageNumber }).ToArray();
     var pagesJson = JsonSerializer.Serialize(pagesData);
+    var chaptersPayload = chapters.Select(c => new { number = c.Number, title = c.Title, read = c.Number < selectedChapter.Number }).ToArray();
+    var chaptersJson = JsonSerializer.Serialize(chaptersPayload);
 
     var start = new ProcessStartInfo
     {
@@ -3428,6 +3441,13 @@ static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> 
 
     start.ArgumentList.Add(pagesJson);
     start.ArgumentList.Add(string.IsNullOrWhiteSpace(displayTitle) ? "Koware Reader" : displayTitle!);
+    start.ArgumentList.Add("--chapters");
+    start.ArgumentList.Add(chaptersJson);
+    if (!string.IsNullOrWhiteSpace(navResultPath))
+    {
+        start.ArgumentList.Add("--nav");
+        start.ArgumentList.Add(navResultPath!);
+    }
 
     if (!string.IsNullOrWhiteSpace(httpReferrer))
     {
@@ -3442,6 +3462,84 @@ static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> 
     }
 
     return StartProcessAndWait(logger, start, readerPath);
+}
+
+static async Task<int> ReadWithNavigationAsync(
+    ReaderOptions readerOptions,
+    Manga selectedManga,
+    Chapter selectedChapter,
+    IReadOnlyCollection<Chapter> chapters,
+    IReadOnlyCollection<ChapterPage> initialPages,
+    IMangaCatalog mangaCatalog,
+    ILogger logger,
+    string? httpReferrer,
+    string? httpUserAgent,
+    string? displayTitle,
+    CancellationToken cancellationToken)
+{
+    // create a temp file to capture navigation intent
+    var navPath = Path.Combine(Path.GetTempPath(), $"koware-nav-{Guid.NewGuid():N}.txt");
+    var orderedChapters = chapters.OrderBy(c => c.Number).ToArray();
+    var currentChapter = selectedChapter;
+    var pages = initialPages;
+    var exitCode = 0;
+
+    try
+    {
+        while (true)
+        {
+            File.WriteAllText(navPath, "none");
+            exitCode = LaunchReader(readerOptions, pages, chapters, currentChapter, logger, httpReferrer, httpUserAgent, displayTitle, navPath);
+
+            var nav = ReadNavigation(navPath);
+            if (nav is not ("next" or "prev"))
+            {
+                break;
+            }
+
+            var currentIndex = Array.FindIndex(orderedChapters, c => Math.Abs(c.Number - currentChapter.Number) < 0.001f);
+            if (currentIndex < 0)
+            {
+                break;
+            }
+
+            if (nav == "next" && currentIndex + 1 < orderedChapters.Length)
+            {
+                currentChapter = orderedChapters[currentIndex + 1];
+            }
+            else if (nav == "prev" && currentIndex - 1 >= 0)
+            {
+                currentChapter = orderedChapters[currentIndex - 1];
+            }
+            else
+            {
+                break;
+            }
+
+            logger.LogInformation("Loading chapter {Chapter} ({Title})", currentChapter.Number, selectedManga.Title);
+            pages = await mangaCatalog.GetPagesAsync(currentChapter, cancellationToken);
+            displayTitle = $"{selectedManga.Title} - Chapter {currentChapter.Number}";
+        }
+    }
+    finally
+    {
+        try { File.Delete(navPath); } catch { }
+    }
+
+    return exitCode;
+}
+
+static string ReadNavigation(string path)
+{
+    try
+    {
+        var text = File.ReadAllText(path).Trim().ToLowerInvariant();
+        return text;
+    }
+    catch
+    {
+        return "none";
+    }
 }
 
 /// <summary>

@@ -92,7 +92,8 @@
         <!-- Header -->
         <Border Grid.Row="0" 
                 Background="#0d0d1a"
-                Padding="12,8">
+                Padding="12,8"
+                x:Name="HeaderBar">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -109,11 +110,32 @@
                            TextTrimming="CharacterEllipsis" />
                 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <TextBlock x:Name="PageIndicator"
-                               Text="Page 1 / 1"
-                               Foreground="#a3abc4"
-                               VerticalAlignment="Center"
-                               Margin="0,0,16,0" />
+                    <StackPanel Orientation="Vertical" Margin="0,0,16,0">
+                        <TextBlock x:Name="ChapterLabel"
+                                   Text="Chapter"
+                                   Foreground="#a3abc4"
+                                   FontSize="12"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="PageIndicator"
+                                   Text="Page 1 / 1"
+                                   Foreground="#a3abc4"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                    
+                    <Button Classes="toolbar"
+                            Content="Chapters"
+                            Click="OnChaptersClick"
+                            ToolTip.Tip="Open chapter list" />
+
+                    <Button Classes="toolbar"
+                            Content="Prev Chapter"
+                            Click="OnPrevChapterClick"
+                            ToolTip.Tip="Previous chapter" />
+                    <Button Classes="toolbar"
+                            Content="Next Chapter"
+                            Click="OnNextChapterClick"
+                            ToolTip.Tip="Next chapter" />
                     
                     <!-- Zoom Controls -->
                     <Button Classes="toolbar"
@@ -197,17 +219,23 @@
         </Border>
         
         <!-- Main Content -->
+        <Border Grid.Row="1" Background="{DynamicResource ReaderBackground}" x:Name="ContentWrapper">
         <ScrollViewer x:Name="ScrollViewer"
-                      Grid.Row="1"
                       HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Auto"
-                      Background="#1a1a2e">
+                      Background="{DynamicResource ReaderBackground}">
             <StackPanel x:Name="PagesContainer"
                         HorizontalAlignment="Center"
                         Margin="0,8">
                 <!-- Pages will be added dynamically -->
             </StackPanel>
         </ScrollViewer>
+        <Rectangle x:Name="ComfortOverlay"
+                   Grid.Row="1"
+                   Fill="#000000"
+                   Opacity="0"
+                   IsHitTestVisible="False" />
+        </Border>
         
         <!-- Loading Overlay -->
         <Border x:Name="LoadingOverlay"
@@ -236,7 +264,8 @@
         <!-- Footer Navigation -->
         <Border Grid.Row="2"
                 Background="#0d0d1a"
-                Padding="16,8">
+                Padding="12,10"
+                x:Name="FooterBar">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -244,31 +273,79 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 
-                <Button Grid.Column="0"
-                        Content="← Previous"
-                        Click="OnPreviousClick"
-                        Background="#2a2a4a"
-                        Foreground="White"
-                        Padding="16,8"
-                        MinHeight="40"
-                        ToolTip.Tip="Previous page (←)" />
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button Content="← Prev"
+                            Click="OnPreviousClick"
+                            Background="#2a2a4a"
+                            Foreground="White"
+                            Padding="12,8"
+                            MinHeight="36"
+                            ToolTip.Tip="Previous page (←)" />
+                    <Button Content="Next →"
+                            Click="OnNextClick"
+                            Background="#2a2a4a"
+                            Foreground="White"
+                            Padding="12,8"
+                            MinHeight="36"
+                            ToolTip.Tip="Next page (→)" />
+                </StackPanel>
                 
-                <Slider x:Name="PageSlider"
-                        Grid.Column="1"
-                        Minimum="1" Maximum="1" Value="1"
-                        Margin="16,6"
-                        VerticalAlignment="Center"
-                        ToolTip.Tip="Scrub pages (drag or use ← / →)"
-                        ValueChanged="OnPageSliderChanged" />
+                <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center">
+                    <Slider x:Name="PageSlider"
+                            Minimum="1" Maximum="1" Value="1"
+                            Margin="0,0,0,4"
+                            VerticalAlignment="Center"
+                            ToolTip.Tip="Scrub pages (drag or use ← / →)"
+                            ValueChanged="OnPageSliderChanged" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="ProgressLabel"
+                                   Grid.Column="0"
+                                   Text="0%"
+                                   Foreground="#a3abc4"
+                                   Margin="0,0,8,0"/>
+                        <TextBlock x:Name="ChapterNameLabel"
+                                   Grid.Column="1"
+                                   Text="Chapter"
+                                   Foreground="#dfe6ff"
+                                   TextAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <Ellipse x:Name="PrefetchDot"
+                                 Grid.Column="2"
+                                 Width="10" Height="10"
+                                 Fill="#60a5fa"
+                                 VerticalAlignment="Center"
+                                 Visibility="Collapsed"
+                                 ToolTip.Tip="Prefetching pages..." />
+                    </Grid>
+                </StackPanel>
                 
-                <Button Grid.Column="2"
-                        Content="Next →"
-                        Click="OnNextClick"
-                        Background="#2a2a4a"
-                        Foreground="White"
-                        Padding="16,8"
-                        MinHeight="40"
-                        ToolTip.Tip="Next page (→)" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <ComboBox x:Name="ThemeSelector"
+                              Width="120"
+                              SelectionChanged="OnThemeChanged">
+                        <ComboBoxItem Content="Dark" />
+                        <ComboBoxItem Content="Sepia" />
+                        <ComboBoxItem Content="Light" />
+                    </ComboBox>
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <TextBlock Text="Comfort" Foreground="#a3abc4" VerticalAlignment="Center"/>
+                        <Slider x:Name="ComfortSlider"
+                                Width="120"
+                                Minimum="0"
+                                Maximum="0.6"
+                                SmallChange="0.05"
+                                ValueChanged="OnComfortChanged"/>
+                    </StackPanel>
+                    <ToggleSwitch x:Name="AutoHideToggle"
+                                  Content="Hide UI on idle"
+                                  Checked="OnAutoHideToggled"
+                                  Unchecked="OnAutoHideToggled"/>
+                </StackPanel>
             </Grid>
         </Border>
         
