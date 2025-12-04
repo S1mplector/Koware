@@ -322,7 +322,9 @@ static async Task<int> ExecuteAndPlayAsync(
 
     var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
     var playerResolution = ResolvePlayerExecutable(playerOptions);
-    var filteredStreams = FilterStreamsForPlayer(result.Streams, playerResolution.Name, logger);
+    var defaultReferrer = services.GetService<IOptions<AllAnimeOptions>>()?.Value?.Referer;
+    var normalizedStreams = ApplyDefaultReferrer(result.Streams, defaultReferrer);
+    var filteredStreams = FilterStreamsForPlayer(normalizedStreams, playerResolution.Name, logger);
 
     var stream = PickBestStream(filteredStreams);
     if (stream is null)
@@ -334,9 +336,7 @@ static async Task<int> ExecuteAndPlayAsync(
 
     var allAnimeOptions = services.GetService<IOptions<AllAnimeOptions>>()?.Value;
     var displayTitle = BuildPlayerTitle(result, stream);
-    var httpReferrer = !string.IsNullOrWhiteSpace(stream.Referrer)
-        ? stream.Referrer
-        : allAnimeOptions?.Referer;
+    var httpReferrer = stream.Referrer ?? allAnimeOptions?.Referer;
     var prettyTitle = string.IsNullOrWhiteSpace(displayTitle) ? stream.Url.ToString() : displayTitle!;
     logger.LogInformation("Playing {Title} via {Host} [{Quality}]", prettyTitle, stream.Url.Host, stream.Quality ?? "auto");
 
@@ -3030,6 +3030,7 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
     Directory.CreateDirectory(targetDir);
 
     var allAnimeOptions = services.GetService<IOptions<AllAnimeOptions>>()?.Value;
+    var defaultReferrer = allAnimeOptions?.Referer;
 
     using var httpClient = new HttpClient();
 
@@ -3070,7 +3071,8 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
                 continue;
             }
 
-            var stream = PickBestStream(epResult.Streams);
+            var normalizedStreams = ApplyDefaultReferrer(epResult.Streams, defaultReferrer);
+            var stream = PickBestStream(normalizedStreams);
             if (stream is null)
             {
                 logger.LogWarning("No suitable stream found for episode {Episode}. Skipping.", episode.Number);
@@ -3081,9 +3083,7 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
             var fileName = DownloadPlanner.BuildDownloadFileName(title, episode, stream.Quality);
             var outputPath = Path.Combine(targetDir, fileName);
 
-            var httpReferrer = !string.IsNullOrWhiteSpace(stream.Referrer)
-                ? stream.Referrer
-                : allAnimeOptions?.Referer;
+            var httpReferrer = stream.Referrer ?? allAnimeOptions?.Referer;
             var httpUserAgent = allAnimeOptions?.UserAgent;
 
             DownloadConsole.PrintEpisodeHeader(title, episode, stream.Quality, index, total, outputPath);
@@ -4154,6 +4154,8 @@ static StreamLink? PickBestStream(IReadOnlyCollection<StreamLink> streams)
 static IReadOnlyCollection<StreamLink> FilterStreamsForPlayer(IReadOnlyCollection<StreamLink> streams, string playerName, ILogger logger)
 {
     var supportsSoftSubs = SupportsSoftSubtitles(playerName);
+    var cautious = IsCautiousPlayer(playerName);
+
     var filtered = supportsSoftSubs
         ? streams
         : streams.Where(s => !s.RequiresSoftSubSupport).ToArray();
@@ -4164,9 +4166,17 @@ static IReadOnlyCollection<StreamLink> FilterStreamsForPlayer(IReadOnlyCollectio
         filtered = streams;
     }
 
+    if (cautious)
+    {
+        filtered = filtered.Where(s => !(IsPlaylist(s) && s.RequiresSoftSubSupport)).ToArray();
+        if (filtered.Count == 0)
+        {
+            filtered = streams;
+        }
+    }
+
     return filtered
-        .OrderByDescending(s => s.HostPriority)
-        .ThenByDescending(s => ParseQualityScore(s.Quality))
+        .OrderByDescending(s => ScoreStreamForPlayer(s, cautious))
         .ToArray();
 }
 
@@ -4177,6 +4187,13 @@ static IReadOnlyCollection<StreamLink> FilterStreamsForPlayer(IReadOnlyCollectio
 /// <returns>True if external subtitles are likely supported.</returns>
 static bool SupportsSoftSubtitles(string playerName) =>
     !playerName.Contains("vlc", StringComparison.OrdinalIgnoreCase);
+
+/// <summary>
+/// Players like VLC/Android struggle with some soft-sub HLS streams; treat them cautiously.
+/// </summary>
+static bool IsCautiousPlayer(string playerName) =>
+    playerName.Contains("vlc", StringComparison.OrdinalIgnoreCase) ||
+    playerName.Contains("android", StringComparison.OrdinalIgnoreCase);
 
 /// <summary>
 /// Score a stream based on quality, protocol, host, and provider (higher is better).
@@ -4242,6 +4259,28 @@ static int ScoreStream(StreamLink stream)
     if (IsSegment(stream))
     {
         score -= 80;
+    }
+
+    return score;
+}
+
+/// <summary>
+/// Adjust stream score for player-specific constraints (e.g., VLC/Android prefer direct files).
+/// </summary>
+static int ScoreStreamForPlayer(StreamLink stream, bool cautiousPlayer)
+{
+    var score = ScoreStream(stream);
+    if (cautiousPlayer)
+    {
+        if (!IsPlaylist(stream) && !stream.RequiresSoftSubSupport)
+        {
+            score += 150;
+        }
+
+        if (IsPlaylist(stream))
+        {
+            score -= 50;
+        }
     }
 
     return score;
@@ -4324,6 +4363,21 @@ static bool IsJsonStream(StreamLink stream)
 {
     var path = stream.Url.AbsolutePath;
     return path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// Ensure every stream has a usable referrer, falling back to a default when missing.
+/// </summary>
+static IReadOnlyCollection<StreamLink> ApplyDefaultReferrer(IReadOnlyCollection<StreamLink> streams, string? defaultReferrer)
+{
+    if (string.IsNullOrWhiteSpace(defaultReferrer))
+    {
+        return streams;
+    }
+
+    return streams
+        .Select(s => string.IsNullOrWhiteSpace(s.Referrer) ? s with { Referrer = defaultReferrer } : s)
+        .ToArray();
 }
 
 /// <summary>
@@ -5140,7 +5194,14 @@ static void RenderPlan(ScrapePlan plan, ScrapeResult result)
         var toShow = ordered.Take(5).ToArray();
         foreach (var stream in toShow)
         {
-            Console.WriteLine($"  {stream.Quality} -> {stream.Url}");
+            var subtitleLabel = stream.Subtitles.Count == 0
+                ? "no subs"
+                : string.Join(", ", stream.Subtitles.Select(s =>
+                    string.IsNullOrWhiteSpace(s.Language)
+                        ? s.Label
+                        : $"{s.Label} ({s.Language})"));
+            var sourceLabel = string.IsNullOrWhiteSpace(stream.SourceTag) ? stream.Provider : stream.SourceTag;
+            Console.WriteLine($"  [{sourceLabel}] {stream.Quality} -> {stream.Url} (subs: {subtitleLabel})");
         }
 
         if (ordered.Length > toShow.Length)
