@@ -1435,17 +1435,7 @@ static async Task<int> HandleContinueAsync(string[] args, IServiceProvider servi
     animeQuery = queryParts.Count == 0 ? null : string.Join(' ', queryParts).Trim();
 
     var history = services.GetRequiredService<IWatchHistoryStore>();
-    WatchHistoryEntry? entry;
-
-    if (string.IsNullOrWhiteSpace(animeQuery))
-    {
-        entry = await history.GetLastAsync(cancellationToken);
-    }
-    else
-    {
-        entry = await history.SearchLastAsync(animeQuery, cancellationToken)
-                ?? await history.GetLastForAnimeAsync(animeQuery, cancellationToken);
-    }
+    var entry = await ResolveWatchHistoryAsync(history, animeQuery, logger, cancellationToken);
 
     if (entry is null)
     {
@@ -1502,17 +1492,7 @@ static async Task<int> HandleContinueMangaAsync(string[] args, IServiceProvider 
     mangaQuery = queryParts.Count == 0 ? null : string.Join(' ', queryParts).Trim();
 
     var readHistory = services.GetRequiredService<IReadHistoryStore>();
-    ReadHistoryEntry? entry;
-
-    if (string.IsNullOrWhiteSpace(mangaQuery))
-    {
-        entry = await readHistory.GetLastAsync(cancellationToken);
-    }
-    else
-    {
-        entry = await readHistory.SearchLastAsync(mangaQuery, cancellationToken)
-                ?? await readHistory.GetLastForMangaAsync(mangaQuery, cancellationToken);
-    }
+    var entry = await ResolveReadHistoryAsync(readHistory, mangaQuery, logger, cancellationToken);
 
     if (entry is null)
     {
@@ -4378,6 +4358,54 @@ static IReadOnlyCollection<StreamLink> ApplyDefaultReferrer(IReadOnlyCollection<
     return streams
         .Select(s => string.IsNullOrWhiteSpace(s.Referrer) ? s with { Referrer = defaultReferrer } : s)
         .ToArray();
+}
+
+/// <summary>
+/// Resolve the best watch history entry for a continue command with optional query.
+/// Prefers exact title matches, then fuzzy matches, then falls back to the most recent entry.
+/// </summary>
+static async Task<WatchHistoryEntry?> ResolveWatchHistoryAsync(IWatchHistoryStore history, string? query, ILogger logger, CancellationToken cancellationToken)
+{
+    WatchHistoryEntry? entry = null;
+
+    if (!string.IsNullOrWhiteSpace(query))
+    {
+        entry = await history.GetLastForAnimeAsync(query, cancellationToken);
+        entry ??= await history.SearchLastAsync(query, cancellationToken);
+    }
+
+    entry ??= await history.GetLastAsync(cancellationToken);
+
+    if (entry is not null && !string.IsNullOrWhiteSpace(query) && !entry.AnimeTitle.Equals(query, StringComparison.OrdinalIgnoreCase))
+    {
+        logger.LogInformation("No exact history match for '{Query}'. Using most recent entry '{Title}'.", query, entry.AnimeTitle);
+    }
+
+    return entry;
+}
+
+/// <summary>
+/// Resolve the best read history entry for a continue command with optional query.
+/// Prefers exact title matches, then fuzzy matches, then falls back to the most recent entry.
+/// </summary>
+static async Task<ReadHistoryEntry?> ResolveReadHistoryAsync(IReadHistoryStore history, string? query, ILogger logger, CancellationToken cancellationToken)
+{
+    ReadHistoryEntry? entry = null;
+
+    if (!string.IsNullOrWhiteSpace(query))
+    {
+        entry = await history.GetLastForMangaAsync(query, cancellationToken);
+        entry ??= await history.SearchLastAsync(query, cancellationToken);
+    }
+
+    entry ??= await history.GetLastAsync(cancellationToken);
+
+    if (entry is not null && !string.IsNullOrWhiteSpace(query) && !entry.MangaTitle.Equals(query, StringComparison.OrdinalIgnoreCase))
+    {
+        logger.LogInformation("No exact history match for '{Query}'. Using most recent entry '{Title}'.", query, entry.MangaTitle);
+    }
+
+    return entry;
 }
 
 /// <summary>
