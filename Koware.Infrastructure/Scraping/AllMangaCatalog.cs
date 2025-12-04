@@ -141,7 +141,8 @@ public sealed class AllMangaCatalog : IMangaCatalog
                 continue;
             }
 
-            var page = new Uri($"{_options.Referer.TrimEnd('/')}/manga/{manga.Id.Value}/chapter-{raw}");
+            var refererBase = string.IsNullOrWhiteSpace(_options.Referer) ? "https://example.com" : _options.Referer;
+            var page = new Uri($"{refererBase.TrimEnd('/')}/manga/{manga.Id.Value}/chapter-{raw}");
             chapters.Add(new Chapter(new ChapterId($"{manga.Id.Value}:ch-{raw}"), $"Chapter {raw}", num, page));
         }
 
@@ -252,7 +253,8 @@ public sealed class AllMangaCatalog : IMangaCatalog
         }
 
         // Fallback: resolve against referer
-        if (Uri.TryCreate(new Uri(_options.Referer), url, out var resolved))
+        var refererBase = string.IsNullOrWhiteSpace(_options.Referer) ? "https://example.com/" : _options.Referer;
+        if (Uri.TryCreate(new Uri(refererBase), url, out var resolved))
         {
             return resolved.ToString();
         }
@@ -279,8 +281,9 @@ public sealed class AllMangaCatalog : IMangaCatalog
 
     private Uri BuildApiUri(string gql, object variables)
     {
+        var apiBase = string.IsNullOrWhiteSpace(_options.ApiBase) ? "https://example.com" : _options.ApiBase;
         var query = $"query={Uri.EscapeDataString(gql)}&variables={Uri.EscapeDataString(JsonSerializer.Serialize(variables, _serializerOptions))}";
-        return new Uri($"{_options.ApiBase.TrimEnd('/')}/api?{query}");
+        return new Uri($"{apiBase.TrimEnd('/')}/api?{query}");
     }
 
     private Uri BuildDetailUri(string id) => new($"https://{_options.BaseHost}/manga/{id}");
@@ -288,9 +291,13 @@ public sealed class AllMangaCatalog : IMangaCatalog
     private HttpRequestMessage BuildRequest(Uri uri)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Referrer = new Uri(_options.Referer);
-        request.Headers.TryAddWithoutValidation("Origin", _options.Referer.TrimEnd('/'));
-        request.Headers.UserAgent.ParseAdd(_options.UserAgent);
+        var referer = string.IsNullOrWhiteSpace(_options.Referer) ? "https://example.com/" : _options.Referer;
+        request.Headers.Referrer = new Uri(referer);
+        request.Headers.TryAddWithoutValidation("Origin", referer.TrimEnd('/'));
+        if (!string.IsNullOrWhiteSpace(_options.UserAgent))
+        {
+            request.Headers.UserAgent.ParseAdd(_options.UserAgent);
+        }
         request.Headers.Accept.ParseAdd("application/json, */*");
         request.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
         return request;

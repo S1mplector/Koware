@@ -200,13 +200,13 @@ public partial class MainWindow : Window
                         _loadedCount++;
                         LoadingProgress.Text = $"{_loadedCount} / {totalPages}";
                         LoadingProgressBar.Value = (_loadedCount * 100.0) / totalPages;
-                        PrefetchDot.Visibility = _loadedCount >= totalPages ? Avalonia.Controls.Visibility.Collapsed : Avalonia.Controls.Visibility.Visible;
+                        PrefetchDot.IsVisible = _loadedCount < totalPages;
                         UpdateProgressLabel();
 
                         if (_loadedCount >= totalPages)
                         {
                             LoadingOverlay.IsVisible = false;
-                            PrefetchDot.Visibility = Avalonia.Controls.Visibility.Collapsed;
+                            PrefetchDot.IsVisible = false;
                         }
                     });
                 }

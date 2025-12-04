@@ -220,21 +220,22 @@
         
         <!-- Main Content -->
         <Border Grid.Row="1" Background="{DynamicResource ReaderBackground}" x:Name="ContentWrapper">
-        <ScrollViewer x:Name="ScrollViewer"
-                      HorizontalScrollBarVisibility="Auto"
-                      VerticalScrollBarVisibility="Auto"
-                      Background="{DynamicResource ReaderBackground}">
-            <StackPanel x:Name="PagesContainer"
-                        HorizontalAlignment="Center"
-                        Margin="0,8">
-                <!-- Pages will be added dynamically -->
-            </StackPanel>
-        </ScrollViewer>
-        <Rectangle x:Name="ComfortOverlay"
-                   Grid.Row="1"
-                   Fill="#000000"
-                   Opacity="0"
-                   IsHitTestVisible="False" />
+            <Grid>
+                <ScrollViewer x:Name="ScrollViewer"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto"
+                              Background="{DynamicResource ReaderBackground}">
+                    <StackPanel x:Name="PagesContainer"
+                                HorizontalAlignment="Center"
+                                Margin="0,8">
+                        <!-- Pages will be added dynamically -->
+                    </StackPanel>
+                </ScrollViewer>
+                <Rectangle x:Name="ComfortOverlay"
+                           Fill="#000000"
+                           Opacity="0"
+                           IsHitTestVisible="False" />
+            </Grid>
         </Border>
         
         <!-- Loading Overlay -->
@@ -319,7 +320,7 @@
                                  Width="10" Height="10"
                                  Fill="#60a5fa"
                                  VerticalAlignment="Center"
-                                 Visibility="Collapsed"
+                                 IsVisible="False"
                                  ToolTip.Tip="Prefetching pages..." />
                     </Grid>
                 </StackPanel>

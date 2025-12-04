@@ -31,6 +31,18 @@ internal sealed class ProviderDiagnostics
     /// <returns>Result with DNS and HTTP status.</returns>
     public async Task<ProviderCheckResult> CheckAsync(AllAnimeOptions options, CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(options.ApiBase))
+        {
+            return new ProviderCheckResult
+            {
+                Target = "(not configured)",
+                DnsResolved = false,
+                DnsError = "ApiBase not configured",
+                HttpError = "ApiBase not configured",
+                Success = false
+            };
+        }
+
         var baseUri = new Uri(options.ApiBase.EndsWith("/") ? options.ApiBase : options.ApiBase + "/");
         var result = new ProviderCheckResult { Target = baseUri.Host };
 

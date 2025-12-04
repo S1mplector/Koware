@@ -3430,7 +3430,7 @@ static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> 
     // Build pages JSON
     var pagesData = pages.Select(p => new { url = p.ImageUrl.ToString(), pageNumber = p.PageNumber }).ToArray();
     var pagesJson = JsonSerializer.Serialize(pagesData);
-    var chaptersPayload = chapters.Select(c => new { number = c.Number, title = c.Title, read = c.Number < selectedChapter.Number }).ToArray();
+    var chaptersPayload = chapters.Select(c => new { number = c.Number, title = c.Title, read = c.Number < currentChapter.Number }).ToArray();
     var chaptersJson = JsonSerializer.Serialize(chaptersPayload);
 
     var start = new ProcessStartInfo
@@ -4398,14 +4398,6 @@ static bool TryParseQualityNumber(string? quality, out int value)
 
     return int.TryParse(digits, out value);
 }
-
-/// <summary>
-/// Convert a quality label into a numeric score, defaulting to 0 when unknown.
-/// </summary>
-/// <param name="quality">Quality label.</param>
-/// <returns>Extracted numeric value or 0.</returns>
-static int ParseQualityScore(string? quality) =>
-    TryParseQualityNumber(quality, out var q) ? q : 0;
 
 /// <summary>
 /// Heuristic: is this URL a playlist/manifest (HLS/DASH) instead of a single file.

@@ -51,7 +51,7 @@ public partial class App : Application
                     var chapterJson = args[++i];
                     try
                     {
-                        chapters = ParseChapters(chapterJson);
+                        chapters = ChapterParser.ParseChapters(chapterJson);
                     }
                     catch
                     {
@@ -114,20 +114,23 @@ public record PageInfo(int PageNumber, string Url);
 
 public record ChapterInfo(int Number, string? Title, bool IsRead);
 
-static List<ChapterInfo> ParseChapters(string json)
+public static class ChapterParser
 {
-    var result = new List<ChapterInfo>();
-    using var doc = JsonDocument.Parse(json);
-    foreach (var el in doc.RootElement.EnumerateArray())
+    public static List<ChapterInfo> ParseChapters(string json)
     {
-        var num = el.TryGetProperty("number", out var n) ? n.GetInt32() : 0;
-        var title = el.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
-        var isRead = el.TryGetProperty("read", out var r) && r.ValueKind == JsonValueKind.True;
-        if (num > 0)
+        var result = new List<ChapterInfo>();
+        using var doc = JsonDocument.Parse(json);
+        foreach (var el in doc.RootElement.EnumerateArray())
         {
-            result.Add(new ChapterInfo(num, title, isRead));
+            var num = el.TryGetProperty("number", out var n) ? n.GetInt32() : 0;
+            var title = el.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+            var isRead = el.TryGetProperty("read", out var r) && r.ValueKind == JsonValueKind.True;
+            if (num > 0)
+            {
+                result.Add(new ChapterInfo(num, title, isRead));
+            }
         }
-    }
 
-    return result;
+        return result;
+    }
 }
