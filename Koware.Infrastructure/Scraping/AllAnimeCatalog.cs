@@ -166,8 +166,12 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         var resolved = streams
             .Where(s => s.Url.Scheme.StartsWith("http", StringComparison.OrdinalIgnoreCase))
             .GroupBy(s => s.Url)
-            .Select(g => g.First())
+            .Select(g => g
+                .OrderByDescending(s => s.HostPriority)
+                .ThenByDescending(s => ParseQualityScore(s.Quality))
+                .First())
             .OrderByDescending(s => ParseQualityScore(s.Quality))
+            .ThenByDescending(s => s.HostPriority)
             .ToArray();
 
         var summary = attempts.ToArray();
@@ -242,14 +246,58 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             _logger.LogDebug("Source payload for {Provider} was not JSON, attempting raw scan.", provider);
         }
 
+        var effectiveReferrer = string.IsNullOrWhiteSpace(referrer) ? _options.Referer : referrer;
         if (links.Count == 0 && sourceUrl.Contains(".m3u8", StringComparison.OrdinalIgnoreCase))
         {
-            var m3u8Links = await ParseM3U8Async(sourceUrl, provider, referrer, cancellationToken);
+            var m3u8Links = await ParseM3U8Async(sourceUrl, provider, effectiveReferrer, subtitles, cancellationToken);
             links.AddRange(m3u8Links);
         }
 
-        return links;
+        if (links.Count == 0)
+        {
+            return links;
+        }
+
+        var expanded = await ExpandManifestStreamsAsync(links, provider, effectiveReferrer, subtitles, cancellationToken);
+        return expanded.ToArray();
     }
+
+    private async Task<IReadOnlyCollection<StreamLink>> ExpandManifestStreamsAsync(
+        IReadOnlyCollection<StreamLink> links,
+        string provider,
+        string? fallbackReferrer,
+        IReadOnlyList<SubtitleTrack>? fallbackSubtitles,
+        CancellationToken cancellationToken)
+    {
+        var expanded = new List<StreamLink>();
+        foreach (var link in links)
+        {
+            if (IsM3U8(link.Url) && IsCoarseQuality(link.Quality))
+            {
+                var manifestReferrer = link.Referrer ?? fallbackReferrer ?? _options.Referer;
+                var manifestSubtitles = link.Subtitles.Count > 0 ? link.Subtitles : fallbackSubtitles;
+                var variants = await ParseM3U8Async(link.Url.ToString(), provider, manifestReferrer, manifestSubtitles, cancellationToken);
+                if (variants.Count > 0)
+                {
+                    expanded.AddRange(variants);
+                    continue;
+                }
+            }
+
+            expanded.Add(link);
+        }
+
+        return expanded;
+    }
+
+    private static bool IsCoarseQuality(string? quality) =>
+        string.IsNullOrWhiteSpace(quality) ||
+        quality.Equals("hls", StringComparison.OrdinalIgnoreCase) ||
+        quality.Equals("auto", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsM3U8(Uri uri) =>
+        uri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase) ||
+        uri.AbsolutePath.Contains(".m3u8", StringComparison.OrdinalIgnoreCase);
 
     private void Walk(JsonElement element, string provider, List<StreamLink> links, string? referrer, IReadOnlyList<SubtitleTrack>? subtitles)
     {
@@ -403,6 +451,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             return;
         }
 
+        var effectiveReferrer = string.IsNullOrWhiteSpace(referrer) ? _options.Referer : referrer;
         var requiresSoftSubs = subtitles is { Count: > 0 };
 
         if (Uri.TryCreate(url, UriKind.Absolute, out var abs))
@@ -411,7 +460,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
                 abs,
                 quality,
                 provider,
-                referrer,
+                effectiveReferrer,
                 subtitles,
                 requiresSoftSubs,
                 ComputeHostPriority(abs),
@@ -419,13 +468,13 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             return;
         }
 
-        if (Uri.TryCreate(new Uri(_options.Referer), url, out var resolved))
+        if (!string.IsNullOrWhiteSpace(_options.Referer) && Uri.TryCreate(new Uri(_options.Referer), url, out var resolved))
         {
             links.Add(new StreamLink(
                 resolved,
                 quality,
                 provider,
-                referrer,
+                effectiveReferrer,
                 subtitles,
                 requiresSoftSubs,
                 ComputeHostPriority(resolved),
@@ -455,17 +504,16 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         return 0;
     }
 
-    private async Task<IReadOnlyCollection<StreamLink>> ParseM3U8Async(string m3u8Url, string provider, string? referrer, CancellationToken cancellationToken)
+    private async Task<IReadOnlyCollection<StreamLink>> ParseM3U8Async(string m3u8Url, string provider, string? referrer, IReadOnlyList<SubtitleTrack>? fallbackSubtitles, CancellationToken cancellationToken)
     {
         var links = new List<StreamLink>();
 
         using var request = new HttpRequestMessage(HttpMethod.Get, m3u8Url);
         var effectiveReferrer = string.IsNullOrWhiteSpace(referrer) ? _options.Referer : referrer;
-        if (!Uri.TryCreate(effectiveReferrer, UriKind.Absolute, out var refUri))
+        if (!string.IsNullOrWhiteSpace(effectiveReferrer) && Uri.TryCreate(effectiveReferrer, UriKind.Absolute, out var refUri))
         {
-            refUri = new Uri(_options.Referer);
+            request.Headers.Referrer = refUri;
         }
-        request.Headers.Referrer = refUri;
         request.Headers.UserAgent.ParseAdd(_options.UserAgent);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -476,7 +524,11 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         var body = await response.Content.ReadAsStringAsync(timeoutCts.Token);
         var lines = body.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        var subtitleTracks = ExtractSubtitleTracks(lines, m3u8Url);
+        IReadOnlyList<SubtitleTrack> subtitleTracks = ExtractSubtitleTracks(lines, m3u8Url);
+        if (subtitleTracks.Count == 0 && fallbackSubtitles is { Count: > 0 })
+        {
+            subtitleTracks = fallbackSubtitles;
+        }
 
         string? currentResolution = null;
         foreach (var line in lines)
