@@ -702,7 +702,8 @@ internal static class ReaderHtmlBuilder
         }
         
         function getCurrentChapterIndex() {
-            return chapters.findIndex(c => !c.read) || 0;
+            const idx = chapters.findIndex(c => c.current);
+            return idx >= 0 ? idx : 0;
         }
         
         function renderChaptersList() {
@@ -736,10 +737,10 @@ internal static class ReaderHtmlBuilder
         
         function writeNavAndClose(direction) {
             if (navPath && window.chrome?.webview?.postMessage) {
-                window.chrome.webview.postMessage(JSON.stringify({ type: "nav", direction, path: navPath }));
+                window.chrome.webview.postMessage({ type: "nav", direction: direction, path: navPath });
             }
             window.__navResult = direction;
-            window.close();
+            // Window will be closed by C# after receiving the message
         }
 
         function renderPages() {

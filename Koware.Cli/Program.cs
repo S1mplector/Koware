@@ -3430,7 +3430,7 @@ static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> 
     // Build pages JSON
     var pagesData = pages.Select(p => new { url = p.ImageUrl.ToString(), pageNumber = p.PageNumber }).ToArray();
     var pagesJson = JsonSerializer.Serialize(pagesData);
-    var chaptersPayload = chapters.Select(c => new { number = c.Number, title = c.Title, read = c.Number < currentChapter.Number }).ToArray();
+    var chaptersPayload = chapters.Select(c => new { number = c.Number, title = c.Title, read = c.Number < currentChapter.Number, current = c.Number == currentChapter.Number }).ToArray();
     var chaptersJson = JsonSerializer.Serialize(chaptersPayload);
 
     var start = new ProcessStartInfo
