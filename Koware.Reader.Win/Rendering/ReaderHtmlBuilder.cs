@@ -378,17 +378,6 @@ internal static class ReaderHtmlBuilder
             color: var(--accent);
         }
 
-        /* Progress bar */
-        #progress-bar {
-            position: fixed;
-            top: 0;
-            left: 0;
-            height: 3px;
-            background: var(--accent);
-            transition: width 0.2s ease;
-            z-index: 100;
-        }
-
         /* Page indicator toast */
         #page-toast {
             position: fixed;
@@ -413,7 +402,6 @@ internal static class ReaderHtmlBuilder
     </style>
 </head>
 <body>
-    <div id="progress-bar" style="width: 0%"></div>
     <div id="page-toast"></div>
     <header id="header">
         <div id="title">{{TITLE}}</div>
@@ -473,7 +461,6 @@ internal static class ReaderHtmlBuilder
         const fitDropdown = document.getElementById("fit-dropdown");
         const zoomBtn = document.getElementById("zoom-btn");
         const zoomDropdown = document.getElementById("zoom-dropdown");
-        const progressBar = document.getElementById("progress-bar");
         const pageSlider = document.getElementById("page-slider");
         const pageToast = document.getElementById("page-toast");
         const rtlBtn = document.getElementById("rtl-btn");
@@ -515,7 +502,6 @@ internal static class ReaderHtmlBuilder
                     wrapper.classList.remove("loading");
                     img.classList.remove("loading");
                     loadedCount++;
-                    updateProgress();
                     // Preload next pages when current loads
                     preloadAhead(idx);
                 };
@@ -525,7 +511,6 @@ internal static class ReaderHtmlBuilder
                     wrapper.classList.add("error");
                     img.style.display = "none";
                     loadedCount++;
-                    updateProgress();
                 };
 
                 img.src = page.url || page.Url;
@@ -549,14 +534,6 @@ internal static class ReaderHtmlBuilder
                         img.src = pages[nextIdx].url || pages[nextIdx].Url;
                     }
                 }
-            }
-        }
-
-        function updateProgress() {
-            const pct = pages.length > 0 ? (loadedCount / pages.length) * 100 : 0;
-            progressBar.style.width = `${pct}%`;
-            if (pct >= 100) {
-                setTimeout(() => { progressBar.style.opacity = "0"; }, 500);
             }
         }
 
