@@ -5,7 +5,9 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Threading;
 using Koware.Reader.Win.Rendering;
 using Koware.Reader.Win.Startup;
@@ -68,9 +70,36 @@ public sealed class WebViewReaderHost
 
         core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
         core.WebResourceRequested += OnWebResourceRequested;
+        core.WebMessageReceived += OnWebMessageReceived;
 
         var html = ReaderHtmlBuilder.Build(_args);
         core.NavigateToString(html);
+    }
+
+    private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        try
+        {
+            var message = e.WebMessageAsJson;
+            using var doc = JsonDocument.Parse(message);
+            var root = doc.RootElement;
+            
+            if (root.TryGetProperty("type", out var typeEl) && typeEl.GetString() == "nav")
+            {
+                var direction = root.TryGetProperty("direction", out var dirEl) ? dirEl.GetString() : null;
+                var path = root.TryGetProperty("path", out var pathEl) ? pathEl.GetString() : null;
+                
+                if (!string.IsNullOrWhiteSpace(direction) && !string.IsNullOrWhiteSpace(path))
+                {
+                    File.WriteAllText(path, direction);
+                    _dispatcher.Invoke(() => Application.Current.MainWindow?.Close());
+                }
+            }
+        }
+        catch
+        {
+            // Ignore parsing errors
+        }
     }
 
     private async void OnWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)

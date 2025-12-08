@@ -437,13 +437,150 @@ internal static class ReaderHtmlBuilder
         #page-toast.visible {
             opacity: 1;
         }
+
+        /* Chapters panel */
+        #chapters-panel {
+            position: fixed;
+            top: 0;
+            right: -320px;
+            width: 320px;
+            height: 100%;
+            background: var(--panel);
+            border-left: 1px solid var(--border);
+            z-index: 200;
+            transition: right 0.3s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #chapters-panel.open {
+            right: 0;
+        }
+
+        #chapters-panel-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        #chapters-panel-header h3 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        #chapters-panel-close {
+            background: none;
+            border: none;
+            color: var(--muted);
+            cursor: pointer;
+            padding: 4px;
+            font-size: 20px;
+            line-height: 1;
+        }
+
+        #chapters-panel-close:hover {
+            color: var(--text);
+        }
+
+        #chapters-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .chapter-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            gap: 10px;
+        }
+
+        .chapter-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .chapter-item.current {
+            background: rgba(56, 189, 248, 0.15);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+        }
+
+        .chapter-item.read {
+            opacity: 0.6;
+        }
+
+        .chapter-number {
+            font-weight: 700;
+            font-size: 13px;
+            min-width: 50px;
+            color: var(--accent);
+        }
+
+        .chapter-title {
+            flex: 1;
+            font-size: 13px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .chapter-read-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: rgba(56, 189, 248, 0.2);
+            color: var(--accent);
+        }
+
+        /* Chapter nav buttons in footer */
+        .chapter-nav-btn {
+            padding: 6px 10px !important;
+            font-size: 11px !important;
+        }
+
+        .chapter-nav-btn:disabled {
+            opacity: 0.3;
+        }
+
+        /* Overlay when panel is open */
+        #chapters-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 150;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        #chapters-overlay.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
     </style>
 </head>
 <body>
     <div id="page-toast"></div>
+    <div id="chapters-overlay"></div>
+    <div id="chapters-panel">
+        <div id="chapters-panel-header">
+            <h3>Chapters</h3>
+            <button id="chapters-panel-close" type="button">&times;</button>
+        </div>
+        <div id="chapters-list"></div>
+    </div>
     <header id="header">
         <div id="title">{{TITLE}}</div>
         <div class="controls">
+            <button class="btn btn-sm" id="chapters-btn" type="button" title="Chapters list">Chapters <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
             <button class="btn btn-sm" id="rtl-btn" type="button" title="Right-to-Left reading">RTL <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 4H10c-2.76 0-5 2.24-5 5s2.24 5 5 5h1M7 14l-4 4 4 4"/><path d="M17 4v16"/></svg></button>
             <button class="btn btn-sm" id="double-btn" type="button" title="Double page spread">2-Page <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H12V3H6.5A2.5 2.5 0 0 0 4 5.5v14z"/><path d="M20 19.5A2.5 2.5 0 0 0 17.5 17H12V3h5.5A2.5 2.5 0 0 1 20 5.5v14z"/></svg></button>
             <div class="dropdown" id="fit-dropdown">
@@ -481,6 +618,9 @@ internal static class ReaderHtmlBuilder
     </main>
     <footer id="footer">
         <div class="nav-controls">
+            <button class="btn chapter-nav-btn" id="prev-chapter-btn" type="button" disabled title="Previous Chapter">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="11 17 6 12 11 7"></polyline><polyline points="18 17 13 12 18 7"></polyline></svg>
+            </button>
             <button class="btn nav-btn" id="prev-btn" type="button" disabled>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
             </button>
@@ -493,16 +633,28 @@ internal static class ReaderHtmlBuilder
             <button class="btn nav-btn" id="next-btn" type="button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
             </button>
+            <button class="btn chapter-nav-btn" id="next-chapter-btn" type="button" disabled title="Next Chapter">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="13 17 18 12 13 7"></polyline><polyline points="6 17 11 12 6 7"></polyline></svg>
+            </button>
         </div>
     </footer>
     <script>
         const pages = {{PAGES_JSON}};
         const title = {{TITLE_JSON}};
+        const chapters = {{CHAPTERS_JSON}};
+        const navPath = {{NAV_PATH_JSON}};
         const reader = document.getElementById("reader");
         const container = document.getElementById("pages-container");
         const pageInfo = document.getElementById("page-info");
         const prevBtn = document.getElementById("prev-btn");
         const nextBtn = document.getElementById("next-btn");
+        const prevChapterBtn = document.getElementById("prev-chapter-btn");
+        const nextChapterBtn = document.getElementById("next-chapter-btn");
+        const chaptersBtn = document.getElementById("chapters-btn");
+        const chaptersPanel = document.getElementById("chapters-panel");
+        const chaptersPanelClose = document.getElementById("chapters-panel-close");
+        const chaptersList = document.getElementById("chapters-list");
+        const chaptersOverlay = document.getElementById("chapters-overlay");
         const modeBtn = document.getElementById("mode-btn");
         const fitBtn = document.getElementById("fit-btn");
         const fitDropdown = document.getElementById("fit-dropdown");
@@ -533,6 +685,61 @@ internal static class ReaderHtmlBuilder
             wireEvents();
             loadPrefs();
             restorePosition();
+            initChapters();
+        }
+
+        // ===== Chapter Navigation =====
+        
+        function initChapters() {
+            if (!chapters || chapters.length === 0) {
+                chaptersBtn.style.display = "none";
+                prevChapterBtn.style.display = "none";
+                nextChapterBtn.style.display = "none";
+                return;
+            }
+            renderChaptersList();
+            updateChapterNavButtons();
+        }
+        
+        function getCurrentChapterIndex() {
+            return chapters.findIndex(c => !c.read) || 0;
+        }
+        
+        function renderChaptersList() {
+            chaptersList.innerHTML = "";
+            const currentIdx = getCurrentChapterIndex();
+            chapters.forEach((chapter, idx) => {
+                const item = document.createElement("div");
+                item.className = "chapter-item" + (idx === currentIdx ? " current" : "") + (chapter.read ? " read" : "");
+                item.innerHTML = `<span class="chapter-number">Ch. ${chapter.number}</span><span class="chapter-title">${chapter.title || "Chapter " + chapter.number}</span>${chapter.read ? '<span class="chapter-read-badge">Read</span>' : ""}`;
+                item.onclick = () => navigateToChapter(idx);
+                chaptersList.appendChild(item);
+            });
+        }
+        
+        function updateChapterNavButtons() {
+            const idx = getCurrentChapterIndex();
+            prevChapterBtn.disabled = idx <= 0;
+            nextChapterBtn.disabled = idx >= chapters.length - 1;
+        }
+        
+        function toggleChaptersPanel(open) {
+            const isOpen = typeof open === "boolean" ? open : !chaptersPanel.classList.contains("open");
+            chaptersPanel.classList.toggle("open", isOpen);
+            chaptersOverlay.classList.toggle("visible", isOpen);
+        }
+        
+        function navigateToChapter(targetIdx) {
+            if (targetIdx === getCurrentChapterIndex()) { toggleChaptersPanel(false); return; }
+            writeNavAndClose(targetIdx > getCurrentChapterIndex() ? "next" : "prev");
+        }
+        
+        function writeNavAndClose(direction) {
+            if (navPath && window.chrome?.webview?.postMessage) {
+                window.chrome.webview.postMessage(JSON.stringify({ type: "nav", direction, path: navPath }));
+            }
+            window.__navResult = direction;
+            window.close();
         }
 
         function renderPages() {
@@ -773,6 +980,13 @@ internal static class ReaderHtmlBuilder
                 item.onclick = () => setTheme(item.dataset.theme);
             });
 
+            // Chapter navigation
+            chaptersBtn.onclick = () => toggleChaptersPanel();
+            chaptersPanelClose.onclick = () => toggleChaptersPanel(false);
+            chaptersOverlay.onclick = () => toggleChaptersPanel(false);
+            prevChapterBtn.onclick = () => writeNavAndClose("prev");
+            nextChapterBtn.onclick = () => writeNavAndClose("next");
+
             // Page slider
             pageSlider.oninput = () => {
                 const page = parseInt(pageSlider.value, 10) - 1;
@@ -918,9 +1132,14 @@ internal static class ReaderHtmlBuilder
 </html>
 """;
 
+        var chaptersJson = string.IsNullOrWhiteSpace(args.ChaptersJson) ? "[]" : args.ChaptersJson;
+        var navPathJson = JsonSerializer.Serialize(args.NavResultPath ?? "");
+
         return template
             .Replace("{{TITLE}}", encodedTitle)
             .Replace("{{PAGES_JSON}}", pagesJson)
-            .Replace("{{TITLE_JSON}}", titleJson);
+            .Replace("{{TITLE_JSON}}", titleJson)
+            .Replace("{{CHAPTERS_JSON}}", chaptersJson)
+            .Replace("{{NAV_PATH_JSON}}", navPathJson);
     }
 }
