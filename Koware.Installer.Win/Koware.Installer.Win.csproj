@@ -34,8 +34,8 @@
     <MakeDir Directories="$(PlayerPublishDir)" />
     <MakeDir Directories="$(ReaderPublishDir)" />
     <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\Koware.Cli\Koware.Cli.csproj&quot; -c Release -r $(RuntimeIdentifier) --self-contained true -o &quot;$(CliPublishDir)&quot;" />
-    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\Koware.Player\Koware.Player.csproj&quot; -c Release -r $(RuntimeIdentifier) --self-contained true -o &quot;$(PlayerPublishDir)&quot;" />
-    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\Koware.Reader\Koware.Reader.csproj&quot; -c Release -r $(RuntimeIdentifier) --self-contained true -o &quot;$(ReaderPublishDir)&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\Koware.Player.Win\Koware.Player.Win.csproj&quot; -c Release -r $(RuntimeIdentifier) --self-contained true -o &quot;$(PlayerPublishDir)&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\Koware.Reader.Win\Koware.Reader.Win.csproj&quot; -c Release -r $(RuntimeIdentifier) --self-contained true -o &quot;$(ReaderPublishDir)&quot;" />
     <ZipDirectory SourceDirectory="$(CliPublishDir)" DestinationFile="$(CliPayloadZip)" Overwrite="true" />
     <ZipDirectory SourceDirectory="$(PlayerPublishDir)" DestinationFile="$(PlayerPayloadZip)" Overwrite="true" />
     <ZipDirectory SourceDirectory="$(ReaderPublishDir)" DestinationFile="$(ReaderPayloadZip)" Overwrite="true" />

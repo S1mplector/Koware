@@ -3400,7 +3400,7 @@ static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> 
     var readerPath = ResolveReaderExecutable(options);
     if (readerPath is null)
     {
-        logger.LogError("No supported reader found. Build Koware.Reader or set Reader:Command in appsettings.json.");
+        logger.LogError("No supported reader found. Build Koware.Reader.Win or set Reader:Command in appsettings.json.");
         return 1;
     }
 
@@ -3685,10 +3685,10 @@ static string? ResolveReaderExecutable(ReaderOptions options)
 {
     var command = options.Command;
     var isDefaultReader = string.IsNullOrWhiteSpace(command) || 
-        command.Equals("Koware.Reader.exe", StringComparison.OrdinalIgnoreCase) ||
-        command.Equals("Koware.Reader", StringComparison.OrdinalIgnoreCase) ||
         command.Equals("Koware.Reader.Win.exe", StringComparison.OrdinalIgnoreCase) ||
-        command.Equals("Koware.Reader.Win", StringComparison.OrdinalIgnoreCase);
+        command.Equals("Koware.Reader.Win", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("Koware.Reader.exe", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("Koware.Reader", StringComparison.OrdinalIgnoreCase);
     
     if (OperatingSystem.IsMacOS())
     {
@@ -3708,7 +3708,7 @@ static string? ResolveReaderExecutable(ReaderOptions options)
     
     if (string.IsNullOrWhiteSpace(command))
     {
-        command = "Koware.Reader.exe";
+        command = "Koware.Reader.Win.exe";
     }
 
     // Check if it's an absolute path
@@ -3722,10 +3722,10 @@ static string? ResolveReaderExecutable(ReaderOptions options)
     var candidates = new[]
     {
         Path.Combine(appDir, command),
-        Path.Combine(appDir, "Koware.Reader.exe"),
-        Path.Combine(appDir, "Koware.Reader", "Koware.Reader.exe"),
         Path.Combine(appDir, "Koware.Reader.Win.exe"),
         Path.Combine(appDir, "Koware.Reader.Win", "Koware.Reader.Win.exe"),
+        Path.Combine(appDir, "Koware.Reader.exe"),
+        Path.Combine(appDir, "Koware.Reader", "Koware.Reader.exe"),
     };
 
     foreach (var candidate in candidates)
@@ -4783,12 +4783,12 @@ static string? ResolveExecutablePath(string command)
 }
 
 /// <summary>
-/// Pick a concrete player executable (Koware.Player, vlc, mpv, etc.) based on options.
+/// Pick a concrete player executable (Koware.Player.Win, vlc, mpv, etc.) based on options.
 /// </summary>
 /// <param name="options">Player options from config (may specify a custom command).</param>
 /// <returns>A <see cref="PlayerResolution"/> with the resolved path, name, and tried candidates.</returns>
 /// <remarks>
-/// Tries the configured command first, then falls back to Koware.Player, vlc, mpv.
+/// Tries the configured command first, then falls back to Koware.Player.Win, vlc, mpv.
 /// </remarks>
 static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
 {
@@ -4805,8 +4805,8 @@ static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
     }
     else
     {
-        // Windows: prefer bundled Avalonia player, then legacy, then VLC, then mpv
-        candidates.AddRange(new[] { "Koware.Player", "Koware.Player.exe", "Koware.Player.Win", "Koware.Player.Win.exe", "vlc", "mpv" });
+        // Windows: prefer bundled WPF player, then Avalonia, then VLC, then mpv
+        candidates.AddRange(new[] { "Koware.Player.Win", "Koware.Player.Win.exe", "Koware.Player", "Koware.Player.exe", "vlc", "mpv" });
     }
     
     candidates = candidates
@@ -4837,7 +4837,7 @@ static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
 /// <param name="resolution">Pre-resolved player; if null, will be resolved.</param>
 /// <returns>Exit code from the player process.</returns>
 /// <remarks>
-/// Handles Koware.Player, vlc, and mpv with appropriate argument styles.
+/// Handles Koware.Player.Win, vlc, and mpv with appropriate argument styles.
 /// </remarks>
 static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger, string? httpReferrer, string? httpUserAgent, string? displayTitle, PlayerResolution? resolution = null)
 {
@@ -4847,7 +4847,7 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
     {
         var hint = OperatingSystem.IsMacOS() 
             ? "Install IINA (brew install --cask iina) or mpv (brew install mpv), or set Player:Command in config."
-            : "Build Koware.Player or set Player:Command in appsettings.json.";
+            : "Build Koware.Player.Win or set Player:Command in appsettings.json.";
         logger.LogError("No supported player found (tried {Candidates}). {Hint}", string.Join(", ", resolution.Candidates), hint);
         return 1;
     }
