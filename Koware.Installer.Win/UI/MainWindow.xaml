@@ -3,7 +3,7 @@
 <Window x:Class="Koware.Installer.Win.UI.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Koware Installer v0.5.0-beta"
+        Title="Koware Installer v0.7.0-beta"
         Height="480"
         Width="720"
         MinHeight="440"
