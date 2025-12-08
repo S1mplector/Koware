@@ -8,12 +8,14 @@ namespace Koware.Reader.Win.Startup;
 
 public sealed class ReaderArguments
 {
-    public ReaderArguments(IReadOnlyList<PageInfo> pages, string title, string? referer, string? userAgent)
+    public ReaderArguments(IReadOnlyList<PageInfo> pages, string title, string? referer, string? userAgent, string? chaptersJson, string? navResultPath)
     {
         Pages = pages;
         Title = string.IsNullOrWhiteSpace(title) ? "Koware Reader" : title;
         Referer = referer;
         UserAgent = userAgent;
+        ChaptersJson = chaptersJson;
+        NavResultPath = navResultPath;
     }
 
     public IReadOnlyList<PageInfo> Pages { get; }
@@ -23,6 +25,10 @@ public sealed class ReaderArguments
     public string? Referer { get; }
 
     public string? UserAgent { get; }
+    
+    public string? ChaptersJson { get; }
+    
+    public string? NavResultPath { get; }
 
     public static bool TryParse(string[] args, out ReaderArguments? parsed, out string? error)
     {
@@ -73,6 +79,8 @@ public sealed class ReaderArguments
         var title = args.Length > 1 ? args[1] : "Koware Reader";
         string? referer = null;
         string? userAgent = null;
+        string? chaptersJson = null;
+        string? navResultPath = null;
 
         for (var i = 2; i < args.Length; i++)
         {
@@ -94,12 +102,24 @@ public sealed class ReaderArguments
                 userAgent = args[++i];
                 continue;
             }
+            
+            if (current.Equals("--chapters", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                chaptersJson = args[++i];
+                continue;
+            }
+            
+            if (current.Equals("--nav", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                navResultPath = args[++i];
+                continue;
+            }
 
             error = $"Unrecognized argument '{current}'.";
             return false;
         }
 
-        parsed = new ReaderArguments(pages, title, referer, userAgent);
+        parsed = new ReaderArguments(pages, title, referer, userAgent, chaptersJson, navResultPath);
         return true;
     }
 }
