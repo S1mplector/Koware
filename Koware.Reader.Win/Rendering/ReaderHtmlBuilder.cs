@@ -31,6 +31,43 @@ internal static class ReaderHtmlBuilder
             --muted: #94a3b8;
             --accent: #38bdf8;
             --error: #f97066;
+            --img-filter: none;
+        }
+
+        /* Sepia theme */
+        body.theme-sepia {
+            --bg: #f4ecd8;
+            --panel: #e8dfc9;
+            --border: rgba(139, 119, 89, 0.2);
+            --text: #5c4b37;
+            --muted: #8b7759;
+            --accent: #b8860b;
+            --img-filter: sepia(30%) brightness(0.95);
+            color-scheme: light;
+        }
+
+        /* Light theme */
+        body.theme-light {
+            --bg: #f8fafc;
+            --panel: #ffffff;
+            --border: rgba(100, 116, 139, 0.15);
+            --text: #1e293b;
+            --muted: #64748b;
+            --accent: #0ea5e9;
+            --img-filter: none;
+            color-scheme: light;
+        }
+
+        /* High contrast theme */
+        body.theme-contrast {
+            --bg: #000000;
+            --panel: #0a0a0a;
+            --border: rgba(255, 255, 255, 0.3);
+            --text: #ffffff;
+            --muted: #cccccc;
+            --accent: #00ff88;
+            --img-filter: contrast(1.1) brightness(1.05);
+            color-scheme: dark;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -204,7 +241,8 @@ internal static class ReaderHtmlBuilder
             display: block;
             max-width: 100%;
             height: auto;
-            transition: opacity 0.2s ease;
+            transition: opacity 0.2s ease, filter 0.3s ease;
+            filter: var(--img-filter);
         }
 
         .page-img.loading {
@@ -427,6 +465,15 @@ internal static class ReaderHtmlBuilder
                 </div>
             </div>
             <button class="btn btn-sm" id="mode-btn" type="button">Scroll <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M12 3l4 4M12 3L8 7M12 21l4-4M12 21l-4-4"/></svg></button>
+            <div class="dropdown" id="theme-dropdown">
+                <button class="btn btn-sm" id="theme-btn" type="button">Theme <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></button>
+                <div class="dropdown-menu">
+                    <button class="dropdown-item active" data-theme="dark">Dark</button>
+                    <button class="dropdown-item" data-theme="sepia">Sepia</button>
+                    <button class="dropdown-item" data-theme="light">Light</button>
+                    <button class="dropdown-item" data-theme="contrast">High Contrast</button>
+                </div>
+            </div>
         </div>
     </header>
     <main id="reader" class="fit-width" data-zoom="100">
@@ -465,8 +512,11 @@ internal static class ReaderHtmlBuilder
         const pageToast = document.getElementById("page-toast");
         const rtlBtn = document.getElementById("rtl-btn");
         const doubleBtn = document.getElementById("double-btn");
+        const themeBtn = document.getElementById("theme-btn");
+        const themeDropdown = document.getElementById("theme-dropdown");
 
         let currentPage = 0;
+        let currentTheme = "dark";
         let singlePageMode = false;
         let rtlMode = false;
         let doublePageMode = false;
@@ -680,6 +730,26 @@ internal static class ReaderHtmlBuilder
             persistPrefs();
         }
 
+        const themeIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>';
+
+        function setTheme(theme) {
+            currentTheme = theme;
+            document.body.className = document.body.className.replace(/theme-\w+/g, "");
+            if (theme !== "dark") {
+                document.body.classList.add(`theme-${theme}`);
+            }
+            
+            const themeNames = { dark: "Dark", sepia: "Sepia", light: "Light", contrast: "High Contrast" };
+            themeBtn.innerHTML = (themeNames[theme] || "Theme") + " " + themeIcon;
+            
+            themeDropdown.querySelectorAll(".dropdown-item").forEach(item => {
+                item.classList.toggle("active", item.dataset.theme === theme);
+            });
+            
+            themeDropdown.classList.remove("open");
+            persistPrefs();
+        }
+
         function wireEvents() {
             prevBtn.onclick = prevPage;
             nextBtn.onclick = nextPage;
@@ -698,6 +768,11 @@ internal static class ReaderHtmlBuilder
                 item.onclick = () => setZoom(item.dataset.zoom);
             });
 
+            themeBtn.onclick = () => themeDropdown.classList.toggle("open");
+            themeDropdown.querySelectorAll(".dropdown-item").forEach(item => {
+                item.onclick = () => setTheme(item.dataset.theme);
+            });
+
             // Page slider
             pageSlider.oninput = () => {
                 const page = parseInt(pageSlider.value, 10) - 1;
@@ -708,6 +783,7 @@ internal static class ReaderHtmlBuilder
             document.addEventListener("click", (e) => {
                 if (!fitDropdown.contains(e.target)) fitDropdown.classList.remove("open");
                 if (!zoomDropdown.contains(e.target)) zoomDropdown.classList.remove("open");
+                if (!themeDropdown.contains(e.target)) themeDropdown.classList.remove("open");
             });
 
             // Keyboard navigation
@@ -735,6 +811,7 @@ internal static class ReaderHtmlBuilder
                     case "Escape":
                         fitDropdown.classList.remove("open");
                         zoomDropdown.classList.remove("open");
+                        themeDropdown.classList.remove("open");
                         break;
                     case "r":
                     case "R":
@@ -811,6 +888,7 @@ internal static class ReaderHtmlBuilder
                     const prefs = JSON.parse(raw);
                     if (prefs.fit) setFit(prefs.fit);
                     if (prefs.zoom) setZoom(prefs.zoom);
+                    if (prefs.theme) setTheme(prefs.theme);
                     if (prefs.singlePage && !singlePageMode) toggleMode();
                     if (prefs.rtl && !rtlMode) toggleRtl();
                     if (prefs.doublePage && !doublePageMode) toggleDoublePage();
@@ -823,6 +901,7 @@ internal static class ReaderHtmlBuilder
                 localStorage.setItem("koware.reader.prefs", JSON.stringify({
                     fit: currentFit,
                     zoom: currentZoom,
+                    theme: currentTheme,
                     singlePage: singlePageMode,
                     rtl: rtlMode,
                     doublePage: doublePageMode
