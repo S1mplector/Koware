@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Koware.Cli.Config;
 
 namespace Koware.Cli.Console;
 
@@ -76,8 +77,8 @@ public sealed class InteractiveSelector<T>
         _maxVisible = Math.Min(options?.MaxVisibleItems ?? 10, Math.Max(3, System.Console.WindowHeight - 8));
         _showSearch = options?.ShowSearch ?? true;
         _showPreview = options?.ShowPreview ?? (_previewFunc != null);
-        _highlightColor = options?.HighlightColor ?? ConsoleColor.Cyan;
-        _selectedColor = options?.SelectedColor ?? ConsoleColor.Yellow;
+        _highlightColor = options?.GetHighlightColor() ?? Theme.Highlight;
+        _selectedColor = options?.GetSelectionColor() ?? Theme.Selection;
         _emptyMessage = options?.EmptyMessage ?? "No items found";
     }
 
@@ -281,18 +282,18 @@ public sealed class InteractiveSelector<T>
         System.Console.SetCursorPosition(0, startLine);
 
         // Header with prompt and count
-        System.Console.ForegroundColor = _highlightColor;
+        System.Console.ForegroundColor = Theme.Primary;
         System.Console.Write($"❯ {_prompt}");
         System.Console.ResetColor();
 
-        System.Console.ForegroundColor = ConsoleColor.White;
+        System.Console.ForegroundColor = Theme.Text;
         System.Console.Write($" [{_filtered.Count}/{_items.Count}]");
         System.Console.ResetColor();
 
         // Scroll indicator
         if (_filtered.Count > _maxVisible)
         {
-            System.Console.ForegroundColor = ConsoleColor.DarkGray;
+            System.Console.ForegroundColor = Theme.Muted;
             var scrollPct = _filtered.Count > 1 ? (_selectedIndex * 100) / (_filtered.Count - 1) : 0;
             System.Console.Write($" ↕{scrollPct}%");
             System.Console.ResetColor();
@@ -304,11 +305,11 @@ public sealed class InteractiveSelector<T>
         // Search box
         if (_showSearch)
         {
-            System.Console.ForegroundColor = ConsoleColor.DarkGray;
+            System.Console.ForegroundColor = Theme.Muted;
             System.Console.Write("  🔍 ");
-            System.Console.ForegroundColor = ConsoleColor.White;
+            System.Console.ForegroundColor = Theme.Text;
             System.Console.Write(_searchText);
-            System.Console.ForegroundColor = ConsoleColor.Cyan;
+            System.Console.ForegroundColor = Theme.Primary;
             System.Console.Write("▌");
             System.Console.ResetColor();
             ClearToEndOfLine();
@@ -316,7 +317,7 @@ public sealed class InteractiveSelector<T>
         }
 
         // Separator
-        System.Console.ForegroundColor = ConsoleColor.DarkGray;
+        System.Console.ForegroundColor = Theme.Muted;
         System.Console.WriteLine(new string('─', Math.Min(60, System.Console.WindowWidth - 2)));
         System.Console.ResetColor();
 
@@ -346,12 +347,12 @@ public sealed class InteractiveSelector<T>
                 var displayNum = i + 1;
                 if (displayNum <= 9 && string.IsNullOrEmpty(_searchText))
                 {
-                    System.Console.ForegroundColor = ConsoleColor.DarkCyan;
+                    System.Console.ForegroundColor = Theme.Secondary;
                     System.Console.Write($"[{displayNum}] ");
                 }
                 else
                 {
-                    System.Console.ForegroundColor = ConsoleColor.DarkGray;
+                    System.Console.ForegroundColor = Theme.Muted;
                     System.Console.Write($"{originalIndex + 1,3}. ");
                 }
 
@@ -359,7 +360,9 @@ public sealed class InteractiveSelector<T>
                 var statusIcon = GetStatusIcon(status);
                 if (!string.IsNullOrEmpty(statusIcon))
                 {
+                    System.Console.ForegroundColor = GetStatusColor(status);
                     System.Console.Write(statusIcon);
+                    System.Console.ResetColor();
                     System.Console.Write(" ");
                 }
 
@@ -376,7 +379,7 @@ public sealed class InteractiveSelector<T>
                 }
                 else
                 {
-                    System.Console.ForegroundColor = ConsoleColor.White;
+                    System.Console.ForegroundColor = Theme.Text;
                 }
 
                 WriteHighlighted(displayText, _searchText, isSelected, _highlightColor);
@@ -394,15 +397,15 @@ public sealed class InteractiveSelector<T>
             var selectedItem = _filtered[_selectedIndex].Item;
             var preview = _previewFunc(selectedItem);
 
-            System.Console.ForegroundColor = ConsoleColor.DarkGray;
+            System.Console.ForegroundColor = Theme.Muted;
             System.Console.WriteLine(new string('─', Math.Min(60, System.Console.WindowWidth - 2)));
             System.Console.ResetColor();
 
             if (!string.IsNullOrWhiteSpace(preview))
             {
-                System.Console.ForegroundColor = ConsoleColor.DarkGray;
+                System.Console.ForegroundColor = Theme.Muted;
                 System.Console.Write("  📖 ");
-                System.Console.ForegroundColor = ConsoleColor.Gray;
+                System.Console.ForegroundColor = Theme.Text;
 
                 // Word-wrap preview text
                 var maxPreviewWidth = System.Console.WindowWidth - 6;
@@ -417,7 +420,7 @@ public sealed class InteractiveSelector<T>
                     System.Console.Write(lines[1]);
                     if (preview.Length > maxPreviewWidth * 2)
                     {
-                        System.Console.ForegroundColor = ConsoleColor.DarkGray;
+                        System.Console.ForegroundColor = Theme.Muted;
                         System.Console.Write("...");
                     }
                 }
@@ -436,11 +439,11 @@ public sealed class InteractiveSelector<T>
         }
 
         // Footer with controls
-        System.Console.ForegroundColor = ConsoleColor.DarkGray;
+        System.Console.ForegroundColor = Theme.Muted;
         System.Console.Write("  ↑↓ move • ");
-        System.Console.ForegroundColor = ConsoleColor.DarkCyan;
+        System.Console.ForegroundColor = Theme.Secondary;
         System.Console.Write("1-9");
-        System.Console.ForegroundColor = ConsoleColor.DarkGray;
+        System.Console.ForegroundColor = Theme.Muted;
         System.Console.Write(" jump • Enter select • Esc cancel");
         if (_showSearch)
         {
@@ -457,6 +460,15 @@ public sealed class InteractiveSelector<T>
         ItemStatus.InProgress => "▶",
         ItemStatus.New => "✨",
         _ => ""
+    };
+
+    private static ConsoleColor GetStatusColor(ItemStatus status) => status switch
+    {
+        ItemStatus.Watched => Theme.Success,
+        ItemStatus.Downloaded => Theme.Accent,
+        ItemStatus.InProgress => Theme.Warning,
+        ItemStatus.New => Theme.Primary,
+        _ => Theme.Text
     };
 
     private static IEnumerable<string> WordWrap(string text, int maxWidth)
@@ -633,10 +645,16 @@ public sealed class SelectorOptions<T>
     public bool ShowPreview { get; init; } = true;
 
     /// <summary>Color for highlighted/matching text.</summary>
-    public ConsoleColor HighlightColor { get; init; } = ConsoleColor.Cyan;
+    public ConsoleColor? HighlightColor { get; init; }
 
     /// <summary>Color for the selected item.</summary>
-    public ConsoleColor SelectedColor { get; init; } = ConsoleColor.Yellow;
+    public ConsoleColor? SelectedColor { get; init; }
+
+    /// <summary>Get effective highlight color (theme or override).</summary>
+    public ConsoleColor GetHighlightColor() => HighlightColor ?? Theme.Highlight;
+
+    /// <summary>Get effective selection color (theme or override).</summary>
+    public ConsoleColor GetSelectionColor() => SelectedColor ?? Theme.Selection;
 
     /// <summary>Message shown when no items match.</summary>
     public string? EmptyMessage { get; init; }

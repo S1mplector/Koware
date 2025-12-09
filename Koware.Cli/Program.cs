@@ -17,6 +17,7 @@ using Koware.Infrastructure.DependencyInjection;
 using Koware.Infrastructure.Configuration;
 using Koware.Infrastructure.Scraping;
 using Koware.Cli.Configuration;
+using Koware.Cli.Config;
 using Koware.Cli.History;
 using Koware.Cli.Console;
 using Koware.Cli.Health;
@@ -90,6 +91,7 @@ static IHost BuildHost(string[] args)
     builder.Services.Configure<PlayerOptions>(builder.Configuration.GetSection("Player"));
     builder.Services.Configure<ReaderOptions>(builder.Configuration.GetSection("Reader"));
     builder.Services.Configure<DefaultCliOptions>(builder.Configuration.GetSection("Defaults"));
+    builder.Services.Configure<ThemeOptions>(builder.Configuration.GetSection("Theme"));
     builder.Services.AddSingleton<IWatchHistoryStore, SqliteWatchHistoryStore>();
     builder.Services.AddSingleton<IReadHistoryStore, SqliteReadHistoryStore>();
     builder.Services.AddSingleton<IAnimeListStore, SqliteAnimeListStore>();
@@ -120,6 +122,8 @@ static async Task<int> RunAsync(IHost host, string[] args)
     var services = scope.ServiceProvider;
     var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("koware.cli");
     var defaults = services.GetService<IOptions<DefaultCliOptions>>()?.Value ?? new DefaultCliOptions();
+    var themeOptions = services.GetService<IOptions<ThemeOptions>>()?.Value;
+    Theme.Initialize(themeOptions);
     using var cts = new CancellationTokenSource();
 
     Console.CancelKeyPress += (_, e) =>
@@ -197,6 +201,10 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandleOfflineAsync(args, services, logger, defaults, cts.Token);
             case "config":
                 return HandleConfig(args);
+            case "theme":
+                return HandleTheme(args);
+            case "stats":
+                return await HandleStatsAsync(args, services, logger, defaults, cts.Token);
             case "doctor":
                 return await HandleDoctorAsync(services, logger, cts.Token);
             case "provider":
@@ -6452,4 +6460,278 @@ static int HandleConfig(string[] args)
 static void PrintConfigUsage()
 {
     Console.WriteLine("Usage: koware config [--quality <label>] [--index <n>] [--player <exe>] [--args <string>] [--show]");
+}
+
+/// <summary>
+/// Handle the theme command - list and preview available themes.
+/// </summary>
+static int HandleTheme(string[] args)
+{
+    var configPath = GetUserConfigFilePath();
+
+    if (args.Length < 2)
+    {
+        // List available themes
+        Console.ForegroundColor = Theme.Primary;
+        Console.WriteLine("Available Themes:");
+        Console.ResetColor();
+        Console.WriteLine();
+
+        foreach (var name in ThemePresets.GetNames())
+        {
+            var theme = ThemePresets.Get(name);
+            var current = name.Equals(Theme.Current == ThemePresets.Get(name) ? name : "", StringComparison.OrdinalIgnoreCase);
+            
+            Console.Write("  ");
+            if (current)
+            {
+                Console.ForegroundColor = Theme.Success;
+                Console.Write("● ");
+            }
+            else
+            {
+                Console.Write("  ");
+            }
+            
+            Console.ForegroundColor = theme.Primary;
+            Console.Write($"{name,-12}");
+            Console.ForegroundColor = theme.Secondary;
+            Console.Write(" ■");
+            Console.ForegroundColor = theme.Accent;
+            Console.Write("■");
+            Console.ForegroundColor = theme.Success;
+            Console.Write("■");
+            Console.ForegroundColor = theme.Warning;
+            Console.Write("■");
+            Console.ForegroundColor = theme.Error;
+            Console.Write("■");
+            Console.ResetColor();
+            Console.WriteLine();
+        }
+
+        Console.WriteLine();
+        Console.ForegroundColor = Theme.Muted;
+        Console.WriteLine("Usage: koware theme <name>  - Set and save theme");
+        Console.WriteLine("       koware theme --preview <name>  - Preview theme");
+        Console.ResetColor();
+        return 0;
+    }
+
+    var arg = args[1].ToLowerInvariant();
+
+    if (arg == "--preview" && args.Length > 2)
+    {
+        var previewName = args[2];
+        if (!ThemePresets.GetNames().Any(n => n.Equals(previewName, StringComparison.OrdinalIgnoreCase)))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"Unknown theme: {previewName}");
+            Console.ResetColor();
+            return 1;
+        }
+
+        // Preview the theme
+        Theme.SetPreset(previewName);
+        Console.ForegroundColor = Theme.Primary;
+        Console.WriteLine($"Preview: {previewName}");
+        Console.ForegroundColor = Theme.Muted;
+        Console.WriteLine(new string('─', 40));
+        Console.ResetColor();
+        
+        Console.ForegroundColor = Theme.Text;
+        Console.Write("  Text  ");
+        Console.ForegroundColor = Theme.Primary;
+        Console.Write("Primary  ");
+        Console.ForegroundColor = Theme.Secondary;
+        Console.Write("Secondary  ");
+        Console.ForegroundColor = Theme.Accent;
+        Console.WriteLine("Accent");
+        
+        Console.ForegroundColor = Theme.Success;
+        Console.Write("  ✓ Success  ");
+        Console.ForegroundColor = Theme.Warning;
+        Console.Write("⚠ Warning  ");
+        Console.ForegroundColor = Theme.Error;
+        Console.WriteLine("✗ Error");
+        Console.ResetColor();
+        
+        Console.ForegroundColor = Theme.Muted;
+        Console.WriteLine("\n(Preview only - run without --preview to save)");
+        Console.ResetColor();
+        return 0;
+    }
+
+    // Set theme
+    var themeName = args[1];
+    if (!ThemePresets.GetNames().Any(n => n.Equals(themeName, StringComparison.OrdinalIgnoreCase)))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"Unknown theme: {themeName}");
+        Console.WriteLine("Available: " + string.Join(", ", ThemePresets.GetNames()));
+        Console.ResetColor();
+        return 1;
+    }
+
+    // Save to config
+    var root = File.Exists(configPath)
+        ? (JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? new JsonObject())
+        : new JsonObject();
+
+    root["Theme"] = new JsonObject { ["Preset"] = themeName };
+    var json = JsonSerializer.Serialize(root, new JsonSerializerOptions { WriteIndented = true });
+    File.WriteAllText(configPath, json);
+
+    Theme.SetPreset(themeName);
+    Console.ForegroundColor = Theme.Success;
+    Console.WriteLine($"Theme set to '{themeName}'");
+    Console.ResetColor();
+    return 0;
+}
+
+/// <summary>
+/// Handle the stats command - display detailed viewing/reading statistics.
+/// </summary>
+static async Task<int> HandleStatsAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
+{
+    var mode = defaults.GetMode();
+    var isJson = args.Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+
+    Console.ForegroundColor = Theme.Primary;
+    Console.WriteLine("📊 Statistics Dashboard");
+    Console.ForegroundColor = Theme.Muted;
+    Console.WriteLine(new string('═', 50));
+    Console.ResetColor();
+    Console.WriteLine();
+
+    // Watch history stats
+    var watchHistory = services.GetRequiredService<IWatchHistoryStore>();
+    var watchStats = await watchHistory.GetStatsAsync(null, cancellationToken);
+    var totalWatchEntries = watchStats.Sum(s => s.Count);
+    var uniqueAnime = watchStats.Count;
+    var estimatedHoursWatched = totalWatchEntries * 24 / 60.0; // ~24 min per episode
+
+    Console.ForegroundColor = Theme.Secondary;
+    Console.WriteLine("📺 Anime Watching");
+    Console.ForegroundColor = Theme.Muted;
+    Console.WriteLine(new string('─', 30));
+    Console.ResetColor();
+    Console.WriteLine($"  Episodes watched: {totalWatchEntries:N0}");
+    Console.WriteLine($"  Unique anime:     {uniqueAnime:N0}");
+    Console.WriteLine($"  Est. hours:       {estimatedHoursWatched:N1}h");
+    Console.WriteLine();
+
+    // Top 5 most watched
+    if (watchStats.Count > 0)
+    {
+        Console.ForegroundColor = Theme.Accent;
+        Console.WriteLine("  Most Watched:");
+        Console.ResetColor();
+        foreach (var stat in watchStats.Take(5))
+        {
+            Console.ForegroundColor = Theme.Success;
+            Console.Write($"    {stat.Count,3} ep ");
+            Console.ForegroundColor = Theme.Text;
+            Console.WriteLine(stat.AnimeTitle.Length > 35 ? stat.AnimeTitle[..32] + "..." : stat.AnimeTitle);
+        }
+        Console.ResetColor();
+        Console.WriteLine();
+    }
+
+    // Read history stats
+    var readHistory = services.GetRequiredService<IReadHistoryStore>();
+    var readStats = await readHistory.GetStatsAsync(null, cancellationToken);
+    var totalReadEntries = readStats.Sum(s => s.Count);
+    var uniqueManga = readStats.Count;
+    var estimatedChaptersRead = totalReadEntries;
+
+    Console.ForegroundColor = Theme.Secondary;
+    Console.WriteLine("📖 Manga Reading");
+    Console.ForegroundColor = Theme.Muted;
+    Console.WriteLine(new string('─', 30));
+    Console.ResetColor();
+    Console.WriteLine($"  Chapters read:    {totalReadEntries:N0}");
+    Console.WriteLine($"  Unique manga:     {uniqueManga:N0}");
+    Console.WriteLine();
+
+    // Top 5 most read
+    if (readStats.Count > 0)
+    {
+        Console.ForegroundColor = Theme.Accent;
+        Console.WriteLine("  Most Read:");
+        Console.ResetColor();
+        foreach (var stat in readStats.Take(5))
+        {
+            Console.ForegroundColor = Theme.Success;
+            Console.Write($"    {stat.Count,3} ch ");
+            Console.ForegroundColor = Theme.Text;
+            Console.WriteLine(stat.MangaTitle.Length > 35 ? stat.MangaTitle[..32] + "..." : stat.MangaTitle);
+        }
+        Console.ResetColor();
+        Console.WriteLine();
+    }
+
+    // Download stats
+    var downloadStore = services.GetRequiredService<IDownloadStore>();
+    var dlStats = await downloadStore.GetStatsAsync(cancellationToken);
+
+    Console.ForegroundColor = Theme.Secondary;
+    Console.WriteLine("📥 Downloads");
+    Console.ForegroundColor = Theme.Muted;
+    Console.WriteLine(new string('─', 30));
+    Console.ResetColor();
+    Console.WriteLine($"  Episodes:         {dlStats.TotalEpisodes:N0} ({dlStats.UniqueAnime} anime)");
+    Console.WriteLine($"  Chapters:         {dlStats.TotalChapters:N0} ({dlStats.UniqueManga} manga)");
+    Console.WriteLine($"  Total size:       {FormatFileSize(dlStats.TotalSizeBytes)}");
+    Console.WriteLine();
+
+    // Anime list stats
+    var animeList = services.GetRequiredService<IAnimeListStore>();
+    var animeListAll = await animeList.GetAllAsync(null, cancellationToken);
+    var animeByStatus = animeListAll.GroupBy(a => a.Status).ToDictionary(g => g.Key, g => g.Count());
+
+    Console.ForegroundColor = Theme.Secondary;
+    Console.WriteLine("📋 Anime List");
+    Console.ForegroundColor = Theme.Muted;
+    Console.WriteLine(new string('─', 30));
+    Console.ResetColor();
+    Console.WriteLine($"  Total:            {animeListAll.Count}");
+    if (animeByStatus.TryGetValue(AnimeWatchStatus.Watching, out var watching))
+        Console.WriteLine($"  Currently watching: {watching}");
+    if (animeByStatus.TryGetValue(AnimeWatchStatus.Completed, out var completed))
+        Console.WriteLine($"  Completed:        {completed}");
+    if (animeByStatus.TryGetValue(AnimeWatchStatus.PlanToWatch, out var ptw))
+        Console.WriteLine($"  Plan to watch:    {ptw}");
+    if (animeByStatus.TryGetValue(AnimeWatchStatus.OnHold, out var onHold))
+        Console.WriteLine($"  On hold:          {onHold}");
+    if (animeByStatus.TryGetValue(AnimeWatchStatus.Dropped, out var dropped))
+        Console.WriteLine($"  Dropped:          {dropped}");
+    Console.WriteLine();
+
+    // Manga list stats
+    var mangaList = services.GetRequiredService<IMangaListStore>();
+    var mangaListAll = await mangaList.GetAllAsync(null, cancellationToken);
+    var mangaByStatus = mangaListAll.GroupBy(m => m.Status).ToDictionary(g => g.Key, g => g.Count());
+
+    Console.ForegroundColor = Theme.Secondary;
+    Console.WriteLine("📚 Manga List");
+    Console.ForegroundColor = Theme.Muted;
+    Console.WriteLine(new string('─', 30));
+    Console.ResetColor();
+    Console.WriteLine($"  Total:            {mangaListAll.Count}");
+    if (mangaByStatus.TryGetValue(MangaReadStatus.Reading, out var reading))
+        Console.WriteLine($"  Currently reading: {reading}");
+    if (mangaByStatus.TryGetValue(MangaReadStatus.Completed, out var mCompleted))
+        Console.WriteLine($"  Completed:        {mCompleted}");
+    if (mangaByStatus.TryGetValue(MangaReadStatus.PlanToRead, out var ptr))
+        Console.WriteLine($"  Plan to read:     {ptr}");
+    Console.WriteLine();
+
+    // Summary
+    Console.ForegroundColor = Theme.Muted;
+    Console.WriteLine(new string('═', 50));
+    Console.ForegroundColor = Theme.Primary;
+    Console.WriteLine($"Total content: {uniqueAnime + uniqueManga} titles | {totalWatchEntries + totalReadEntries} entries");
+    Console.ResetColor();
+
+    return 0;
 }
