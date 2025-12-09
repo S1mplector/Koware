@@ -10,7 +10,7 @@ using Microsoft.Data.Sqlite;
 namespace Koware.Cli.History;
 
 /// <summary>
-/// Represents a single read history entry with manga, chapter, and timestamp.
+/// Represents a single read history entry with manga, chapter, page, and timestamp.
 /// </summary>
 public sealed class ReadHistoryEntry
 {
@@ -23,6 +23,9 @@ public sealed class ReadHistoryEntry
     public float ChapterNumber { get; init; }
 
     public string? ChapterTitle { get; init; }
+
+    /// <summary>Last page number read in this chapter (1-indexed).</summary>
+    public int LastPage { get; init; } = 1;
 
     public DateTimeOffset ReadAt { get; init; }
 }
@@ -124,7 +127,7 @@ public sealed class SqliteReadHistoryStore : IReadHistoryStore
 
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT provider, manga_id, manga_title, chapter_number, chapter_title, read_at_utc
+            SELECT provider, manga_id, manga_title, chapter_number, chapter_title, last_page, read_at_utc
             FROM {TableName}
             ORDER BY read_at_utc DESC
             LIMIT 1;
@@ -148,7 +151,7 @@ public sealed class SqliteReadHistoryStore : IReadHistoryStore
 
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT provider, manga_id, manga_title, chapter_number, chapter_title, read_at_utc
+            SELECT provider, manga_id, manga_title, chapter_number, chapter_title, last_page, read_at_utc
             FROM {TableName}
             WHERE manga_title = @title COLLATE NOCASE
             ORDER BY read_at_utc DESC
@@ -174,7 +177,7 @@ public sealed class SqliteReadHistoryStore : IReadHistoryStore
 
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT provider, manga_id, manga_title, chapter_number, chapter_title, read_at_utc
+            SELECT provider, manga_id, manga_title, chapter_number, chapter_title, last_page, read_at_utc
             FROM {TableName}
             WHERE manga_title LIKE @pattern COLLATE NOCASE
             ORDER BY read_at_utc DESC
@@ -235,7 +238,7 @@ public sealed class SqliteReadHistoryStore : IReadHistoryStore
 
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT provider, manga_id, manga_title, chapter_number, chapter_title, read_at_utc
+            SELECT provider, manga_id, manga_title, chapter_number, chapter_title, last_page, read_at_utc
             FROM {TableName}
             {whereClause}
             ORDER BY read_at_utc DESC
@@ -323,12 +326,18 @@ public sealed class SqliteReadHistoryStore : IReadHistoryStore
                     manga_title TEXT NOT NULL,
                     chapter_number REAL NOT NULL,
                     chapter_title TEXT,
+                    last_page INTEGER DEFAULT 1,
                     read_at_utc TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_{TableName}_manga_title ON {TableName}(manga_title COLLATE NOCASE);
                 CREATE INDEX IF NOT EXISTS idx_{TableName}_read_at ON {TableName}(read_at_utc DESC);
                 """;
             await command.ExecuteNonQueryAsync(cancellationToken);
+
+            // Migration: add last_page column if it doesn't exist (for existing databases)
+            await using var alterCmd = connection.CreateCommand();
+            alterCmd.CommandText = $"ALTER TABLE {TableName} ADD COLUMN last_page INTEGER DEFAULT 1;";
+            try { await alterCmd.ExecuteNonQueryAsync(cancellationToken); } catch { /* column already exists */ }
 
             _initialized = true;
         }
@@ -342,14 +351,15 @@ public sealed class SqliteReadHistoryStore : IReadHistoryStore
     {
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
-            INSERT INTO {TableName} (provider, manga_id, manga_title, chapter_number, chapter_title, read_at_utc)
-            VALUES (@provider, @mangaId, @mangaTitle, @chapterNumber, @chapterTitle, @readAt);
+            INSERT INTO {TableName} (provider, manga_id, manga_title, chapter_number, chapter_title, last_page, read_at_utc)
+            VALUES (@provider, @mangaId, @mangaTitle, @chapterNumber, @chapterTitle, @lastPage, @readAt);
             """;
         command.Parameters.AddWithValue("@provider", entry.Provider);
         command.Parameters.AddWithValue("@mangaId", entry.MangaId);
         command.Parameters.AddWithValue("@mangaTitle", entry.MangaTitle);
         command.Parameters.AddWithValue("@chapterNumber", entry.ChapterNumber);
         command.Parameters.AddWithValue("@chapterTitle", entry.ChapterTitle ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("@lastPage", entry.LastPage);
         command.Parameters.AddWithValue("@readAt", entry.ReadAt.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -363,7 +373,8 @@ public sealed class SqliteReadHistoryStore : IReadHistoryStore
             MangaTitle = reader.GetString(2),
             ChapterNumber = reader.GetFloat(3),
             ChapterTitle = reader.IsDBNull(4) ? null : reader.GetString(4),
-            ReadAt = DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal)
+            LastPage = reader.IsDBNull(5) ? 1 : reader.GetInt32(5),
+            ReadAt = DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal)
         };
     }
 }

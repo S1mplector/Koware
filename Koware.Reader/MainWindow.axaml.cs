@@ -54,6 +54,7 @@ public partial class MainWindow : Window
     public string? HttpUserAgent { get; set; }
     public ChapterNavigationRequest ChapterNavigation { get; private set; } = ChapterNavigationRequest.None;
     public string? NavResultPath { get; set; }
+    public int StartPage { get; set; } = 1;
 
     private enum FitMode
     {
@@ -156,8 +157,18 @@ public partial class MainWindow : Window
         // Setup chapter navigation
         InitChapters();
         
-        // Restore position if saved
-        RestorePosition();
+        // Navigate to start page if specified (for resume functionality)
+        if (StartPage > 1 && StartPage <= Pages.Count)
+        {
+            _currentPage = StartPage;
+            PageSlider.Value = StartPage;
+            UpdatePageIndicator();
+        }
+        else
+        {
+            // Restore position if saved
+            RestorePosition();
+        }
 
         // Start loading pages
         _loadCts = new CancellationTokenSource();
@@ -1208,12 +1219,16 @@ public partial class MainWindow : Window
             return;
         }
 
-        var value = ChapterNavigation switch
+        var nav = ChapterNavigation switch
         {
             ChapterNavigationRequest.Next => "next",
             ChapterNavigationRequest.Previous => "prev",
             _ => "none"
         };
+
+        // Include current page and chapter for resume functionality
+        // Format: nav:page:chapter (e.g., "none:15:1.5")
+        var value = $"{nav}:{_currentPage}:{_currentChapterNumber}";
 
         try
         {

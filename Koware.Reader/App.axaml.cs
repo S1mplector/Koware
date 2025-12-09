@@ -22,13 +22,14 @@ public partial class App : Application
             var args = desktop.Args ?? Array.Empty<string>();
             
             // Parse command line arguments
-            // Usage: Koware.Reader <pagesJson> [title] [--referer <url>] [--user-agent <ua>] [--chapters <json>]
+            // Usage: Koware.Reader <pagesJson> [title] [--referer <url>] [--user-agent <ua>] [--chapters <json>] [--start-page <n>]
             List<PageInfo> pages = new();
             string title = "Koware Reader";
             string? referer = null;
             string? userAgent = null;
             List<ChapterInfo> chapters = new();
             string? navPath = null;
+            int startPage = 1;
 
             for (int i = 0; i < args.Length; i++)
             {
@@ -45,6 +46,13 @@ public partial class App : Application
                 else if (arg.Equals("--nav", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
                 {
                     navPath = args[++i];
+                }
+                else if (arg.Equals("--start-page", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    if (int.TryParse(args[++i], out var sp) && sp > 0)
+                    {
+                        startPage = sp;
+                    }
                 }
                 else if (arg.Equals("--chapters", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
                 {
@@ -83,7 +91,8 @@ public partial class App : Application
                 HttpReferer = referer,
                 HttpUserAgent = userAgent,
                 Chapters = chapters,
-                NavResultPath = navPath
+                NavResultPath = navPath,
+                StartPage = startPage
             };
         }
 

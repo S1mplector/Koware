@@ -1515,16 +1515,33 @@ static async Task<int> HandleContinueMangaAsync(string[] args, IServiceProvider 
         return 1;
     }
 
-    var targetChapter = fromChapter ?? (entry.ChapterNumber + 1);
+    // If resuming from the same chapter (not explicitly overridden), use the last page
+    // Otherwise, start at page 1 of the new chapter
+    var targetChapter = fromChapter ?? entry.ChapterNumber;
+    var startPage = (fromChapter == null && Math.Abs(targetChapter - entry.ChapterNumber) < 0.001f) ? entry.LastPage : 1;
+    
     if (targetChapter <= 0)
     {
         targetChapter = 1;
     }
 
-    logger.LogInformation("Continuing {Manga} from chapter {Chapter}", entry.MangaTitle, targetChapter);
+    if (startPage > 1)
+    {
+        logger.LogInformation("Resuming {Manga} chapter {Chapter} from page {Page}", entry.MangaTitle, targetChapter, startPage);
+    }
+    else
+    {
+        logger.LogInformation("Continuing {Manga} from chapter {Chapter}", entry.MangaTitle, targetChapter);
+    }
 
-    // Build args for HandleReadAsync
-    var readArgs = new List<string> { "read", entry.MangaTitle, "--chapter", targetChapter.ToString(System.Globalization.CultureInfo.InvariantCulture), "--index", "1", "--non-interactive" };
+    // Build args for HandleReadAsync with start page
+    var readArgs = new List<string> { 
+        "read", entry.MangaTitle, 
+        "--chapter", targetChapter.ToString(System.Globalization.CultureInfo.InvariantCulture), 
+        "--index", "1", 
+        "--non-interactive",
+        "--start-page", startPage.ToString()
+    };
     var defaults = services.GetRequiredService<IOptions<DefaultCliOptions>>().Value;
     return await HandleReadAsync(readArgs.ToArray(), services, logger, defaults, cancellationToken);
 }
@@ -3611,6 +3628,7 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
     float? chapterNumber = null;
     int? preferredIndex = null;
     var nonInteractive = false;
+    int startPage = 1;
 
     for (var i = 1; i < args.Length; i++)
     {
@@ -3636,6 +3654,18 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
                 continue;
             }
             logger.LogWarning("--index must be a positive integer.");
+            return 1;
+        }
+
+        if (arg.Equals("--start-page", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            if (int.TryParse(args[i + 1], out var sp) && sp >= 1)
+            {
+                startPage = sp;
+                i++;
+                continue;
+            }
+            logger.LogWarning("--start-page must be a positive integer.");
             return 1;
         }
 
@@ -3806,7 +3836,7 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
     var allMangaOptions = services.GetService<IOptions<AllMangaOptions>>()?.Value;
     var displayTitle = $"{selectedManga.Title} - Chapter {selectedChapter.Number}";
 
-    var exitCode = await ReadWithNavigationAsync(
+    var readResult = await ReadWithNavigationAsync(
         readerOptions,
         selectedManga,
         selectedChapter,
@@ -3817,9 +3847,10 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
         allMangaOptions?.Referer,
         allMangaOptions?.UserAgent,
         displayTitle,
-        cancellationToken);
+        cancellationToken,
+        startPage);
 
-    // Save to reading history
+    // Save to reading history with last page position
     try
     {
         var readHistory = services.GetRequiredService<IReadHistoryStore>();
@@ -3828,8 +3859,9 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
             Provider = "allmanga",
             MangaId = selectedManga.Id.Value,
             MangaTitle = selectedManga.Title,
-            ChapterNumber = selectedChapter.Number,
-            ChapterTitle = selectedChapter.Title,
+            ChapterNumber = readResult.LastChapter,
+            ChapterTitle = chapters.FirstOrDefault(c => Math.Abs(c.Number - readResult.LastChapter) < 0.001f)?.Title ?? selectedChapter.Title,
+            LastPage = readResult.LastPage,
             ReadAt = DateTimeOffset.UtcNow
         };
         await readHistory.AddAsync(entry, cancellationToken);
@@ -3856,7 +3888,7 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
         logger.LogDebug(ex, "Failed to update manga list tracking.");
     }
 
-    return exitCode;
+    return readResult.ExitCode;
 }
 
 /// <summary>
@@ -3868,8 +3900,9 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
 /// <param name="httpReferrer">Optional HTTP Referer header.</param>
 /// <param name="httpUserAgent">Optional User-Agent header.</param>
 /// <param name="displayTitle">Window title for the reader.</param>
+/// <param name="startPage">Starting page number for resume (1-indexed).</param>
 /// <returns>Exit code from the reader process.</returns>
-static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> pages, IReadOnlyCollection<Chapter> chapters, Chapter currentChapter, ILogger logger, string? httpReferrer, string? httpUserAgent, string? displayTitle, string? navResultPath)
+static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> pages, IReadOnlyCollection<Chapter> chapters, Chapter currentChapter, ILogger logger, string? httpReferrer, string? httpUserAgent, string? displayTitle, string? navResultPath, int startPage = 1)
 {
     var readerPath = ResolveReaderExecutable(options);
     if (readerPath is null)
@@ -3935,10 +3968,16 @@ static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> 
         start.ArgumentList.Add(httpUserAgent!);
     }
 
+    if (startPage > 1)
+    {
+        start.ArgumentList.Add("--start-page");
+        start.ArgumentList.Add(startPage.ToString());
+    }
+
     return StartProcessAndWait(logger, start, readerPath);
 }
 
-static async Task<int> ReadWithNavigationAsync(
+static async Task<ReadResult> ReadWithNavigationAsync(
     ReaderOptions readerOptions,
     Manga selectedManga,
     Chapter selectedChapter,
@@ -3949,7 +3988,8 @@ static async Task<int> ReadWithNavigationAsync(
     string? httpReferrer,
     string? httpUserAgent,
     string? displayTitle,
-    CancellationToken cancellationToken)
+    CancellationToken cancellationToken,
+    int startPage = 1)
 {
     // create a temp file to capture navigation intent
     var navPath = Path.Combine(Path.GetTempPath(), $"koware-nav-{Guid.NewGuid():N}.txt");
@@ -3957,16 +3997,20 @@ static async Task<int> ReadWithNavigationAsync(
     var currentChapter = selectedChapter;
     var pages = initialPages;
     var exitCode = 0;
+    var lastNav = new NavigationResult("none", 1, currentChapter.Number);
 
     try
     {
+        var currentStartPage = startPage;
         while (true)
         {
-            File.WriteAllText(navPath, "none");
-            exitCode = LaunchReader(readerOptions, pages, chapters, currentChapter, logger, httpReferrer, httpUserAgent, displayTitle, navPath);
+            File.WriteAllText(navPath, "none:1:0");
+            exitCode = LaunchReader(readerOptions, pages, chapters, currentChapter, logger, httpReferrer, httpUserAgent, displayTitle, navPath, currentStartPage);
+            currentStartPage = 1; // Reset for subsequent chapter navigation
 
             var nav = ReadNavigation(navPath);
-            if (nav is not ("next" or "prev"))
+            lastNav = nav;
+            if (nav.Action is not ("next" or "prev"))
             {
                 break;
             }
@@ -3977,11 +4021,11 @@ static async Task<int> ReadWithNavigationAsync(
                 break;
             }
 
-            if (nav == "next" && currentIndex + 1 < orderedChapters.Length)
+            if (nav.Action == "next" && currentIndex + 1 < orderedChapters.Length)
             {
                 currentChapter = orderedChapters[currentIndex + 1];
             }
-            else if (nav == "prev" && currentIndex - 1 >= 0)
+            else if (nav.Action == "prev" && currentIndex - 1 >= 0)
             {
                 currentChapter = orderedChapters[currentIndex - 1];
             }
@@ -4000,19 +4044,30 @@ static async Task<int> ReadWithNavigationAsync(
         try { File.Delete(navPath); } catch { }
     }
 
-    return exitCode;
+    // Return the final position
+    var finalChapter = lastNav.Chapter > 0 ? lastNav.Chapter : currentChapter.Number;
+    return new ReadResult(exitCode, finalChapter, lastNav.Page);
 }
 
-static string ReadNavigation(string path)
+static NavigationResult ReadNavigation(string path)
 {
     try
     {
         var text = File.ReadAllText(path).Trim().ToLowerInvariant();
-        return text;
+        // Format: action:page:chapter (e.g., "none:15:1.5")
+        var parts = text.Split(':');
+        if (parts.Length >= 3 && 
+            int.TryParse(parts[1], out var page) && 
+            float.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var chapter))
+        {
+            return new NavigationResult(parts[0], page, chapter);
+        }
+        // Legacy format: just action
+        return new NavigationResult(text, 1, 0);
     }
     catch
     {
-        return "none";
+        return new NavigationResult("none", 1, 0);
     }
 }
 
@@ -6735,3 +6790,15 @@ static async Task<int> HandleStatsAsync(string[] args, IServiceProvider services
 
     return 0;
 }
+
+// ===== Record Types =====
+
+/// <summary>
+/// Navigation result from reader including current page.
+/// </summary>
+record NavigationResult(string Action, int Page, float Chapter);
+
+/// <summary>
+/// Result from reading with navigation - includes exit code and last position.
+/// </summary>
+record ReadResult(int ExitCode, float LastChapter, int LastPage);
