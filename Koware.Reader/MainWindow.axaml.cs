@@ -168,9 +168,11 @@ public partial class MainWindow : Window
     {
         if (Chapters.Count == 0)
         {
-            ChaptersButton.IsVisible = false;
-            PrevChapterButton.IsVisible = false;
-            NextChapterButton.IsVisible = false;
+            // Show but disable chapter controls when no chapters available
+            ChaptersButton.IsEnabled = false;
+            ChaptersButton.Opacity = 0.5;
+            PrevChapterButton.IsEnabled = false;
+            NextChapterButton.IsEnabled = false;
             return;
         }
         
@@ -190,10 +192,11 @@ public partial class MainWindow : Window
             if (isCurrent) item.Classes.Add("current");
             if (ch.IsRead) item.Opacity = 0.6;
             
+            var chapterNumStr = ch.Number % 1 == 0 ? $"{(int)ch.Number}" : $"{ch.Number:0.#}";
             var row = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 10 };
             row.Children.Add(new TextBlock 
             { 
-                Text = $"Ch. {ch.Number}", 
+                Text = $"Ch. {chapterNumStr}", 
                 FontWeight = FontWeight.Bold, 
                 FontSize = 13, 
                 MinWidth = 50,
@@ -201,7 +204,7 @@ public partial class MainWindow : Window
             });
             row.Children.Add(new TextBlock 
             { 
-                Text = string.IsNullOrWhiteSpace(ch.Title) ? $"Chapter {ch.Number}" : ch.Title,
+                Text = string.IsNullOrWhiteSpace(ch.Title) ? $"Chapter {chapterNumStr}" : ch.Title,
                 FontSize = 13,
                 Foreground = new SolidColorBrush(Color.Parse("#e2e8f0")),
                 TextTrimming = TextTrimming.CharacterEllipsis
@@ -687,6 +690,15 @@ public partial class MainWindow : Window
                 ToggleDoublePageMode();
                 e.Handled = true;
                 break;
+                
+            // Chapters panel
+            case Key.C:
+                if (Chapters.Count > 0)
+                {
+                    ToggleChaptersPanel();
+                }
+                e.Handled = true;
+                break;
         }
     }
     
@@ -1155,6 +1167,8 @@ public partial class MainWindow : Window
     {
         ToggleChaptersPanel(false);
     }
+    
+    private void ToggleChaptersPanel() => ToggleChaptersPanel(!_chaptersOpen);
     
     private void ToggleChaptersPanel(bool open)
     {

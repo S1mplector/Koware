@@ -205,7 +205,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
             case "help":
             case "--help":
             case "-h":
-                return HandleHelp(args);
+                return HandleHelp(args, defaults.GetMode());
             default:
                 logger.LogWarning("Unknown command: {Command}", command);
                 PrintUsage();
@@ -5373,11 +5373,12 @@ static void PrintUsage()
 /// Implement <c>koware help</c> and <c>koware help &lt;command&gt;</c>.
 /// </summary>
 /// <param name="args">CLI arguments; second element is the help topic.</param>
+/// <param name="mode">Current CLI mode (anime or manga) for mode-sensitive help.</param>
 /// <returns>Exit code: 0 on success, 1 if topic unknown.</returns>
 /// <remarks>
 /// Delegates to topic-specific help sections for each command.
 /// </remarks>
-static int HandleHelp(string[] args)
+static int HandleHelp(string[] args, CliMode mode)
 {
     if (args.Length == 1)
     {
@@ -5490,32 +5491,64 @@ static int HandleHelp(string[] args)
             Console.WriteLine("Behavior: downloads the latest Windows installer and launches it. Follow the GUI to complete the update.");
             break;
         case "list":
-            PrintTopicHeader("list", "Track your anime watch status.");
-            Console.WriteLine();
-            WriteColoredLine("Commands:", ConsoleColor.Yellow);
-            WriteListCommand("koware list", "Show all anime in your list");
-            WriteListCommand("koware list --status <status>", "Filter by status");
-            WriteListCommand("koware list add \"<title>\"", "Add to plan-to-watch (default)");
-            WriteListCommand("koware list update \"<title>\" --status <status>", "Change status");
-            WriteListCommand("koware list remove \"<title>\"", "Remove from list");
-            WriteListCommand("koware list stats", "Show counts by status");
-            Console.WriteLine();
-            WriteColoredLine("Options:", ConsoleColor.Yellow);
-            WriteListOption("--status <status>", "watching, completed, plan, hold, dropped");
-            WriteListOption("--episodes <n>", "Set total episode count");
-            WriteListOption("--score <1-10>", "Rate the anime");
-            WriteListOption("--notes \"...\"", "Add personal notes");
-            Console.WriteLine();
-            WriteColoredLine("Examples:", ConsoleColor.Yellow);
-            WriteListExample("koware list add \"Clannad\"");
-            WriteListExample("koware list add \"Demon Slayer\" --status watching --episodes 26");
-            WriteListExample("koware list update \"Clannad\" --status completed --score 10");
-            WriteListExample("koware list --status watching");
-            Console.WriteLine();
-            WriteColoredLine("Auto-tracking:", ConsoleColor.Yellow);
-            Console.WriteLine("  When you watch an episode, it's automatically added as 'Watching'.");
-            Console.WriteLine("  'Plan to Watch' entries transition to 'Watching' when you start.");
-            Console.WriteLine("  When you finish the last episode, it auto-completes.");
+            if (mode == CliMode.Manga)
+            {
+                PrintTopicHeader("list", "Track your manga read status.");
+                Console.WriteLine();
+                WriteColoredLine("Commands:", ConsoleColor.Yellow);
+                WriteListCommand("koware list", "Show all manga in your list");
+                WriteListCommand("koware list --status <status>", "Filter by status");
+                WriteListCommand("koware list add \"<title>\"", "Add to plan-to-read (default)");
+                WriteListCommand("koware list update \"<title>\" --status <status>", "Change status");
+                WriteListCommand("koware list remove \"<title>\"", "Remove from list");
+                WriteListCommand("koware list stats", "Show counts by status");
+                Console.WriteLine();
+                WriteColoredLine("Options:", ConsoleColor.Yellow);
+                WriteListOption("--status <status>", "reading, completed, plan, hold, dropped");
+                WriteListOption("--chapters <n>", "Set total chapter count");
+                WriteListOption("--score <1-10>", "Rate the manga");
+                WriteListOption("--notes \"...\"", "Add personal notes");
+                Console.WriteLine();
+                WriteColoredLine("Examples:", ConsoleColor.Yellow);
+                WriteListExample("koware list add \"One Piece\"");
+                WriteListExample("koware list add \"Chainsaw Man\" --status reading --chapters 150");
+                WriteListExample("koware list update \"One Piece\" --status reading --score 10");
+                WriteListExample("koware list --status reading");
+                Console.WriteLine();
+                WriteColoredLine("Auto-tracking:", ConsoleColor.Yellow);
+                Console.WriteLine("  When you read a chapter, it's automatically added as 'Reading'.");
+                Console.WriteLine("  'Plan to Read' entries transition to 'Reading' when you start.");
+                Console.WriteLine("  When you finish the last chapter, it auto-completes.");
+            }
+            else
+            {
+                PrintTopicHeader("list", "Track your anime watch status.");
+                Console.WriteLine();
+                WriteColoredLine("Commands:", ConsoleColor.Yellow);
+                WriteListCommand("koware list", "Show all anime in your list");
+                WriteListCommand("koware list --status <status>", "Filter by status");
+                WriteListCommand("koware list add \"<title>\"", "Add to plan-to-watch (default)");
+                WriteListCommand("koware list update \"<title>\" --status <status>", "Change status");
+                WriteListCommand("koware list remove \"<title>\"", "Remove from list");
+                WriteListCommand("koware list stats", "Show counts by status");
+                Console.WriteLine();
+                WriteColoredLine("Options:", ConsoleColor.Yellow);
+                WriteListOption("--status <status>", "watching, completed, plan, hold, dropped");
+                WriteListOption("--episodes <n>", "Set total episode count");
+                WriteListOption("--score <1-10>", "Rate the anime");
+                WriteListOption("--notes \"...\"", "Add personal notes");
+                Console.WriteLine();
+                WriteColoredLine("Examples:", ConsoleColor.Yellow);
+                WriteListExample("koware list add \"Clannad\"");
+                WriteListExample("koware list add \"Demon Slayer\" --status watching --episodes 26");
+                WriteListExample("koware list update \"Clannad\" --status completed --score 10");
+                WriteListExample("koware list --status watching");
+                Console.WriteLine();
+                WriteColoredLine("Auto-tracking:", ConsoleColor.Yellow);
+                Console.WriteLine("  When you watch an episode, it's automatically added as 'Watching'.");
+                Console.WriteLine("  'Plan to Watch' entries transition to 'Watching' when you start.");
+                Console.WriteLine("  When you finish the last episode, it auto-completes.");
+            }
             break;
         default:
             PrintUsage();

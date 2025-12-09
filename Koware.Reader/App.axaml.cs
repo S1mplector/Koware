@@ -112,7 +112,7 @@ public partial class App : Application
 
 public record PageInfo(int PageNumber, string Url);
 
-public record ChapterInfo(int Number, string? Title, bool IsRead);
+public record ChapterInfo(float Number, string? Title, bool IsRead);
 
 public static class ChapterParser
 {
@@ -122,7 +122,15 @@ public static class ChapterParser
         using var doc = JsonDocument.Parse(json);
         foreach (var el in doc.RootElement.EnumerateArray())
         {
-            var num = el.TryGetProperty("number", out var n) ? n.GetInt32() : 0;
+            // Chapter numbers can be floats (e.g., 6.5 for half chapters)
+            float num = 0;
+            if (el.TryGetProperty("number", out var n))
+            {
+                if (n.ValueKind == JsonValueKind.Number)
+                {
+                    num = (float)n.GetDouble();
+                }
+            }
             var title = el.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
             var isRead = el.TryGetProperty("read", out var r) && r.ValueKind == JsonValueKind.True;
             if (num > 0)

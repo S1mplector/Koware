@@ -98,14 +98,32 @@
         
         <!-- Page slider -->
         <Style Selector="Slider#PageSlider">
-            <Setter Property="Height" Value="24" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Margin" Value="0,-4,0,-4" />
+        </Style>
+        <Style Selector="Slider#PageSlider /template/ Track">
+            <Setter Property="Height" Value="6" />
+            <Setter Property="MinHeight" Value="6" />
+        </Style>
+        <Style Selector="Slider#PageSlider /template/ RepeatButton.track">
+            <Setter Property="Height" Value="6" />
         </Style>
         <Style Selector="Slider#PageSlider /template/ Thumb">
-            <Setter Property="Width" Value="16" />
-            <Setter Property="Height" Value="16" />
-            <Setter Property="Background" Value="#38bdf8" />
+            <Setter Property="Width" Value="18" />
+            <Setter Property="Height" Value="18" />
+            <Setter Property="Background" Value="#94a3b8" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Ellipse Width="18" Height="18" Fill="{TemplateBinding Background}" />
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="Slider#PageSlider /template/ Thumb:pointerover">
+            <Setter Property="Background" Value="#38bdf8" />
+        </Style>
+        <Style Selector="Slider#PageSlider /template/ Thumb:pressed">
+            <Setter Property="Background" Value="#0ea5e9" />
         </Style>
         
         <!-- Dropdown menu items -->
@@ -195,16 +213,24 @@
                            TextTrimming="CharacterEllipsis" />
                 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <!-- Chapters button -->
-                    <Button x:Name="ChaptersButton" Classes="toolbar-sm"
+                    <!-- Chapters button - prominent like Windows reader -->
+                    <Button x:Name="ChaptersButton" Classes="toolbar"
                             Click="OnChaptersClick"
-                            ToolTip.Tip="Chapters list">
-                        <StackPanel Orientation="Horizontal" Spacing="4">
-                            <TextBlock Text="Chapters" VerticalAlignment="Center" />
-                            <Viewbox Width="14" Height="14" Stretch="Uniform">
-                                <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                      StrokeThickness="2" Data="M4 6h16M4 12h16M4 18h16" />
+                            ToolTip.Tip="Chapters list (C)"
+                            Background="#1e3a5f"
+                            BorderBrush="#38bdf8">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Viewbox Width="16" Height="16" Stretch="Uniform">
+                                <Canvas Width="24" Height="24">
+                                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="2" Fill="Transparent" Data="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="2" Fill="Transparent" Data="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="1.5" Data="M8 7h8M8 11h8M8 15h5" />
+                                </Canvas>
                             </Viewbox>
+                            <TextBlock Text="Chapters" VerticalAlignment="Center" FontWeight="SemiBold" />
                         </StackPanel>
                     </Button>
                     
@@ -554,6 +580,12 @@
                             </StackPanel>
                         </Border>
                         <Border Classes="shortcut-row alt">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="C" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Open chapters list" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="F / F11" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
                                 <TextBlock Text="Toggle fullscreen" Foreground="#ccc" />
