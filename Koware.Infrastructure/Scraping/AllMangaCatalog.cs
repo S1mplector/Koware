@@ -386,15 +386,18 @@ public sealed class AllMangaCatalog : IMangaCatalog
     private async Task<HttpResponseMessage> SendWithRetryAsync(Uri uri, CancellationToken cancellationToken)
     {
         const int maxAttempts = 3;
-        const int perAttemptTimeoutSeconds = 6;
+        const int perAttemptTimeoutSeconds = 10;
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             using var request = BuildRequest(uri);
-            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             attemptCts.CancelAfter(TimeSpan.FromSeconds(perAttemptTimeoutSeconds));
             try
             {
                 var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, attemptCts.Token);
+                // Delay CTS disposal to avoid race with timer callback
+                _ = Task.Delay(100).ContinueWith(_ => attemptCts.Dispose());
+                
                 if (response.IsSuccessStatusCode || attempt == maxAttempts)
                 {
                     return response;
@@ -404,10 +407,12 @@ public sealed class AllMangaCatalog : IMangaCatalog
             }
             catch (HttpRequestException ex) when (attempt < maxAttempts)
             {
+                _ = Task.Delay(100).ContinueWith(_ => attemptCts.Dispose());
                 _logger.LogDebug(ex, "Request to {Uri} failed on attempt {Attempt}/{MaxAttempts}. Retrying...", uri, attempt, maxAttempts);
             }
-            catch (OperationCanceledException) when (attemptCts.IsCancellationRequested && attempt < maxAttempts)
+            catch (OperationCanceledException) when (attemptCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested && attempt < maxAttempts)
             {
+                _ = Task.Delay(100).ContinueWith(_ => attemptCts.Dispose());
                 _logger.LogDebug("Request to {Uri} timed out on attempt {Attempt}/{MaxAttempts}. Retrying...", uri, attempt, maxAttempts);
             }
 

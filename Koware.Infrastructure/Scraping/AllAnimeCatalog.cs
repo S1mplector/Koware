@@ -598,12 +598,22 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         }
         request.Headers.UserAgent.ParseAdd(_options.UserAgent);
 
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(6));
-
-        using var response = await _httpClient.SendAsync(request, timeoutCts.Token);
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadAsStringAsync(timeoutCts.Token);
+        var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
+        HttpResponseMessage? response = null;
+        string body;
+        try
+        {
+            response = await _httpClient.SendAsync(request, timeoutCts.Token);
+            response.EnsureSuccessStatusCode();
+            body = await response.Content.ReadAsStringAsync(cancellationToken);
+        }
+        finally
+        {
+            response?.Dispose();
+            // Delay CTS disposal to avoid race with timer callback
+            _ = Task.Delay(100).ContinueWith(_ => timeoutCts.Dispose());
+        }
         var lines = body.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         IReadOnlyList<SubtitleTrack> subtitleTracks = ExtractSubtitleTracks(lines, m3u8Url);
@@ -772,15 +782,18 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
     private async Task<HttpResponseMessage> SendWithRetryAsync(Uri uri, CancellationToken cancellationToken)
     {
         const int maxAttempts = 3;
-        const int perAttemptTimeoutSeconds = 6;
+        const int perAttemptTimeoutSeconds = 10;
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             using var request = BuildRequest(uri);
-            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             attemptCts.CancelAfter(TimeSpan.FromSeconds(perAttemptTimeoutSeconds));
             try
             {
                 var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, attemptCts.Token);
+                // Delay CTS disposal to avoid race with timer callback
+                _ = Task.Delay(100).ContinueWith(_ => attemptCts.Dispose());
+                
                 if (response.IsSuccessStatusCode || attempt == maxAttempts)
                 {
                     return response;
@@ -790,10 +803,12 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             }
             catch (HttpRequestException ex) when (attempt < maxAttempts)
             {
+                _ = Task.Delay(100).ContinueWith(_ => attemptCts.Dispose());
                 _logger.LogDebug(ex, "Request to {Uri} failed on attempt {Attempt}/{MaxAttempts}. Retrying...", uri, attempt, maxAttempts);
             }
-            catch (OperationCanceledException) when (attemptCts.IsCancellationRequested && attempt < maxAttempts)
+            catch (OperationCanceledException) when (attemptCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested && attempt < maxAttempts)
             {
+                _ = Task.Delay(100).ContinueWith(_ => attemptCts.Dispose());
                 _logger.LogDebug("Request to {Uri} timed out on attempt {Attempt}/{MaxAttempts}. Retrying...", uri, attempt, maxAttempts);
             }
 
