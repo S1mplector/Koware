@@ -57,6 +57,7 @@ public sealed class InteractiveSelector<T>
     private string _searchText = "";
     private int _selectedIndex;
     private int _scrollOffset;
+    private int _lastRenderedLines;  // Track how many lines were rendered
 
     /// <summary>
     /// Create a new interactive selector.
@@ -108,7 +109,29 @@ public sealed class InteractiveSelector<T>
         }
         catch { /* Ignore on non-interactive terminals */ }
 
-        var startLine = System.Console.CursorTop;
+        // Calculate total lines needed and reserve space to prevent scrolling glitches
+        var totalLinesNeeded = _maxVisible + 4 + (_showPreview ? 4 : 0);
+        var currentLine = System.Console.CursorTop;
+        var availableLines = System.Console.WindowHeight - currentLine - 1;
+        
+        // If not enough space, scroll the terminal by printing blank lines
+        if (availableLines < totalLinesNeeded)
+        {
+            var linesToScroll = totalLinesNeeded - availableLines;
+            for (var i = 0; i < linesToScroll; i++)
+            {
+                System.Console.WriteLine();
+            }
+        }
+        
+        // Now set startLine - if we scrolled, we need to account for that
+        var startLine = Math.Max(0, System.Console.CursorTop - (availableLines < totalLinesNeeded ? 0 : 0));
+        if (availableLines < totalLinesNeeded)
+        {
+            startLine = System.Console.WindowHeight - totalLinesNeeded - 1;
+            startLine = Math.Max(0, startLine);
+        }
+        
         var result = SelectionResult<T>.Cancel();
 
         try
@@ -279,7 +302,20 @@ public sealed class InteractiveSelector<T>
 
     private void Render(int startLine)
     {
+        // Use ANSI escape to move cursor and clear properly
+        // First, clear any previously rendered content
+        if (_lastRenderedLines > 0)
+        {
+            // Move to start and clear each line explicitly
+            for (int i = 0; i < _lastRenderedLines; i++)
+            {
+                System.Console.SetCursorPosition(0, startLine + i);
+                System.Console.Write("\x1b[2K"); // ANSI: clear entire line
+            }
+        }
+        
         System.Console.SetCursorPosition(0, startLine);
+        var linesRendered = 0;
 
         // Header with prompt and count
         System.Console.ForegroundColor = Theme.Primary;
@@ -299,8 +335,9 @@ public sealed class InteractiveSelector<T>
             System.Console.ResetColor();
         }
 
-        ClearToEndOfLine();
+        System.Console.Write("\x1b[K"); // ANSI: clear to end of line
         System.Console.WriteLine();
+        linesRendered++;
 
         // Search box
         if (_showSearch)
@@ -312,14 +349,18 @@ public sealed class InteractiveSelector<T>
             System.Console.ForegroundColor = Theme.Primary;
             System.Console.Write("▌");
             System.Console.ResetColor();
-            ClearToEndOfLine();
+            System.Console.Write("\x1b[K");
             System.Console.WriteLine();
+            linesRendered++;
         }
 
         // Separator
         System.Console.ForegroundColor = Theme.Muted;
-        System.Console.WriteLine(new string('─', Math.Min(60, System.Console.WindowWidth - 2)));
+        System.Console.Write(new string('─', Math.Min(60, System.Console.WindowWidth - 2)));
+        System.Console.Write("\x1b[K");
+        System.Console.WriteLine();
         System.Console.ResetColor();
+        linesRendered++;
 
         // Items
         for (var i = 0; i < _maxVisible; i++)
@@ -387,8 +428,9 @@ public sealed class InteractiveSelector<T>
                 System.Console.ResetColor();
             }
 
-            ClearToEndOfLine();
+            System.Console.Write("\x1b[K");
             System.Console.WriteLine();
+            linesRendered++;
         }
 
         // Preview pane
@@ -398,8 +440,11 @@ public sealed class InteractiveSelector<T>
             var preview = _previewFunc(selectedItem);
 
             System.Console.ForegroundColor = Theme.Muted;
-            System.Console.WriteLine(new string('─', Math.Min(60, System.Console.WindowWidth - 2)));
+            System.Console.Write(new string('─', Math.Min(60, System.Console.WindowWidth - 2)));
+            System.Console.Write("\x1b[K");
+            System.Console.WriteLine();
             System.Console.ResetColor();
+            linesRendered++;
 
             if (!string.IsNullOrWhiteSpace(preview))
             {
@@ -411,8 +456,9 @@ public sealed class InteractiveSelector<T>
                 var maxPreviewWidth = System.Console.WindowWidth - 6;
                 var lines = WordWrap(preview, maxPreviewWidth).Take(2).ToList();
                 System.Console.Write(lines[0]);
-                ClearToEndOfLine();
+                System.Console.Write("\x1b[K");
                 System.Console.WriteLine();
+                linesRendered++;
 
                 if (lines.Count > 1)
                 {
@@ -424,15 +470,18 @@ public sealed class InteractiveSelector<T>
                         System.Console.Write("...");
                     }
                 }
-                ClearToEndOfLine();
+                System.Console.Write("\x1b[K");
                 System.Console.WriteLine();
+                linesRendered++;
             }
             else
             {
-                ClearToEndOfLine();
+                System.Console.Write("\x1b[K");
                 System.Console.WriteLine();
-                ClearToEndOfLine();
+                linesRendered++;
+                System.Console.Write("\x1b[K");
                 System.Console.WriteLine();
+                linesRendered++;
             }
 
             System.Console.ResetColor();
@@ -450,7 +499,10 @@ public sealed class InteractiveSelector<T>
             System.Console.Write(" • Type to search");
         }
         System.Console.ResetColor();
-        ClearToEndOfLine();
+        System.Console.Write("\x1b[K");
+        linesRendered++;
+        
+        _lastRenderedLines = linesRendered;
     }
 
     private static string GetStatusIcon(ItemStatus status) => status switch
