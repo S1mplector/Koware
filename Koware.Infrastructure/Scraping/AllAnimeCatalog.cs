@@ -102,20 +102,8 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             _ => "ALL"
         };
         
-        // Map sort order
-        var sortBy = filters.Sort switch
-        {
-            SearchSort.Popularity => "popularity_desc",
-            SearchSort.Score => "score_desc",
-            SearchSort.Recent => "recent",
-            SearchSort.Title => "name_asc",
-            _ => (string?)null
-        };
-        
-        if (sortBy != null)
-        {
-            searchInput["sortBy"] = sortBy;
-        }
+        // Note: AllAnime API does not support sortBy in SearchInput for shows.
+        // The API returns popular content by default when no query is provided.
 
         var variables = new
         {

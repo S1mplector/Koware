@@ -100,20 +100,8 @@ public sealed class AllMangaCatalog : IMangaCatalog
             _ => "ALL"
         };
         
-        // Map sort order
-        var sortBy = filters.Sort switch
-        {
-            SearchSort.Popularity => "popularity_desc",
-            SearchSort.Score => "score_desc",
-            SearchSort.Recent => "recent",
-            SearchSort.Title => "name_asc",
-            _ => (string?)null
-        };
-        
-        if (sortBy != null)
-        {
-            searchInput["sortBy"] = sortBy;
-        }
+        // Note: AllManga API does not support sortBy in SearchInput for mangas.
+        // The API returns popular content by default when no query is provided.
         
         var variables = new
         {
