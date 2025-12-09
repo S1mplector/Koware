@@ -28,7 +28,7 @@ Users of Koware are solely responsible for:
 
 If you are a copyright holder or authorized agent and believe that any code within this repository (not user-configured content) infringes on your copyrights, please contact:
 
-**Email:** [Your contact email]
+**Email:** megmetogluilgaz07@gmail.com
 
 Your notice must include:
 
