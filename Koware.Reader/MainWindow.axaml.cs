@@ -1,5 +1,6 @@
 // Author: Ilgaz Mehmetoğlu
 // Main window for the cross-platform Koware manga reader.
+// Rewritten to match Windows WebView reader behavior.
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -13,9 +14,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia.Controls.Primitives.PopupPositioning;
 
 namespace Koware.Reader;
 
@@ -27,19 +28,25 @@ public partial class MainWindow : Window
     private readonly Dictionary<int, Border> _pagePlaceholders = new();
     private CancellationTokenSource? _loadCts;
     
+    // State
     private bool _isFullscreen;
     private WindowState _previousWindowState;
     private int _currentPage = 1;
     private FitMode _fitMode = FitMode.FitWidth;
-    private double _zoomLevel = 1.0;
+    private int _zoomLevel = 100; // 100, 125, 150, 175, 200
     private bool _showHelp;
     private bool _isScrollTracking = true;
+    private bool _singlePageMode; // true = page-by-page, false = scroll mode
+    private bool _rtlMode;
     private bool _doublePageMode;
     private DateTime _lastScrollTime = DateTime.MinValue;
     private bool _autoHideUi;
     private readonly DispatcherTimer _uiHideTimer;
+    private readonly DispatcherTimer _toastTimer;
     private int _loadedCount;
     private float _currentChapterNumber;
+    private string _currentTheme = "dark";
+    private bool _chaptersOpen;
 
     public List<PageInfo> Pages { get; set; } = new();
     public List<ChapterInfo> Chapters { get; set; } = new();
@@ -61,6 +68,13 @@ public partial class MainWindow : Window
         Previous,
         Next
     }
+
+    // Preference storage paths
+    private static string PrefsPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "Koware", "reader-prefs.json");
+    
+    private string PositionKey => $"koware.reader.pos.{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Title ?? ""))[..Math.Min(32, (Title ?? "").Length)]}";
 
     public MainWindow()
     {
@@ -86,7 +100,14 @@ public partial class MainWindow : Window
         };
         _uiHideTimer.Tick += (_, _) => SetUiVisibility(false);
         PointerMoved += (_, _) => ResetUiHideTimer();
-        KeyDown += (_, _) => ResetUiHideTimer();
+        
+        // Toast timer
+        _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
+        _toastTimer.Tick += (_, _) =>
+        {
+            _toastTimer.Stop();
+            PageToast.IsVisible = false;
+        };
     }
     
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
@@ -121,25 +142,125 @@ public partial class MainWindow : Window
         }
 
         TitleText.Text = Title;
-        ChapterLabel.Text = Title;
-        ChapterNameLabel.Text = Title;
         _currentChapterNumber = Chapters.FirstOrDefault(c => !c.IsRead)?.Number
                                  ?? Chapters.LastOrDefault()?.Number
                                  ?? 0;
-        if (_currentChapterNumber > 0)
-        {
-            ChapterLabel.Text = $"Chapter {_currentChapterNumber}";
-            ChapterNameLabel.Text = $"Chapter {_currentChapterNumber}";
-        }
+        
         PageSlider.Maximum = Pages.Count;
         PageSlider.Value = 1;
         UpdatePageIndicator();
-        UpdateProgressLabel();
-        ThemeSelector.SelectedIndex = 0;
+        
+        // Load saved preferences
+        LoadPrefs();
+        
+        // Setup chapter navigation
+        InitChapters();
+        
+        // Restore position if saved
+        RestorePosition();
 
         // Start loading pages
         _loadCts = new CancellationTokenSource();
         _ = LoadAllPagesAsync(_loadCts.Token);
+    }
+    
+    private void InitChapters()
+    {
+        if (Chapters.Count == 0)
+        {
+            ChaptersButton.IsVisible = false;
+            PrevChapterButton.IsVisible = false;
+            NextChapterButton.IsVisible = false;
+            return;
+        }
+        
+        // Build chapters list
+        ChaptersList.Children.Clear();
+        var currentIdx = GetCurrentChapterIndex();
+        
+        foreach (var (ch, idx) in Chapters.OrderBy(c => c.Number).Select((c, i) => (c, i)))
+        {
+            var isCurrent = idx == currentIdx;
+            var item = new Border
+            {
+                Classes = { "chapter-item" },
+                Cursor = new Cursor(StandardCursorType.Hand),
+                Tag = idx
+            };
+            if (isCurrent) item.Classes.Add("current");
+            if (ch.IsRead) item.Opacity = 0.6;
+            
+            var row = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 10 };
+            row.Children.Add(new TextBlock 
+            { 
+                Text = $"Ch. {ch.Number}", 
+                FontWeight = FontWeight.Bold, 
+                FontSize = 13, 
+                MinWidth = 50,
+                Foreground = new SolidColorBrush(Color.Parse("#38bdf8"))
+            });
+            row.Children.Add(new TextBlock 
+            { 
+                Text = string.IsNullOrWhiteSpace(ch.Title) ? $"Chapter {ch.Number}" : ch.Title,
+                FontSize = 13,
+                Foreground = new SolidColorBrush(Color.Parse("#e2e8f0")),
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+            if (ch.IsRead)
+            {
+                row.Children.Add(new Border
+                {
+                    Background = new SolidColorBrush(Color.Parse("#1e3a5f")),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(6, 2),
+                    Child = new TextBlock 
+                    { 
+                        Text = "Read", 
+                        FontSize = 10, 
+                        Foreground = new SolidColorBrush(Color.Parse("#38bdf8"))
+                    }
+                });
+            }
+            
+            item.Child = row;
+            item.PointerPressed += (s, _) =>
+            {
+                if (s is Border b && b.Tag is int targetIdx)
+                {
+                    NavigateToChapter(targetIdx);
+                }
+            };
+            ChaptersList.Children.Add(item);
+        }
+        
+        UpdateChapterNavButtons();
+    }
+    
+    private int GetCurrentChapterIndex()
+    {
+        var idx = Chapters.Select((c, i) => (c, i)).FirstOrDefault(x => Math.Abs(x.c.Number - _currentChapterNumber) < 0.001f).i;
+        return idx >= 0 ? idx : 0;
+    }
+    
+    private void UpdateChapterNavButtons()
+    {
+        var idx = GetCurrentChapterIndex();
+        PrevChapterButton.IsEnabled = idx > 0;
+        NextChapterButton.IsEnabled = idx < Chapters.Count - 1;
+    }
+    
+    private void NavigateToChapter(int targetIdx)
+    {
+        var currentIdx = GetCurrentChapterIndex();
+        if (targetIdx == currentIdx)
+        {
+            ToggleChaptersPanel(false);
+            return;
+        }
+        
+        ChapterNavigation = targetIdx > currentIdx ? ChapterNavigationRequest.Next : ChapterNavigationRequest.Previous;
+        WriteNavigationResult();
+        Close();
     }
 
     private async Task LoadAllPagesAsync(CancellationToken cancellationToken)
@@ -201,13 +322,10 @@ public partial class MainWindow : Window
                         _loadedCount++;
                         LoadingProgress.Text = $"{_loadedCount} / {totalPages}";
                         LoadingProgressBar.Value = (_loadedCount * 100.0) / totalPages;
-                        PrefetchDot.IsVisible = _loadedCount < totalPages;
-                        UpdateProgressLabel();
 
                         if (_loadedCount >= totalPages)
                         {
                             LoadingOverlay.IsVisible = false;
-                            PrefetchDot.IsVisible = false;
                         }
                     });
                 }
@@ -315,20 +433,21 @@ public partial class MainWindow : Window
 
         var containerWidth = ScrollViewer.Bounds.Width - 40; // Padding
         var containerHeight = ScrollViewer.Bounds.Height - 40;
+        var scale = _zoomLevel / 100.0;
 
         switch (_fitMode)
         {
             case FitMode.FitWidth:
-                image.Width = containerWidth * _zoomLevel;
+                image.Width = Math.Min(containerWidth, 900) * scale;
                 image.Height = double.NaN;
                 break;
             case FitMode.FitHeight:
                 image.Width = double.NaN;
-                image.Height = containerHeight * _zoomLevel;
+                image.Height = containerHeight * scale;
                 break;
             case FitMode.Original:
-                image.Width = bitmap.PixelSize.Width * _zoomLevel;
-                image.Height = bitmap.PixelSize.Height * _zoomLevel;
+                image.Width = bitmap.PixelSize.Width * scale;
+                image.Height = bitmap.PixelSize.Height * scale;
                 break;
         }
     }
@@ -344,16 +463,6 @@ public partial class MainWindow : Window
     private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
     {
         ApplyFitModeToAll();
-    }
-
-    private void OnFitModeClick(object? sender, RoutedEventArgs e)
-    {
-        CycleFitMode();
-    }
-
-    private void OnFullscreenClick(object? sender, RoutedEventArgs e)
-    {
-        ToggleFullscreen();
     }
 
     private void ToggleFullscreen()
@@ -373,12 +482,21 @@ public partial class MainWindow : Window
 
     private void OnPreviousClick(object? sender, RoutedEventArgs e)
     {
-        NavigateToPage(_currentPage - 1);
+        var step = _doublePageMode ? 2 : 1;
+        var delta = _rtlMode ? step : -step;
+        NavigateToPage(_currentPage + delta);
     }
 
     private void OnNextClick(object? sender, RoutedEventArgs e)
     {
-        NavigateToPage(_currentPage + 1);
+        var step = _doublePageMode ? 2 : 1;
+        var delta = _rtlMode ? -step : step;
+        NavigateToPage(_currentPage + delta);
+    }
+    
+    private void OnFullscreenClick(object? sender, RoutedEventArgs e)
+    {
+        ToggleFullscreen();
     }
 
     private void OnPageSliderChanged(object? sender, RangeBaseValueChangedEventArgs e)
@@ -386,11 +504,11 @@ public partial class MainWindow : Window
         var page = (int)e.NewValue;
         if (page != _currentPage)
         {
-            NavigateToPage(page, updateSlider: false);
+            NavigateToPage(page, updateSlider: false, showToast: true);
         }
     }
 
-    private void NavigateToPage(int page, bool updateSlider = true)
+    private void NavigateToPage(int page, bool updateSlider = true, bool showToast = false)
     {
         if (page < 1 || page > Pages.Count) return;
         
@@ -402,51 +520,65 @@ public partial class MainWindow : Window
         }
         
         UpdatePageIndicator();
-        UpdateProgressLabel();
+        UpdateNavButtons();
+        
+        if (showToast)
+        {
+            ShowToast($"{page} / {Pages.Count}");
+        }
         
         // Scroll to page
-        if (page - 1 < _pageImages.Count)
+        if (!_singlePageMode && page - 1 < _pageImages.Count)
         {
             var target = _pageImages[page - 1];
             target.BringIntoView();
         }
+        
+        // Save position periodically
+        SavePosition();
     }
 
     private void UpdatePageIndicator()
     {
-        PageIndicator.Text = $"Page {_currentPage} / {Pages.Count}";
+        PageIndicator.Text = $"{_currentPage} / {Pages.Count}";
     }
-
-    private void UpdateProgressLabel()
+    
+    private void ShowToast(string text)
     {
-        var percent = (int)Math.Round((_currentPage / (double)Math.Max(1, Pages.Count)) * 100);
-        ProgressLabel.Text = $"{percent}%";
+        PageToastText.Text = text;
+        PageToast.IsVisible = true;
+        _toastTimer.Stop();
+        _toastTimer.Start();
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
+        // RTL-aware navigation
+        var navRight = _rtlMode ? -1 : 1;
+        var navLeft = _rtlMode ? 1 : -1;
+        var step = _doublePageMode ? 2 : 1;
+        
         switch (e.Key)
         {
             case Key.Left:
-            case Key.PageUp:
-                NavigateToPage(_currentPage - 1);
+            case Key.A:
+                NavigateToPage(_currentPage + (navLeft * step), showToast: true);
                 e.Handled = true;
                 break;
                 
             case Key.Right:
-            case Key.PageDown:
-            case Key.Space:
-                NavigateToPage(_currentPage + 1);
+            case Key.D:
+                NavigateToPage(_currentPage + (navRight * step), showToast: true);
                 e.Handled = true;
                 break;
                 
             case Key.Home:
-                NavigateToPage(1);
+                NavigateToPage(1, showToast: true);
                 e.Handled = true;
                 break;
                 
             case Key.End:
-                NavigateToPage(Pages.Count);
+                NavigateToPage(Pages.Count, showToast: true);
                 e.Handled = true;
                 break;
                 
@@ -457,7 +589,11 @@ public partial class MainWindow : Window
                 break;
                 
             case Key.Escape:
-                if (_showHelp)
+                if (_chaptersOpen)
+                {
+                    ToggleChaptersPanel(false);
+                }
+                else if (_showHelp)
                 {
                     ToggleHelp();
                 }
@@ -492,7 +628,7 @@ public partial class MainWindow : Window
                 
             case Key.D0:
             case Key.NumPad0:
-                ResetZoom();
+                SetZoom(100);
                 e.Handled = true;
                 break;
                 
@@ -509,19 +645,17 @@ public partial class MainWindow : Window
                 e.Handled = true;
                 break;
                 
-            // Double-page mode
-            case Key.D:
-                ToggleDoublePageMode();
+            // RTL mode
+            case Key.R:
+                ToggleRtl();
                 e.Handled = true;
                 break;
                 
-            // Jump to specific page (number keys 1-9)
-            case Key.D1: NavigateToPage(1); e.Handled = true; break;
-            case Key.D2: NavigateToPage(Math.Max(1, Pages.Count / 4)); e.Handled = true; break;
-            case Key.D3: NavigateToPage(Math.Max(1, Pages.Count / 3)); e.Handled = true; break;
-            case Key.D4: NavigateToPage(Math.Max(1, Pages.Count / 2)); e.Handled = true; break;
-            case Key.D5: NavigateToPage(Math.Max(1, (Pages.Count * 2) / 3)); e.Handled = true; break;
-            case Key.D9: NavigateToPage(Pages.Count); e.Handled = true; break;
+            // Double-page mode
+            case Key.P:
+                ToggleDoublePageMode();
+                e.Handled = true;
+                break;
         }
     }
     
@@ -571,26 +705,32 @@ public partial class MainWindow : Window
     
     private void ZoomIn()
     {
-        _zoomLevel = Math.Min(_zoomLevel + 0.1, 3.0);
-        ApplyZoom();
+        var levels = new[] { 100, 125, 150, 175, 200 };
+        var idx = Array.IndexOf(levels, _zoomLevel);
+        if (idx < levels.Length - 1) SetZoom(levels[idx + 1]);
     }
     
     private void ZoomOut()
     {
-        _zoomLevel = Math.Max(_zoomLevel - 0.1, 0.3);
-        ApplyZoom();
+        var levels = new[] { 100, 125, 150, 175, 200 };
+        var idx = Array.IndexOf(levels, _zoomLevel);
+        if (idx > 0) SetZoom(levels[idx - 1]);
     }
     
-    private void ResetZoom()
+    private void SetZoom(int zoom)
     {
-        _zoomLevel = 1.0;
-        ApplyZoom();
-    }
-    
-    private void ApplyZoom()
-    {
-        ZoomIndicator.Text = $"{(int)(_zoomLevel * 100)}%";
+        _zoomLevel = zoom;
+        ZoomText.Text = $"{zoom}%";
         ApplyFitModeToAll();
+        PersistPrefs();
+    }
+    
+    private void OnZoomSelected(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string tag && int.TryParse(tag, out var zoom))
+        {
+            SetZoom(zoom);
+        }
     }
     
     private void CycleFitMode()
@@ -603,15 +743,37 @@ public partial class MainWindow : Window
             _ => FitMode.FitWidth
         };
         
-        FitModeButton.Content = _fitMode switch
+        UpdateFitModeUi();
+        ApplyFitModeToAll();
+        PersistPrefs();
+    }
+    
+    private void UpdateFitModeUi()
+    {
+        FitModeText.Text = _fitMode switch
         {
             FitMode.FitWidth => "Fit Width",
             FitMode.FitHeight => "Fit Height",
             FitMode.Original => "Original",
             _ => "Fit Width"
         };
-        
-        ApplyFitModeToAll();
+    }
+    
+    private void OnFitModeSelected(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string tag)
+        {
+            _fitMode = tag switch
+            {
+                "width" => FitMode.FitWidth,
+                "height" => FitMode.FitHeight,
+                "original" => FitMode.Original,
+                _ => FitMode.FitWidth
+            };
+            UpdateFitModeUi();
+            ApplyFitModeToAll();
+            PersistPrefs();
+        }
     }
     
     private void ToggleHelp()
@@ -620,16 +782,80 @@ public partial class MainWindow : Window
         HelpOverlay.IsVisible = _showHelp;
     }
     
+    private void ToggleRtl()
+    {
+        _rtlMode = !_rtlMode;
+        if (_rtlMode)
+            RtlButton.Classes.Add("active");
+        else
+            RtlButton.Classes.Remove("active");
+        
+        // Update navigation button state
+        UpdateNavButtons();
+        PersistPrefs();
+    }
+    
+    private void OnRtlClick(object? sender, RoutedEventArgs e)
+    {
+        ToggleRtl();
+    }
+    
+    private void UpdateNavButtons()
+    {
+        // In RTL mode, swap the visual meaning of prev/next
+        if (_rtlMode)
+        {
+            PrevPageButton.IsEnabled = _currentPage < Pages.Count;
+            NextPageButton.IsEnabled = _currentPage > 1;
+        }
+        else
+        {
+            PrevPageButton.IsEnabled = _currentPage > 1;
+            NextPageButton.IsEnabled = _currentPage < Pages.Count;
+        }
+    }
+    
     private void ToggleDoublePageMode()
     {
         _doublePageMode = !_doublePageMode;
-        DoublePageButton.Content = _doublePageMode ? "Double" : "Single";
+        DoublePageText.Text = _doublePageMode ? "2-Page" : "1-Page";
+        if (_doublePageMode)
+            DoublePageButton.Classes.Add("active");
+        else
+            DoublePageButton.Classes.Remove("active");
+        
         RebuildPageLayout();
+        PersistPrefs();
     }
     
     private void OnDoublePageClick(object? sender, RoutedEventArgs e)
     {
         ToggleDoublePageMode();
+    }
+    
+    private void ToggleMode()
+    {
+        _singlePageMode = !_singlePageMode;
+        ModeText.Text = _singlePageMode ? "Page" : "Scroll";
+        
+        if (_singlePageMode)
+        {
+            ScrollViewer.Offset = new Vector(0, 0);
+        }
+        else
+        {
+            // Scroll to current page
+            if (_currentPage - 1 < _pageImages.Count)
+            {
+                _pageImages[_currentPage - 1].BringIntoView();
+            }
+        }
+        PersistPrefs();
+    }
+    
+    private void OnModeClick(object? sender, RoutedEventArgs e)
+    {
+        ToggleMode();
     }
     
     private void RebuildPageLayout()
@@ -684,80 +910,51 @@ public partial class MainWindow : Window
     private void OnPrevChapterClick(object? sender, RoutedEventArgs e)
     {
         ChapterNavigation = ChapterNavigationRequest.Previous;
+        WriteNavigationResult();
         Close();
     }
 
     private void OnNextChapterClick(object? sender, RoutedEventArgs e)
     {
         ChapterNavigation = ChapterNavigationRequest.Next;
+        WriteNavigationResult();
         Close();
     }
     
-    private void OnZoomInClick(object? sender, RoutedEventArgs e)
+    private void OnThemeSelected(object? sender, RoutedEventArgs e)
     {
-        ZoomIn();
-    }
-    
-    private void OnZoomOutClick(object? sender, RoutedEventArgs e)
-    {
-        ZoomOut();
-    }
-
-    private void OnSettingsClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Control control)
+        if (sender is Button btn && btn.Tag is string tag)
         {
-            FlyoutBase.ShowAttachedFlyout(control);
+            SetTheme(tag);
         }
     }
 
-    private void OnThemeChanged(object? sender, SelectionChangedEventArgs e)
+    private void SetTheme(string theme)
     {
-        var selection = (ThemeSelector.SelectedItem as ComboBoxItem)?.Content?.ToString()?.ToLowerInvariant();
-        switch (selection)
+        _currentTheme = theme;
+        ThemeText.Text = theme switch
         {
-            case "sepia":
-                SetTheme("#f3e7d3", "#1b1307");
-                break;
-            case "light":
-                SetTheme("#f5f7fb", "#111827");
-                break;
-            default:
-                SetTheme("#1a1a2e", "#dfe6ff");
-                break;
-        }
-    }
-
-    private void SetTheme(string backgroundHex, string foregroundHex)
-    {
-        var bg = Color.Parse(backgroundHex);
-        var fg = Color.Parse(foregroundHex);
-
-        ContentWrapper.Background = new SolidColorBrush(bg);
-        ScrollViewer.Background = new SolidColorBrush(bg);
-        TitleText.Foreground = new SolidColorBrush(fg);
-        PageIndicator.Foreground = new SolidColorBrush(fg);
-        ChapterLabel.Foreground = new SolidColorBrush(fg);
-        ChapterNameLabel.Foreground = new SolidColorBrush(fg);
-    }
-
-    private void OnComfortChanged(object? sender, RangeBaseValueChangedEventArgs e)
-    {
-        ComfortOverlay.Opacity = e.NewValue;
-    }
-
-    private void OnAutoHideToggled(object? sender, RoutedEventArgs e)
-    {
-        _autoHideUi = AutoHideToggle.IsChecked == true;
-        if (_autoHideUi)
+            "dark" => "Dark",
+            "sepia" => "Sepia",
+            "light" => "Light",
+            "contrast" => "High Contrast",
+            _ => "Dark"
+        };
+        
+        var (bg, panel, text, imgFilter) = theme switch
         {
-            ResetUiHideTimer();
-        }
-        else
-        {
-            _uiHideTimer.Stop();
-            SetUiVisibility(true);
-        }
+            "sepia" => ("#f4ecd8", "#e8dfc9", "#5c4b37", 0.0),
+            "light" => ("#f8fafc", "#ffffff", "#1e293b", 0.0),
+            "contrast" => ("#000000", "#0a0a0a", "#ffffff", 0.0),
+            _ => ("#0f172a", "#0f172a", "#e2e8f0", 0.0) // dark
+        };
+
+        ContentWrapper.Background = new SolidColorBrush(Color.Parse(bg));
+        ScrollViewer.Background = new SolidColorBrush(Color.Parse(bg));
+        TitleText.Foreground = new SolidColorBrush(Color.Parse(text));
+        PageIndicator.Foreground = new SolidColorBrush(Color.Parse(text));
+        
+        PersistPrefs();
     }
 
     private void ResetUiHideTimer()
@@ -778,74 +975,24 @@ public partial class MainWindow : Window
 
     private void OnChaptersClick(object? sender, RoutedEventArgs e)
     {
-        if (Chapters.Count == 0)
-        {
-            var toast = new Window
-            {
-                Width = 300,
-                Height = 120,
-                Background = Brushes.Black,
-                Opacity = 0.8,
-                CanResize = false,
-                ShowInTaskbar = false,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Content = new TextBlock
-                {
-                    Text = "No chapter list provided.",
-                    Foreground = Brushes.White,
-                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
-                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
-                }
-            };
-            toast.ShowDialog(this);
-            return;
-        }
-
-        var overlay = new Window
-        {
-            Title = "Chapters",
-            Width = 380,
-            Height = 500,
-            Background = new SolidColorBrush(Color.Parse("#111527")),
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            ShowInTaskbar = false
-        };
-
-        var list = new StackPanel { Margin = new Thickness(12), Spacing = 8 };
-        foreach (var ch in Chapters.OrderBy(c => c.Number))
-        {
-            var row = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8 };
-            var badge = new Border
-            {
-                Background = ch.IsRead ? Brushes.Green : Brushes.Gray,
-                Width = 10,
-                Height = 10,
-                CornerRadius = new CornerRadius(5),
-                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
-            };
-            row.Children.Add(badge);
-            row.Children.Add(new TextBlock
-            {
-                Text = $"Ch {ch.Number}",
-                Foreground = Brushes.White,
-                Width = 70
-            });
-            row.Children.Add(new TextBlock
-            {
-                Text = string.IsNullOrWhiteSpace(ch.Title) ? "Untitled" : ch.Title,
-                Foreground = Brushes.White,
-                TextTrimming = TextTrimming.CharacterEllipsis
-            });
-            if (Math.Abs(ch.Number - _currentChapterNumber) < 0.001f)
-            {
-                row.Background = new SolidColorBrush(Color.Parse("#1f2a48"));
-            }
-            list.Children.Add(row);
-        }
-
-        var scroll = new ScrollViewer { Content = list };
-        overlay.Content = scroll;
-        overlay.ShowDialog(this);
+        ToggleChaptersPanel(true);
+    }
+    
+    private void OnChaptersPanelClose(object? sender, RoutedEventArgs e)
+    {
+        ToggleChaptersPanel(false);
+    }
+    
+    private void OnChaptersOverlayClick(object? sender, PointerPressedEventArgs e)
+    {
+        ToggleChaptersPanel(false);
+    }
+    
+    private void ToggleChaptersPanel(bool open)
+    {
+        _chaptersOpen = open;
+        ChaptersPanel.IsVisible = open;
+        ChaptersOverlay.IsVisible = open;
     }
     private void ShowError(string message)
     {
@@ -861,6 +1008,7 @@ public partial class MainWindow : Window
 
     private void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {
+        SavePosition();
         WriteNavigationResult();
         _loadCts?.Cancel();
         _httpClient.Dispose();
@@ -892,6 +1040,182 @@ public partial class MainWindow : Window
         catch
         {
             // ignore write errors
+        }
+    }
+    
+    // ===== Preference Persistence =====
+    
+    private void LoadPrefs()
+    {
+        try
+        {
+            if (!File.Exists(PrefsPath)) return;
+            var json = File.ReadAllText(PrefsPath);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            
+            if (root.TryGetProperty("fit", out var fit))
+            {
+                _fitMode = fit.GetString() switch
+                {
+                    "width" => FitMode.FitWidth,
+                    "height" => FitMode.FitHeight,
+                    "original" => FitMode.Original,
+                    _ => FitMode.FitWidth
+                };
+                UpdateFitModeUi();
+            }
+            
+            if (root.TryGetProperty("zoom", out var zoom))
+            {
+                _zoomLevel = zoom.GetInt32();
+                ZoomText.Text = $"{_zoomLevel}%";
+            }
+            
+            if (root.TryGetProperty("theme", out var theme))
+            {
+                SetTheme(theme.GetString() ?? "dark");
+            }
+            
+            if (root.TryGetProperty("singlePage", out var sp) && sp.GetBoolean())
+            {
+                _singlePageMode = true;
+                ModeText.Text = "Page";
+            }
+            
+            if (root.TryGetProperty("rtl", out var rtl) && rtl.GetBoolean())
+            {
+                _rtlMode = true;
+                RtlButton.Classes.Add("active");
+            }
+            
+            if (root.TryGetProperty("doublePage", out var dp) && dp.GetBoolean())
+            {
+                _doublePageMode = true;
+                DoublePageText.Text = "2-Page";
+                DoublePageButton.Classes.Add("active");
+            }
+        }
+        catch
+        {
+            // ignore load errors
+        }
+    }
+    
+    private void PersistPrefs()
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(PrefsPath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+            
+            var fitStr = _fitMode switch
+            {
+                FitMode.FitWidth => "width",
+                FitMode.FitHeight => "height",
+                FitMode.Original => "original",
+                _ => "width"
+            };
+            
+            var prefs = new
+            {
+                fit = fitStr,
+                zoom = _zoomLevel,
+                theme = _currentTheme,
+                singlePage = _singlePageMode,
+                rtl = _rtlMode,
+                doublePage = _doublePageMode
+            };
+            
+            File.WriteAllText(PrefsPath, JsonSerializer.Serialize(prefs));
+        }
+        catch
+        {
+            // ignore save errors
+        }
+    }
+    
+    private void SavePosition()
+    {
+        try
+        {
+            var posPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Koware", "reader-positions.json");
+            
+            var dir = Path.GetDirectoryName(posPath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+            
+            Dictionary<string, JsonElement> positions = new();
+            if (File.Exists(posPath))
+            {
+                try
+                {
+                    var existing = File.ReadAllText(posPath);
+                    positions = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(existing) ?? new();
+                }
+                catch { }
+            }
+            
+            var key = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Title ?? ""))[..Math.Min(32, (Title ?? "").Length + 10)];
+            var posData = new
+            {
+                page = _currentPage,
+                total = Pages.Count,
+                savedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            };
+            
+            // Update with new position (as raw JSON)
+            var updatedJson = JsonSerializer.Serialize(posData);
+            using var newDoc = JsonDocument.Parse(updatedJson);
+            positions[key] = newDoc.RootElement.Clone();
+            
+            File.WriteAllText(posPath, JsonSerializer.Serialize(positions));
+        }
+        catch
+        {
+            // ignore save errors
+        }
+    }
+    
+    private void RestorePosition()
+    {
+        try
+        {
+            var posPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Koware", "reader-positions.json");
+            
+            if (!File.Exists(posPath)) return;
+            
+            var json = File.ReadAllText(posPath);
+            using var doc = JsonDocument.Parse(json);
+            
+            var key = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Title ?? ""))[..Math.Min(32, (Title ?? "").Length + 10)];
+            
+            if (doc.RootElement.TryGetProperty(key, out var pos))
+            {
+                var page = pos.GetProperty("page").GetInt32();
+                var total = pos.GetProperty("total").GetInt32();
+                var savedAt = pos.GetProperty("savedAt").GetInt64();
+                
+                // Only restore if saved within last 30 days and same chapter
+                var thirtyDaysMs = 30L * 24 * 60 * 60 * 1000;
+                if (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - savedAt < thirtyDaysMs && total == Pages.Count && page > 1)
+                {
+                    NavigateToPage(page, showToast: true);
+                }
+            }
+        }
+        catch
+        {
+            // ignore restore errors
         }
     }
 }

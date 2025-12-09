@@ -8,53 +8,202 @@
         Width="1280" Height="720"
         MinWidth="640" MinHeight="480"
         WindowStartupLocation="CenterScreen"
-        Background="#1a1a2e"
-        KeyDown="OnKeyDown">
+        Background="#0f172a"
+        KeyDown="OnKeyDown"
+        PointerMoved="OnPointerMoved">
     
-    <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+    <Window.Styles>
+        <!-- Icon buttons -->
+        <Style Selector="Button.icon-btn">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#e2e8f0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="6" />
+            <Setter Property="CornerRadius" Value="6" />
+        </Style>
+        <Style Selector="Button.icon-btn:pointerover">
+            <Setter Property="Background" Value="#1a2438" />
+        </Style>
         
-        <!-- Video View -->
+        <!-- Control buttons -->
+        <Style Selector="Button.ctrl-btn">
+            <Setter Property="Background" Value="#99000000" />
+            <Setter Property="Foreground" Value="#e2e8f0" />
+            <Setter Property="BorderBrush" Value="#3a4a62" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Button.ctrl-btn:pointerover">
+            <Setter Property="Background" Value="#cc000000" />
+        </Style>
+        <Style Selector="Button.ctrl-btn.active">
+            <Setter Property="Background" Value="#4d38bdf8" />
+            <Setter Property="BorderBrush" Value="#8038bdf8" />
+        </Style>
+        
+        <!-- Dropdown items -->
+        <Style Selector="Button.dropdown-item">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#e2e8f0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+        <Style Selector="Button.dropdown-item:pointerover">
+            <Setter Property="Background" Value="#1a2438" />
+        </Style>
+        <Style Selector="Button.dropdown-item.active">
+            <Setter Property="Background" Value="#1e3a5f" />
+            <Setter Property="Foreground" Value="#38bdf8" />
+        </Style>
+    </Window.Styles>
+    
+    <Grid x:Name="MainGrid">
+        <!-- Video View (full window) -->
         <vlc:VideoView x:Name="VideoView" 
-                       Grid.Row="0"
                        MediaPlayer="{Binding MediaPlayer}"
-                       DoubleTapped="OnVideoDoubleTapped" />
+                       DoubleTapped="OnVideoDoubleTapped"
+                       PointerPressed="OnVideoClicked" />
+        
+        <!-- Header (title bar, auto-hide in fullscreen) -->
+        <Border x:Name="HeaderBar"
+                VerticalAlignment="Top"
+                Background="Linear, 0%, 0%, 0%, 100%, #b3000000, Transparent"
+                Padding="16,12"
+                IsHitTestVisible="True">
+            <TextBlock x:Name="TitleText"
+                       Text="Koware Player"
+                       FontSize="14"
+                       FontWeight="Bold"
+                       Foreground="#e2e8f0" />
+        </Border>
+        
+        <!-- Top controls (CC, Settings) -->
+        <StackPanel x:Name="TopControls"
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    VerticalAlignment="Top"
+                    HorizontalAlignment="Right"
+                    Margin="0,12,12,0">
+            <Button x:Name="CcButton" Classes="ctrl-btn"
+                    Click="OnCcClick"
+                    ToolTip.Tip="Subtitles"
+                    Content="CC" />
+            <Button x:Name="SettingsButton" Classes="ctrl-btn"
+                    ToolTip.Tip="Subtitle settings">
+                <Viewbox Width="18" Height="18" Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Ellipse Width="6" Height="6" Canvas.Left="9" Canvas.Top="9"
+                                 Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                 StrokeThickness="2" />
+                        <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              StrokeThickness="2" Data="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+                    </Canvas>
+                </Viewbox>
+                <Button.Flyout>
+                    <Flyout Placement="BottomEdgeAlignedRight">
+                        <Border Background="#f80f172a" CornerRadius="12" Padding="12" MinWidth="260">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="Subtitles" FontWeight="Bold" FontSize="14" Foreground="#e2e8f0" />
+                                <StackPanel Spacing="4">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="Font size" Foreground="#94a3b8" FontSize="12" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="FontSizeValue" Grid.Column="1" Text="22px" Foreground="#e2e8f0" FontSize="12" />
+                                    </Grid>
+                                    <Slider x:Name="FontSizeSlider" Minimum="14" Maximum="38" Value="22" ValueChanged="OnFontSizeChanged" />
+                                </StackPanel>
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="Font family" Foreground="#94a3b8" FontSize="12" />
+                                    <ComboBox x:Name="FontFamilyCombo" Width="200" SelectedIndex="0" SelectionChanged="OnFontFamilyChanged">
+                                        <ComboBoxItem Content="Segoe UI" />
+                                        <ComboBoxItem Content="Arial" />
+                                        <ComboBoxItem Content="Verdana" />
+                                        <ComboBoxItem Content="Tahoma" />
+                                    </ComboBox>
+                                </StackPanel>
+                                <StackPanel Spacing="4">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="Background opacity" Foreground="#94a3b8" FontSize="12" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="BgOpacityValue" Grid.Column="1" Text="45%" Foreground="#e2e8f0" FontSize="12" />
+                                    </Grid>
+                                    <Slider x:Name="BgOpacitySlider" Minimum="0" Maximum="90" Value="45" ValueChanged="OnBgOpacityChanged" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </Flyout>
+                </Button.Flyout>
+            </Button>
+        </StackPanel>
         
         <!-- Loading Overlay -->
         <Border x:Name="LoadingOverlay" 
-                Grid.Row="0" 
                 Background="#80000000"
                 IsVisible="True">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <TextBlock Text="Loading..." 
-                           Foreground="White" 
-                           FontSize="24"
+                <TextBlock Text="Loading stream..." 
+                           Foreground="#94a3b8" 
+                           FontSize="16"
+                           FontWeight="SemiBold"
                            HorizontalAlignment="Center" />
                 <TextBlock x:Name="StatusText"
                            Text=""
-                           Foreground="#888"
+                           Foreground="#64748b"
                            FontSize="14"
                            HorizontalAlignment="Center"
-                           Margin="0,10,0,0" />
+                           Margin="0,8,0,0" />
             </StackPanel>
         </Border>
         
-        <!-- Controls Panel -->
+        <!-- Skip Indicator (center overlay) -->
+        <Border x:Name="SkipIndicator"
+                Background="#b3000000"
+                CornerRadius="10"
+                Padding="20,12"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                IsVisible="False"
+                IsHitTestVisible="False">
+            <TextBlock x:Name="SkipIndicatorText"
+                       Text="+10s"
+                       Foreground="#e2e8f0"
+                       FontWeight="SemiBold"
+                       FontSize="16" />
+        </Border>
+        
+        <!-- Bottom Controls Panel -->
         <Border x:Name="ControlsPanel"
-                Grid.Row="1"
-                Background="#cc1a1a2e"
-                Padding="16,12">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-                
+                VerticalAlignment="Bottom"
+                Background="Linear, 0%, 0%, 0%, 100%, Transparent, #cc000000"
+                Padding="16,20,16,16"
+                IsHitTestVisible="True">
+            <Grid RowDefinitions="Auto,Auto">
                 <!-- Progress Bar -->
-                <Grid Grid.Row="0" Margin="0,0,0,8">
+                <Grid Grid.Row="0" Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <!-- Buffer bar (behind progress) -->
+                    <Border x:Name="BufferBar"
+                            Background="#33ffffff"
+                            Height="6"
+                            CornerRadius="3"
+                            HorizontalAlignment="Left"
+                            Width="0" />
+                    <!-- Progress slider -->
                     <Slider x:Name="ProgressSlider"
                             Minimum="0" Maximum="100" Value="0"
                             PointerPressed="OnProgressPointerPressed"
@@ -69,117 +218,134 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     
-                    <!-- Previous Episode -->
-                    <Button x:Name="PrevEpisodeButton" 
-                            Grid.Column="0"
-                            Content="|&lt;"
-                            FontSize="14"
-                            FontWeight="Bold"
-                            Width="40" Height="40"
-                            Click="OnPrevEpisodeClick"
-                            Background="Transparent"
-                            Foreground="White"
-                            ToolTip.Tip="Previous Episode" />
-                    
-                    <!-- Rewind 10s -->
-                    <Button x:Name="RewindButton" 
-                            Grid.Column="1"
-                            Content="-10"
-                            FontSize="12"
-                            FontWeight="Bold"
-                            Width="40" Height="40"
-                            Click="OnRewindClick"
-                            Background="Transparent"
-                            Foreground="White"
-                            ToolTip.Tip="Rewind 10 seconds" />
-                    
                     <!-- Play/Pause -->
-                    <Button x:Name="PlayPauseButton" 
-                            Grid.Column="2"
-                            Content="II"
-                            FontSize="16"
-                            FontWeight="Bold"
-                            Width="48" Height="40"
+                    <Button x:Name="PlayPauseButton" Classes="icon-btn"
+                            Grid.Column="0"
                             Click="OnPlayPauseClick"
-                            Background="Transparent"
-                            Foreground="White" />
+                            ToolTip.Tip="Play/Pause (Space)">
+                        <Viewbox Width="20" Height="20" Stretch="Uniform">
+                            <Path x:Name="PlayPauseIcon" Fill="#e2e8f0" Data="M5 3L19 12L5 21Z" />
+                        </Viewbox>
+                    </Button>
                     
-                    <!-- Forward 10s -->
-                    <Button x:Name="ForwardButton" 
-                            Grid.Column="3"
-                            Content="+10"
-                            FontSize="12"
-                            FontWeight="Bold"
-                            Width="40" Height="40"
+                    <!-- Skip back -->
+                    <Button Classes="icon-btn" Grid.Column="1"
+                            Click="OnRewindClick"
+                            ToolTip.Tip="Back 10s (←)">
+                        <Viewbox Width="20" Height="20" Stretch="Uniform">
+                            <Path Stroke="#e2e8f0" StrokeThickness="2" Fill="None"
+                                  Data="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" />
+                        </Viewbox>
+                    </Button>
+                    
+                    <!-- Skip forward -->
+                    <Button Classes="icon-btn" Grid.Column="2"
                             Click="OnForwardClick"
-                            Background="Transparent"
-                            Foreground="White"
-                            ToolTip.Tip="Forward 10 seconds" />
-                    
-                    <!-- Next Episode -->
-                    <Button x:Name="NextEpisodeButton" 
-                            Grid.Column="4"
-                            Content="&gt;|"
-                            FontSize="14"
-                            FontWeight="Bold"
-                            Width="40" Height="40"
-                            Click="OnNextEpisodeClick"
-                            Background="Transparent"
-                            Foreground="White"
-                            ToolTip.Tip="Next Episode" />
-                    
-                    <!-- Time Display -->
-                    <TextBlock x:Name="TimeDisplay"
-                               Grid.Column="5"
-                               Text="00:00 / 00:00"
-                               Foreground="#aaa"
-                               VerticalAlignment="Center"
-                               Margin="12,0,0,0" />
-                    
-                    <!-- Spacer -->
-                    <Panel Grid.Column="7" />
+                            ToolTip.Tip="Forward 10s (→)">
+                        <Viewbox Width="20" Height="20" Stretch="Uniform">
+                            <Path Stroke="#e2e8f0" StrokeThickness="2" Fill="None"
+                                  Data="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z" />
+                        </Viewbox>
+                    </Button>
                     
                     <!-- Volume -->
-                    <StackPanel Grid.Column="8" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Button x:Name="MuteButton"
-                                Content="🔊"
-                                FontSize="16"
-                                Width="40" Height="40"
+                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
+                        <Button x:Name="MuteButton" Classes="icon-btn"
                                 Click="OnMuteClick"
-                                Background="Transparent"
-                                Foreground="White" />
+                                ToolTip.Tip="Mute (M)">
+                            <Viewbox Width="20" Height="20" Stretch="Uniform">
+                                <Path x:Name="VolumeIcon" Fill="#e2e8f0"
+                                      Data="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.06c1.48-.74 2.5-2.26 2.5-4.03zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+                            </Viewbox>
+                        </Button>
                         <Slider x:Name="VolumeSlider"
-                                Width="100"
+                                Width="80"
                                 Minimum="0" Maximum="100" Value="100"
                                 VerticalAlignment="Center"
                                 ValueChanged="OnVolumeChanged" />
                     </StackPanel>
                     
+                    <!-- Time Display -->
+                    <TextBlock x:Name="TimeDisplay"
+                               Grid.Column="4"
+                               Text="0:00 / 0:00"
+                               Foreground="#94a3b8"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               MinWidth="90"
+                               TextAlignment="Center" />
+                    
+                    <!-- Spacer -->
+                    <Panel Grid.Column="5" />
+                    
+                    <!-- Speed dropdown -->
+                    <Button x:Name="SpeedButton" Classes="icon-btn" Grid.Column="6"
+                            ToolTip.Tip="Playback speed">
+                        <TextBlock x:Name="SpeedText" Text="1x" FontSize="12" FontWeight="SemiBold" Foreground="#e2e8f0" />
+                        <Button.Flyout>
+                            <Flyout Placement="Top">
+                                <Border Background="#f80f172a" CornerRadius="10" Padding="6" MinWidth="100">
+                                    <StackPanel Spacing="2">
+                                        <Button Classes="dropdown-item" Tag="0.5" Click="OnSpeedSelected" Content="0.5x" />
+                                        <Button Classes="dropdown-item" Tag="0.75" Click="OnSpeedSelected" Content="0.75x" />
+                                        <Button Classes="dropdown-item active" Tag="1" Click="OnSpeedSelected" Content="1x" />
+                                        <Button Classes="dropdown-item" Tag="1.25" Click="OnSpeedSelected" Content="1.25x" />
+                                        <Button Classes="dropdown-item" Tag="1.5" Click="OnSpeedSelected" Content="1.5x" />
+                                        <Button Classes="dropdown-item" Tag="2" Click="OnSpeedSelected" Content="2x" />
+                                    </StackPanel>
+                                </Border>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+                    
+                    <!-- Previous Episode -->
+                    <Button x:Name="PrevEpisodeButton" Classes="icon-btn" Grid.Column="7"
+                            Click="OnPrevEpisodeClick"
+                            ToolTip.Tip="Previous Episode">
+                        <Viewbox Width="18" Height="18" Stretch="Uniform">
+                            <Canvas Width="24" Height="24">
+                                <Path Stroke="#e2e8f0" StrokeThickness="2.5" Data="M11 17L6 12l5-5" />
+                                <Path Stroke="#e2e8f0" StrokeThickness="2.5" Data="M18 17l-5-5 5-5" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                    
+                    <!-- Next Episode -->
+                    <Button x:Name="NextEpisodeButton" Classes="icon-btn" Grid.Column="8"
+                            Click="OnNextEpisodeClick"
+                            ToolTip.Tip="Next Episode">
+                        <Viewbox Width="18" Height="18" Stretch="Uniform">
+                            <Canvas Width="24" Height="24">
+                                <Path Stroke="#e2e8f0" StrokeThickness="2.5" Data="M13 17l5-5-5-5" />
+                                <Path Stroke="#e2e8f0" StrokeThickness="2.5" Data="M6 17l5-5-5-5" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                    
                     <!-- Fullscreen -->
-                    <Button x:Name="FullscreenButton"
-                            Grid.Column="9"
-                            Content="⛶"
-                            FontSize="18"
-                            Width="48" Height="40"
+                    <Button x:Name="FullscreenButton" Classes="icon-btn" Grid.Column="9"
                             Click="OnFullscreenClick"
-                            Background="Transparent"
-                            Foreground="White"
-                            Margin="8,0,0,0" />
+                            ToolTip.Tip="Fullscreen (F)">
+                        <Viewbox Width="20" Height="20" Stretch="Uniform">
+                            <Path x:Name="FullscreenIcon" Stroke="#e2e8f0" StrokeThickness="2"
+                                  Data="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                        </Viewbox>
+                    </Button>
                 </Grid>
             </Grid>
         </Border>
         
         <!-- Error Overlay -->
         <Border x:Name="ErrorOverlay"
-                Grid.Row="0" Grid.RowSpan="2"
-                Background="#ee1a1a2e"
+                Background="#f00f172a"
                 IsVisible="False">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <TextBlock Text="⚠"
@@ -195,7 +361,11 @@
                 <Button Content="Close"
                         Click="OnCloseClick"
                         Margin="0,24,0,0"
-                        HorizontalAlignment="Center" />
+                        HorizontalAlignment="Center"
+                        Background="#1e293b"
+                        Foreground="#e2e8f0"
+                        Padding="18,10"
+                        CornerRadius="8" />
             </StackPanel>
         </Border>
     </Grid>

@@ -7,54 +7,140 @@
         Width="1000" Height="800"
         MinWidth="600" MinHeight="500"
         WindowStartupLocation="CenterScreen"
-        Background="#1a1a2e"
+        Background="#0f172a"
         KeyDown="OnKeyDown">
     
+    <Window.Resources>
+        <!-- Theme colors as resources for dynamic switching -->
+        <SolidColorBrush x:Key="ReaderBg" Color="#0f172a" />
+        <SolidColorBrush x:Key="ReaderPanel" Color="#0f172a" />
+        <SolidColorBrush x:Key="ReaderBorder" Color="#1e293b" />
+        <SolidColorBrush x:Key="ReaderText" Color="#e2e8f0" />
+        <SolidColorBrush x:Key="ReaderMuted" Color="#94a3b8" />
+        <SolidColorBrush x:Key="ReaderAccent" Color="#38bdf8" />
+    </Window.Resources>
+    
     <Window.Styles>
-        <!-- Toolbar buttons -->
+        <!-- Toolbar buttons matching Windows style -->
         <Style Selector="Button.toolbar">
-            <Setter Property="Background" Value="#2b2b4c" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="BorderBrush" Value="#3c446a" />
+            <Setter Property="Background" Value="#141e32" />
+            <Setter Property="Foreground" Value="#e2e8f0" />
+            <Setter Property="BorderBrush" Value="#2a3a52" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Padding" Value="10,8" />
-            <Setter Property="MinHeight" Value="36" />
-            <Setter Property="MinWidth" Value="36" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
-            <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
         </Style>
         <Style Selector="Button.toolbar:pointerover">
-            <Setter Property="Background" Value="#343a62" />
-            <Setter Property="BorderBrush" Value="#55639a" />
+            <Setter Property="Background" Value="#1e2d45" />
+            <Setter Property="BorderBrush" Value="#3a4a62" />
         </Style>
         <Style Selector="Button.toolbar:pressed">
-            <Setter Property="Background" Value="#2a2f54" />
-            <Setter Property="BorderBrush" Value="#6c7ac0" />
-            <Setter Property="RenderTransform">
-                <ScaleTransform ScaleX="0.98" ScaleY="0.98" />
-            </Setter>
+            <Setter Property="Background" Value="#0f1a2a" />
         </Style>
-        <Style Selector="Button.toolbar:focus-visible">
-            <Setter Property="BorderBrush" Value="#7ec4ff" />
+        <Style Selector="Button.toolbar.active">
+            <Setter Property="Background" Value="#1e3a5f" />
+            <Setter Property="BorderBrush" Value="#38bdf8" />
+            <Setter Property="Foreground" Value="#38bdf8" />
+        </Style>
+        
+        <!-- Small toolbar buttons -->
+        <Style Selector="Button.toolbar-sm">
+            <Setter Property="Background" Value="#141e32" />
+            <Setter Property="Foreground" Value="#e2e8f0" />
+            <Setter Property="BorderBrush" Value="#2a3a52" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="6,5" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Button.toolbar-sm:pointerover">
+            <Setter Property="Background" Value="#1e2d45" />
+        </Style>
+        
+        <!-- Nav buttons -->
+        <Style Selector="Button.nav-btn">
+            <Setter Property="Background" Value="#141e32" />
+            <Setter Property="Foreground" Value="#e2e8f0" />
+            <Setter Property="BorderBrush" Value="#2a3a52" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="MinHeight" Value="36" />
+        </Style>
+        <Style Selector="Button.nav-btn:pointerover">
+            <Setter Property="Background" Value="#1e2d45" />
+        </Style>
+        <Style Selector="Button.nav-btn:disabled">
+            <Setter Property="Opacity" Value="0.4" />
+        </Style>
+        
+        <!-- Chapter nav buttons -->
+        <Style Selector="Button.chapter-nav">
+            <Setter Property="Background" Value="#141e32" />
+            <Setter Property="Foreground" Value="#e2e8f0" />
+            <Setter Property="BorderBrush" Value="#2a3a52" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+        <Style Selector="Button.chapter-nav:disabled">
+            <Setter Property="Opacity" Value="0.3" />
         </Style>
         
         <!-- Page slider -->
         <Style Selector="Slider#PageSlider">
-            <Setter Property="Height" Value="36" />
+            <Setter Property="Height" Value="24" />
         </Style>
         <Style Selector="Slider#PageSlider /template/ Thumb">
-            <Setter Property="Width" Value="34" />
-            <Setter Property="Height" Value="14" />
-            <Setter Property="Background" Value="#6d7ea6" />
-            <Setter Property="BorderBrush" Value="#9acbff" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Height" Value="16" />
+            <Setter Property="Background" Value="#38bdf8" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="8" />
         </Style>
-        <Style Selector="Slider#PageSlider /template/ Thumb:pointerover">
-            <Setter Property="Background" Value="#7ec4ff" />
-            <Setter Property="BorderBrush" Value="#d6e9ff" />
+        
+        <!-- Dropdown menu items -->
+        <Style Selector="Button.dropdown-item">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#e2e8f0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="CornerRadius" Value="5" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style Selector="Button.dropdown-item:pointerover">
+            <Setter Property="Background" Value="#1e2d45" />
+        </Style>
+        <Style Selector="Button.dropdown-item.active">
+            <Setter Property="Background" Value="#1e3a5f" />
+            <Setter Property="Foreground" Value="#38bdf8" />
+        </Style>
+        
+        <!-- Chapter list items -->
+        <Style Selector="Border.chapter-item">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="10,10" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Border.chapter-item:pointerover">
+            <Setter Property="Background" Value="#1a2438" />
+        </Style>
+        <Style Selector="Border.chapter-item.current">
+            <Setter Property="Background" Value="#1e3a5f" />
+            <Setter Property="BorderBrush" Value="#38bdf8" />
+            <Setter Property="BorderThickness" Value="1" />
         </Style>
         
         <!-- Overlays -->
@@ -62,23 +148,20 @@
             <Setter Property="Opacity" Value="1" />
             <Setter Property="Transitions">
                 <Transitions>
-                    <DoubleTransition Property="Opacity" Duration="0:0:0.18" />
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.2" />
                 </Transitions>
             </Setter>
-        </Style>
-        <Style Selector="Border.overlay:not(:visible)">
-            <Setter Property="Opacity" Value="0" />
         </Style>
         
         <!-- Shortcut rows -->
         <Style Selector="Border.shortcut-row">
-            <Setter Property="Background" Value="#12122b" />
+            <Setter Property="Background" Value="#0a1220" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="8,6" />
             <Setter Property="Margin" Value="0,0,0,4" />
         </Style>
         <Style Selector="Border.shortcut-row.alt">
-            <Setter Property="Background" Value="#141437" />
+            <Setter Property="Background" Value="#0f1a2a" />
         </Style>
     </Window.Styles>
     
@@ -91,8 +174,10 @@
         
         <!-- Header -->
         <Border Grid.Row="0" 
-                Background="#0d0d1a"
-                Padding="12,8"
+                Background="#0f172a"
+                BorderBrush="#1e293b"
+                BorderThickness="0,0,0,1"
+                Padding="16,10"
                 x:Name="HeaderBar">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -103,116 +188,149 @@
                 <TextBlock x:Name="TitleText"
                            Grid.Column="0"
                            Text="Koware Reader"
-                           FontSize="17"
+                           FontSize="14"
                            FontWeight="Bold"
-                           Foreground="White"
+                           Foreground="#e2e8f0"
                            VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis" />
                 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <StackPanel Orientation="Vertical" Margin="0,0,16,0">
-                        <TextBlock x:Name="ChapterLabel"
-                                   Text="Chapter"
-                                   Foreground="#a3abc4"
-                                   FontSize="12"
-                                   TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="PageIndicator"
-                                   Text="Page 1 / 1"
-                                   Foreground="#a3abc4"
-                                   FontWeight="SemiBold"
-                                   VerticalAlignment="Center" />
-                    </StackPanel>
-                    
-                    <Button Classes="toolbar"
-                            Content="Chapters"
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <!-- Chapters button -->
+                    <Button x:Name="ChaptersButton" Classes="toolbar-sm"
                             Click="OnChaptersClick"
-                            ToolTip.Tip="Open chapter list" />
-
-                    <Button Classes="toolbar"
-                            Content="Prev Chapter"
-                            Click="OnPrevChapterClick"
-                            ToolTip.Tip="Previous chapter" />
-                    <Button Classes="toolbar"
-                            Content="Next Chapter"
-                            Click="OnNextChapterClick"
-                            ToolTip.Tip="Next chapter" />
-                    
-                    <!-- Zoom Controls -->
-                    <Button Classes="toolbar"
-                            Click="OnZoomOutClick"
-                            ToolTip.Tip="Zoom out (−)"
-                            Padding="0">
-                        <Viewbox Width="16" Height="16" Stretch="Uniform">
-                            <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                  StrokeThickness="2.4"
-                                  StrokeLineCap="Round"
-                                  Data="M5 12h14" />
-                        </Viewbox>
-                    </Button>
-                    <TextBlock x:Name="ZoomIndicator"
-                               Text="100%"
-                               Foreground="#a3abc4"
-                               VerticalAlignment="Center"
-                               Width="45"
-                                TextAlignment="Center" />
-                    <Button Classes="toolbar"
-                            Click="OnZoomInClick"
-                            ToolTip.Tip="Zoom in (+)"
-                            Padding="0">
-                        <Viewbox Width="16" Height="16" Stretch="Uniform">
-                            <Canvas Width="24" Height="24">
+                            ToolTip.Tip="Chapters list">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="Chapters" VerticalAlignment="Center" />
+                            <Viewbox Width="14" Height="14" Stretch="Uniform">
                                 <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                      StrokeThickness="2.4"
-                                      StrokeLineCap="Round"
-                                      Data="M5 12h14" />
-                                <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                      StrokeThickness="2.4"
-                                      StrokeLineCap="Round"
-                                      Data="M12 5v14" />
-                            </Canvas>
-                        </Viewbox>
+                                      StrokeThickness="2" Data="M4 6h16M4 12h16M4 18h16" />
+                            </Viewbox>
+                        </StackPanel>
                     </Button>
                     
-                    <Button x:Name="FitModeButton" Classes="toolbar"
-                            Content="Fit Width"
-                            Click="OnFitModeClick"
-                            ToolTip.Tip="Cycle fit mode (W)" />
+                    <!-- RTL button -->
+                    <Button x:Name="RtlButton" Classes="toolbar-sm"
+                            Click="OnRtlClick"
+                            ToolTip.Tip="Right-to-Left reading (R)">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="RTL" VerticalAlignment="Center" />
+                            <Viewbox Width="14" Height="14" Stretch="Uniform">
+                                <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                      StrokeThickness="2" Data="M17 4H10c-2.76 0-5 2.24-5 5s2.24 5 5 5h1M7 14l-4 4 4 4M17 4v16" />
+                            </Viewbox>
+                        </StackPanel>
+                    </Button>
                     
-                    <Button x:Name="DoublePageButton" Classes="toolbar"
-                            Content="Single"
+                    <!-- Double page button -->
+                    <Button x:Name="DoublePageButton" Classes="toolbar-sm"
                             Click="OnDoublePageClick"
-                            ToolTip.Tip="Toggle double-page view (D)" />
-                    
-                    <Button x:Name="FullscreenButton" Classes="toolbar"
-                            Click="OnFullscreenClick"
-                            Foreground="White"
-                            Padding="0"
-                            ToolTip.Tip="Fullscreen (F)">
-                        <Viewbox Width="16" Height="16" Stretch="Uniform">
-                            <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                  StrokeThickness="2"
-                                  StrokeLineCap="Round"
-                                  Data="M5 9V5h4M5 15v4h4M19 9V5h-4M19 15v4h-4" />
-                        </Viewbox>
+                            ToolTip.Tip="Double page spread (P)">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock x:Name="DoublePageText" Text="1-Page" VerticalAlignment="Center" />
+                            <Viewbox Width="14" Height="14" Stretch="Uniform">
+                                <Canvas Width="24" Height="24">
+                                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="2" Data="M4 19.5A2.5 2.5 0 0 1 6.5 17H12V3H6.5A2.5 2.5 0 0 0 4 5.5v14z" />
+                                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="2" Data="M20 19.5A2.5 2.5 0 0 0 17.5 17H12V3h5.5A2.5 2.5 0 0 1 20 5.5v14z" />
+                                </Canvas>
+                            </Viewbox>
+                        </StackPanel>
                     </Button>
                     
-                    <Button Classes="toolbar"
-                            Content="?"
-                            Click="OnHelpCloseClick"
-                            Foreground="#aaa"
-                            Padding="0"
-                            ToolTip.Tip="Keyboard shortcuts (H)">
-                        <Viewbox Width="16" Height="16" Stretch="Uniform">
-                            <Canvas Width="24" Height="24">
+                    <!-- Fit mode dropdown -->
+                    <Button x:Name="FitModeButton" Classes="toolbar-sm"
+                            ToolTip.Tip="Fit mode (W)">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock x:Name="FitModeText" Text="Fit Width" VerticalAlignment="Center" />
+                            <Viewbox Width="14" Height="14" Stretch="Uniform">
                                 <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                      StrokeThickness="2"
-                                      StrokeLineCap="Round"
-                                      Data="M8 8a4 4 0 1 1 8 0c0 1.38-.86 2.59-2.06 3.26-.43.25-.87.51-1.25.84-.4.36-.64.88-.64 1.42v1.48" />
-                                <Ellipse Width="2" Height="2"
-                                         Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                         Canvas.Left="11" Canvas.Top="18" />
-                            </Canvas>
-                        </Viewbox>
+                                      StrokeThickness="2" Data="M21 12H3M21 12l-4-4m4 4l-4 4M3 12l4-4m-4 4l4 4" />
+                            </Viewbox>
+                        </StackPanel>
+                        <Button.Flyout>
+                            <Flyout Placement="BottomEdgeAlignedRight">
+                                <Border Background="#0f172aF8" CornerRadius="8" Padding="4" MinWidth="120">
+                                    <StackPanel Spacing="2">
+                                        <Button Classes="dropdown-item" Tag="width" Click="OnFitModeSelected" Content="Fit Width" />
+                                        <Button Classes="dropdown-item" Tag="height" Click="OnFitModeSelected" Content="Fit Height" />
+                                        <Button Classes="dropdown-item" Tag="original" Click="OnFitModeSelected" Content="Original Size" />
+                                    </StackPanel>
+                                </Border>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+                    
+                    <!-- Zoom dropdown -->
+                    <Button x:Name="ZoomButton" Classes="toolbar-sm"
+                            ToolTip.Tip="Zoom level">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock x:Name="ZoomText" Text="100%" VerticalAlignment="Center" />
+                            <Viewbox Width="14" Height="14" Stretch="Uniform">
+                                <Canvas Width="24" Height="24">
+                                    <Ellipse Width="16" Height="16" Canvas.Left="3" Canvas.Top="3"
+                                             Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                             StrokeThickness="2" />
+                                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="2" Data="M21 21l-4.35-4.35M11 8v6M8 11h6" />
+                                </Canvas>
+                            </Viewbox>
+                        </StackPanel>
+                        <Button.Flyout>
+                            <Flyout Placement="BottomEdgeAlignedRight">
+                                <Border Background="#0f172aF8" CornerRadius="8" Padding="4" MinWidth="100">
+                                    <StackPanel Spacing="2">
+                                        <Button Classes="dropdown-item" Tag="100" Click="OnZoomSelected" Content="100%" />
+                                        <Button Classes="dropdown-item" Tag="125" Click="OnZoomSelected" Content="125%" />
+                                        <Button Classes="dropdown-item" Tag="150" Click="OnZoomSelected" Content="150%" />
+                                        <Button Classes="dropdown-item" Tag="175" Click="OnZoomSelected" Content="175%" />
+                                        <Button Classes="dropdown-item" Tag="200" Click="OnZoomSelected" Content="200%" />
+                                    </StackPanel>
+                                </Border>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+                    
+                    <!-- Mode button (Scroll/Page) -->
+                    <Button x:Name="ModeButton" Classes="toolbar-sm"
+                            Click="OnModeClick"
+                            ToolTip.Tip="Reading mode (M)">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock x:Name="ModeText" Text="Scroll" VerticalAlignment="Center" />
+                            <Viewbox Width="14" Height="14" Stretch="Uniform">
+                                <Path x:Name="ModeIcon" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                      StrokeThickness="2" Data="M12 3v18M12 3l4 4M12 3L8 7M12 21l4-4M12 21l-4-4" />
+                            </Viewbox>
+                        </StackPanel>
+                    </Button>
+                    
+                    <!-- Theme dropdown -->
+                    <Button x:Name="ThemeButton" Classes="toolbar-sm"
+                            ToolTip.Tip="Theme">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock x:Name="ThemeText" Text="Dark" VerticalAlignment="Center" />
+                            <Viewbox Width="14" Height="14" Stretch="Uniform">
+                                <Canvas Width="24" Height="24">
+                                    <Ellipse Width="10" Height="10" Canvas.Left="7" Canvas.Top="7"
+                                             Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                             StrokeThickness="2" />
+                                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="2" Data="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+                                </Canvas>
+                            </Viewbox>
+                        </StackPanel>
+                        <Button.Flyout>
+                            <Flyout Placement="BottomEdgeAlignedRight">
+                                <Border Background="#0f172aF8" CornerRadius="8" Padding="4" MinWidth="130">
+                                    <StackPanel Spacing="2">
+                                        <Button Classes="dropdown-item" Tag="dark" Click="OnThemeSelected" Content="Dark" />
+                                        <Button Classes="dropdown-item" Tag="sepia" Click="OnThemeSelected" Content="Sepia" />
+                                        <Button Classes="dropdown-item" Tag="light" Click="OnThemeSelected" Content="Light" />
+                                        <Button Classes="dropdown-item" Tag="contrast" Click="OnThemeSelected" Content="High Contrast" />
+                                    </StackPanel>
+                                </Border>
+                            </Flyout>
+                        </Button.Flyout>
                     </Button>
                 </StackPanel>
             </Grid>
@@ -264,8 +382,10 @@
         
         <!-- Footer Navigation -->
         <Border Grid.Row="2"
-                Background="#0d0d1a"
-                Padding="12,10"
+                Background="#0f172a"
+                BorderBrush="#1e293b"
+                BorderThickness="0,1,0,0"
+                Padding="16,8"
                 x:Name="FooterBar">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -274,99 +394,82 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 
+                <!-- Left nav controls -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <Button Content="← Prev"
-                            Click="OnPreviousClick"
-                            Background="#2a2a4a"
-                            Foreground="White"
-                            Padding="12,8"
-                            MinHeight="36"
-                            ToolTip.Tip="Previous page (←)" />
-                    <Button Content="Next →"
-                            Click="OnNextClick"
-                            Background="#2a2a4a"
-                            Foreground="White"
-                            Padding="12,8"
-                            MinHeight="36"
-                            ToolTip.Tip="Next page (→)" />
-                </StackPanel>
-                
-                <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center">
-                    <Slider x:Name="PageSlider"
-                            Minimum="1" Maximum="1" Value="1"
-                            Margin="0,0,0,4"
-                            VerticalAlignment="Center"
-                            ToolTip.Tip="Scrub pages (drag or use ← / →)"
-                            ValueChanged="OnPageSliderChanged" />
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="ProgressLabel"
-                                   Grid.Column="0"
-                                   Text="0%"
-                                   Foreground="#a3abc4"
-                                   Margin="0,0,8,0"/>
-                        <TextBlock x:Name="ChapterNameLabel"
-                                   Grid.Column="1"
-                                   Text="Chapter"
-                                   Foreground="#dfe6ff"
-                                   TextAlignment="Center"
-                                   TextTrimming="CharacterEllipsis"/>
-                        <Ellipse x:Name="PrefetchDot"
-                                 Grid.Column="2"
-                                 Width="10" Height="10"
-                                 Fill="#60a5fa"
-                                 VerticalAlignment="Center"
-                                 IsVisible="False"
-                                 ToolTip.Tip="Prefetching pages..." />
-                    </Grid>
-                </StackPanel>
-                
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <Button x:Name="SettingsButton"
-                            Classes="toolbar"
-                            Click="OnSettingsClick"
-                            ToolTip.Tip="Reader settings">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Viewbox Width="16" Height="16" Stretch="Uniform">
+                    <!-- Previous chapter -->
+                    <Button x:Name="PrevChapterButton" Classes="chapter-nav"
+                            Click="OnPrevChapterClick"
+                            ToolTip.Tip="Previous Chapter"
+                            IsEnabled="False">
+                        <Viewbox Width="14" Height="14" Stretch="Uniform">
+                            <Canvas Width="24" Height="24">
                                 <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                      StrokeThickness="2"
-                                      StrokeLineCap="Round"
-                                      Data="M12 8a4 4 0 1 1-4 4 4 4 0 0 1 4-4Zm0-6 2.3 2 2.7-.7 1.1 2.6 2.7.6-.3 2.8 2 2-2 2 .3 2.8-2.7.6-1.1 2.6-2.7-.7L12 26 9.7 24l-2.7.7-1.1-2.6-2.7-.6.3-2.8-2-2 2-2-.3-2.8 2.7-.6 1.1-2.6 2.7.7Z" />
-                            </Viewbox>
-                            <TextBlock Text="Settings" />
-                        </StackPanel>
-                        <Button.Flyout>
-                            <Flyout Placement="TopEdgeAlignedRight">
-                                <Border Background="#13162b" Padding="12" CornerRadius="8">
-                                    <StackPanel Spacing="10">
-                                        <TextBlock Text="Appearance" Foreground="#dfe6ff" FontWeight="SemiBold"/>
-                                        <ComboBox x:Name="ThemeSelector"
-                                                  Width="180"
-                                                  SelectionChanged="OnThemeChanged">
-                                            <ComboBoxItem Content="Dark" />
-                                            <ComboBoxItem Content="Sepia" />
-                                            <ComboBoxItem Content="Light" />
-                                        </ComboBox>
-                                        <StackPanel Orientation="Vertical" Spacing="4">
-                                            <TextBlock Text="Comfort" Foreground="#a3abc4" />
-                                            <Slider x:Name="ComfortSlider"
-                                                    Minimum="0"
-                                                    Maximum="0.6"
-                                                    SmallChange="0.05"
-                                                    ValueChanged="OnComfortChanged"/>
-                                        </StackPanel>
-                                        <ToggleSwitch x:Name="AutoHideToggle"
-                                                      Content="Hide UI on idle"
-                                                      Checked="OnAutoHideToggled"
-                                                      Unchecked="OnAutoHideToggled"/>
-                                    </StackPanel>
-                                </Border>
-                            </Flyout>
-                        </Button.Flyout>
+                                      StrokeThickness="2.5" Data="M11 17L6 12l5-5" />
+                                <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                      StrokeThickness="2.5" Data="M18 17l-5-5 5-5" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                    <!-- Previous page -->
+                    <Button x:Name="PrevPageButton" Classes="nav-btn"
+                            Click="OnPreviousClick"
+                            ToolTip.Tip="Previous page">
+                        <Viewbox Width="16" Height="16" Stretch="Uniform">
+                            <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  StrokeThickness="2.5" Data="M15 18L9 12l6-6" />
+                        </Viewbox>
+                    </Button>
+                </StackPanel>
+                
+                <!-- Center: slider and page info -->
+                <Grid Grid.Column="1" Margin="12,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    
+                    <TextBlock x:Name="PageIndicator"
+                               Grid.Column="0"
+                               Text="1 / 1"
+                               Foreground="#94a3b8"
+                               FontWeight="SemiBold"
+                               FontSize="12"
+                               VerticalAlignment="Center"
+                               MinWidth="70"
+                               TextAlignment="Center"
+                               Margin="0,0,10,0" />
+                    
+                    <Slider x:Name="PageSlider"
+                            Grid.Column="1"
+                            Minimum="1" Maximum="1" Value="1"
+                            VerticalAlignment="Center"
+                            ValueChanged="OnPageSliderChanged" />
+                </Grid>
+                
+                <!-- Right nav controls -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <!-- Next page -->
+                    <Button x:Name="NextPageButton" Classes="nav-btn"
+                            Click="OnNextClick"
+                            ToolTip.Tip="Next page">
+                        <Viewbox Width="16" Height="16" Stretch="Uniform">
+                            <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  StrokeThickness="2.5" Data="M9 18l6-6-6-6" />
+                        </Viewbox>
+                    </Button>
+                    <!-- Next chapter -->
+                    <Button x:Name="NextChapterButton" Classes="chapter-nav"
+                            Click="OnNextChapterClick"
+                            ToolTip.Tip="Next Chapter"
+                            IsEnabled="False">
+                        <Viewbox Width="14" Height="14" Stretch="Uniform">
+                            <Canvas Width="24" Height="24">
+                                <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                      StrokeThickness="2.5" Data="M13 17l5-5-5-5" />
+                                <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                      StrokeThickness="2.5" Data="M6 17l5-5-5-5" />
+                            </Canvas>
+                        </Viewbox>
                     </Button>
                 </StackPanel>
             </Grid>
@@ -440,11 +543,17 @@
                         </Border>
                         <Border Classes="shortcut-row alt">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="D" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="P" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
                                 <TextBlock Text="Toggle double-page view" Foreground="#ccc" />
                             </StackPanel>
                         </Border>
                         <Border Classes="shortcut-row">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="R" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Toggle RTL (right-to-left)" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row alt">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="F / F11" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
                                 <TextBlock Text="Toggle fullscreen" Foreground="#ccc" />
@@ -522,6 +631,86 @@
                             ToolTip.Tip="Close reader" />
                 </StackPanel>
             </Border>
+        </Border>
+        
+        <!-- Page Toast (center indicator) -->
+        <Border x:Name="PageToast"
+                Grid.RowSpan="3"
+                Background="#cc000000"
+                CornerRadius="10"
+                Padding="24,12"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                IsVisible="False"
+                IsHitTestVisible="False">
+            <TextBlock x:Name="PageToastText"
+                       Text="1 / 1"
+                       Foreground="#e2e8f0"
+                       FontWeight="SemiBold"
+                       FontSize="18" />
+        </Border>
+        
+        <!-- Chapters Panel Overlay (click to close) -->
+        <Border x:Name="ChaptersOverlay"
+                Grid.RowSpan="3"
+                Background="#80000000"
+                IsVisible="False"
+                PointerPressed="OnChaptersOverlayClick">
+            <Border.Transitions>
+                <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.3" />
+                </Transitions>
+            </Border.Transitions>
+        </Border>
+        
+        <!-- Chapters Slide-in Panel -->
+        <Border x:Name="ChaptersPanel"
+                Grid.RowSpan="3"
+                HorizontalAlignment="Right"
+                Width="320"
+                Background="#0f172a"
+                BorderBrush="#1e293b"
+                BorderThickness="1,0,0,0"
+                IsVisible="False">
+            <Border.Transitions>
+                <Transitions>
+                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.3" />
+                </Transitions>
+            </Border.Transitions>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                
+                <!-- Panel header -->
+                <Border Grid.Row="0" 
+                        Padding="16"
+                        BorderBrush="#1e293b"
+                        BorderThickness="0,0,0,1">
+                    <Grid>
+                        <TextBlock Text="Chapters"
+                                   FontSize="16"
+                                   FontWeight="Bold"
+                                   Foreground="#e2e8f0"
+                                   VerticalAlignment="Center" />
+                        <Button HorizontalAlignment="Right"
+                                Background="Transparent"
+                                Foreground="#94a3b8"
+                                Padding="4"
+                                Click="OnChaptersPanelClose">
+                            <TextBlock Text="✕" FontSize="20" />
+                        </Button>
+                    </Grid>
+                </Border>
+                
+                <!-- Chapters list -->
+                <ScrollViewer Grid.Row="1" Padding="8">
+                    <StackPanel x:Name="ChaptersList" Spacing="4">
+                        <!-- Chapters will be added dynamically -->
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
         </Border>
     </Grid>
 </Window>
