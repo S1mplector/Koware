@@ -1559,6 +1559,7 @@ static async Task<int> HandleHistoryAsync(string[] args, IServiceProvider servic
     bool stats = false;
     int? playIndex = null;
     bool playNext = false;
+    bool browse = false;
 
     var idx = 1;
     if (args.Length > 1 && args[1].Equals("search", StringComparison.OrdinalIgnoreCase))
@@ -1623,8 +1624,49 @@ static async Task<int> HandleHistoryAsync(string[] args, IServiceProvider servic
             case "--next":
                 playNext = true;
                 break;
+            case "--browse":
+            case "-b":
+                browse = true;
+                break;
         }
         idx++;
+    }
+
+    // Interactive browse mode
+    if (browse)
+    {
+        var browseQuery = new HistoryQuery(search, after, before, fromEpisode, toEpisode, 50);
+        var browseEntries = await history.QueryAsync(browseQuery, cancellationToken);
+
+        if (browseEntries.Count == 0)
+        {
+            Console.WriteLine("No history matches your filters.");
+            return 0;
+        }
+
+        // Group by anime and get latest entry per anime
+        var grouped = browseEntries
+            .GroupBy(e => e.AnimeTitle)
+            .Select(g => g.OrderByDescending(e => e.WatchedAt).First())
+            .OrderByDescending(e => e.WatchedAt)
+            .ToList();
+
+        var historyItems = grouped.Select(e => new HistoryItem
+        {
+            Title = e.AnimeTitle,
+            LastEpisode = e.EpisodeNumber,
+            TotalEpisodes = null,
+            WatchedAt = e.WatchedAt,
+            Provider = e.Provider,
+            Quality = e.Quality
+        }).ToList();
+
+        var selected = InteractiveBrowser.BrowseHistory(historyItems);
+        if (selected == null) return 0;
+
+        // Find the original entry and replay
+        var selectedEntry = browseEntries.First(e => e.AnimeTitle == selected.Title);
+        return await LaunchFromHistory(selectedEntry, orchestrator, services, history, logger, defaults, selectedEntry.EpisodeNumber + 1, cancellationToken);
     }
 
     if (stats)

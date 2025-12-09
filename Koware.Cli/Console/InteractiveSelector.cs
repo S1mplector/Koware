@@ -22,6 +22,18 @@ public sealed class SelectionResult<T>
 }
 
 /// <summary>
+/// Status indicator for list items (watched, downloaded, etc.)
+/// </summary>
+public enum ItemStatus
+{
+    None,
+    Watched,
+    Downloaded,
+    InProgress,
+    New
+}
+
+/// <summary>
 /// Interactive fuzzy selector with arrow-key navigation, similar to fzf.
 /// </summary>
 /// <typeparam name="T">Type of items to select from.</typeparam>
@@ -29,10 +41,12 @@ public sealed class InteractiveSelector<T>
 {
     private readonly IReadOnlyList<T> _items;
     private readonly Func<T, string> _displayFunc;
-    private readonly Func<T, string>? _secondaryFunc;
+    private readonly Func<T, string>? _previewFunc;
+    private readonly Func<T, ItemStatus>? _statusFunc;
     private readonly string _prompt;
     private readonly int _maxVisible;
     private readonly bool _showSearch;
+    private readonly bool _showPreview;
     private readonly ConsoleColor _highlightColor;
     private readonly ConsoleColor _selectedColor;
     private readonly string _emptyMessage;
@@ -55,10 +69,12 @@ public sealed class InteractiveSelector<T>
     {
         _items = items ?? throw new ArgumentNullException(nameof(items));
         _displayFunc = displayFunc ?? throw new ArgumentNullException(nameof(displayFunc));
-        _secondaryFunc = options?.SecondaryDisplayFunc;
+        _previewFunc = options?.PreviewFunc ?? options?.SecondaryDisplayFunc;
+        _statusFunc = options?.StatusFunc;
         _prompt = options?.Prompt ?? "Select";
-        _maxVisible = Math.Min(options?.MaxVisibleItems ?? 10, Math.Max(3, System.Console.WindowHeight - 5));
+        _maxVisible = Math.Min(options?.MaxVisibleItems ?? 10, Math.Max(3, System.Console.WindowHeight - 8));
         _showSearch = options?.ShowSearch ?? true;
+        _showPreview = options?.ShowPreview ?? (_previewFunc != null);
         _highlightColor = options?.HighlightColor ?? ConsoleColor.Cyan;
         _selectedColor = options?.SelectedColor ?? ConsoleColor.Yellow;
         _emptyMessage = options?.EmptyMessage ?? "No items found";
@@ -160,6 +176,33 @@ public sealed class InteractiveSelector<T>
                             MoveDown();
                         break;
 
+                    // Quick number jump (1-9)
+                    case ConsoleKey.D1:
+                    case ConsoleKey.D2:
+                    case ConsoleKey.D3:
+                    case ConsoleKey.D4:
+                    case ConsoleKey.D5:
+                    case ConsoleKey.D6:
+                    case ConsoleKey.D7:
+                    case ConsoleKey.D8:
+                    case ConsoleKey.D9:
+                        if (key.Modifiers == 0 && string.IsNullOrEmpty(_searchText))
+                        {
+                            var jumpIndex = key.Key - ConsoleKey.D1;
+                            if (jumpIndex < _filtered.Count)
+                            {
+                                var jumpItem = _filtered[jumpIndex];
+                                result = SelectionResult<T>.Success(jumpItem.Item, jumpItem.OriginalIndex);
+                                goto done;
+                            }
+                        }
+                        else if (_showSearch && !char.IsControl(key.KeyChar))
+                        {
+                            _searchText += key.KeyChar;
+                            UpdateFilter();
+                        }
+                        break;
+
                     default:
                         // Add character to search if printable
                         if (_showSearch && !char.IsControl(key.KeyChar))
@@ -177,8 +220,9 @@ public sealed class InteractiveSelector<T>
         }
         finally
         {
-            // Clear the selector UI
-            ClearLines(startLine, _maxVisible + 3);
+            // Clear the selector UI (items + header + search + separator + footer + preview)
+            var totalLines = _maxVisible + 4 + (_showPreview ? 4 : 0);
+            ClearLines(startLine, totalLines);
             try { System.Console.CursorVisible = originalCursorVisible; } catch { }
         }
 
@@ -235,17 +279,24 @@ public sealed class InteractiveSelector<T>
     {
         System.Console.SetCursorPosition(0, startLine);
 
-        // Header with prompt and search
+        // Header with prompt and count
         System.Console.ForegroundColor = _highlightColor;
         System.Console.Write($"❯ {_prompt}");
         System.Console.ResetColor();
 
-        if (_showSearch)
+        System.Console.ForegroundColor = ConsoleColor.White;
+        System.Console.Write($" [{_filtered.Count}/{_items.Count}]");
+        System.Console.ResetColor();
+
+        // Scroll indicator
+        if (_filtered.Count > _maxVisible)
         {
-            System.Console.ForegroundColor = ConsoleColor.White;
-            System.Console.Write($" [{_filtered.Count}/{_items.Count}]");
+            System.Console.ForegroundColor = ConsoleColor.DarkGray;
+            var scrollPct = _filtered.Count > 1 ? (_selectedIndex * 100) / (_filtered.Count - 1) : 0;
+            System.Console.Write($" ↕{scrollPct}%");
             System.Console.ResetColor();
         }
+
         ClearToEndOfLine();
         System.Console.WriteLine();
 
@@ -253,11 +304,11 @@ public sealed class InteractiveSelector<T>
         if (_showSearch)
         {
             System.Console.ForegroundColor = ConsoleColor.DarkGray;
-            System.Console.Write("  Search: ");
+            System.Console.Write("  🔍 ");
             System.Console.ForegroundColor = ConsoleColor.White;
             System.Console.Write(_searchText);
-            System.Console.ForegroundColor = ConsoleColor.DarkGray;
-            System.Console.Write("▌"); // Cursor indicator
+            System.Console.ForegroundColor = ConsoleColor.Cyan;
+            System.Console.Write("▌");
             System.Console.ResetColor();
             ClearToEndOfLine();
             System.Console.WriteLine();
@@ -265,11 +316,10 @@ public sealed class InteractiveSelector<T>
 
         // Separator
         System.Console.ForegroundColor = ConsoleColor.DarkGray;
-        System.Console.WriteLine(new string('─', Math.Min(50, System.Console.WindowWidth - 2)));
+        System.Console.WriteLine(new string('─', Math.Min(60, System.Console.WindowWidth - 2)));
         System.Console.ResetColor();
 
         // Items
-        var visibleCount = Math.Min(_maxVisible, _filtered.Count);
         for (var i = 0; i < _maxVisible; i++)
         {
             var itemIndex = _scrollOffset + i;
@@ -278,25 +328,47 @@ public sealed class InteractiveSelector<T>
                 var (item, originalIndex, _) = _filtered[itemIndex];
                 var isSelected = itemIndex == _selectedIndex;
                 var displayText = _displayFunc(item);
-                var secondary = _secondaryFunc?.Invoke(item);
+                var status = _statusFunc?.Invoke(item) ?? ItemStatus.None;
 
                 // Selection indicator
                 if (isSelected)
                 {
                     System.Console.ForegroundColor = _selectedColor;
-                    System.Console.Write(" ❯ ");
+                    System.Console.Write(" ▶ ");
+                }
+                else
+                {
+                    System.Console.Write("   ");
+                }
+
+                // Quick jump number (1-9)
+                var displayNum = i + 1;
+                if (displayNum <= 9 && string.IsNullOrEmpty(_searchText))
+                {
+                    System.Console.ForegroundColor = ConsoleColor.DarkCyan;
+                    System.Console.Write($"[{displayNum}] ");
                 }
                 else
                 {
                     System.Console.ForegroundColor = ConsoleColor.DarkGray;
-                    System.Console.Write("   ");
+                    System.Console.Write($"{originalIndex + 1,3}. ");
                 }
 
-                // Index number
-                System.Console.ForegroundColor = ConsoleColor.DarkGray;
-                System.Console.Write($"{originalIndex + 1,2}. ");
+                // Status indicator
+                var statusIcon = GetStatusIcon(status);
+                if (!string.IsNullOrEmpty(statusIcon))
+                {
+                    System.Console.Write(statusIcon);
+                    System.Console.Write(" ");
+                }
 
                 // Main text with search highlighting
+                var maxWidth = System.Console.WindowWidth - 16;
+                if (displayText.Length > maxWidth)
+                {
+                    displayText = displayText[..(maxWidth - 3)] + "...";
+                }
+
                 if (isSelected)
                 {
                     System.Console.ForegroundColor = _selectedColor;
@@ -306,22 +378,7 @@ public sealed class InteractiveSelector<T>
                     System.Console.ForegroundColor = ConsoleColor.White;
                 }
 
-                // Truncate if needed
-                var maxWidth = System.Console.WindowWidth - 10;
-                if (displayText.Length > maxWidth)
-                {
-                    displayText = displayText[..(maxWidth - 3)] + "...";
-                }
-
-                WriteHighlighted(displayText, _searchText, isSelected ? _selectedColor : ConsoleColor.Cyan);
-
-                // Secondary text (e.g., synopsis preview)
-                if (!string.IsNullOrWhiteSpace(secondary) && isSelected)
-                {
-                    System.Console.ForegroundColor = ConsoleColor.DarkGray;
-                    var preview = secondary.Length > 40 ? secondary[..40] + "..." : secondary;
-                    System.Console.Write($" - {preview}");
-                }
+                WriteHighlighted(displayText, _searchText, isSelected, _highlightColor);
 
                 System.Console.ResetColor();
             }
@@ -330,18 +387,114 @@ public sealed class InteractiveSelector<T>
             System.Console.WriteLine();
         }
 
+        // Preview pane
+        if (_showPreview && _previewFunc != null && _filtered.Count > 0 && _selectedIndex < _filtered.Count)
+        {
+            var selectedItem = _filtered[_selectedIndex].Item;
+            var preview = _previewFunc(selectedItem);
+
+            System.Console.ForegroundColor = ConsoleColor.DarkGray;
+            System.Console.WriteLine(new string('─', Math.Min(60, System.Console.WindowWidth - 2)));
+            System.Console.ResetColor();
+
+            if (!string.IsNullOrWhiteSpace(preview))
+            {
+                System.Console.ForegroundColor = ConsoleColor.DarkGray;
+                System.Console.Write("  📖 ");
+                System.Console.ForegroundColor = ConsoleColor.Gray;
+
+                // Word-wrap preview text
+                var maxPreviewWidth = System.Console.WindowWidth - 6;
+                var lines = WordWrap(preview, maxPreviewWidth).Take(2).ToList();
+                System.Console.Write(lines[0]);
+                ClearToEndOfLine();
+                System.Console.WriteLine();
+
+                if (lines.Count > 1)
+                {
+                    System.Console.Write("     ");
+                    System.Console.Write(lines[1]);
+                    if (preview.Length > maxPreviewWidth * 2)
+                    {
+                        System.Console.ForegroundColor = ConsoleColor.DarkGray;
+                        System.Console.Write("...");
+                    }
+                }
+                ClearToEndOfLine();
+                System.Console.WriteLine();
+            }
+            else
+            {
+                ClearToEndOfLine();
+                System.Console.WriteLine();
+                ClearToEndOfLine();
+                System.Console.WriteLine();
+            }
+
+            System.Console.ResetColor();
+        }
+
         // Footer with controls
         System.Console.ForegroundColor = ConsoleColor.DarkGray;
-        System.Console.Write("  ↑↓ navigate • Enter select • Esc cancel");
+        System.Console.Write("  ↑↓ move • ");
+        System.Console.ForegroundColor = ConsoleColor.DarkCyan;
+        System.Console.Write("1-9");
+        System.Console.ForegroundColor = ConsoleColor.DarkGray;
+        System.Console.Write(" jump • Enter select • Esc cancel");
         if (_showSearch)
         {
-            System.Console.Write(" • Type to filter");
+            System.Console.Write(" • Type to search");
         }
         System.Console.ResetColor();
         ClearToEndOfLine();
     }
 
-    private void WriteHighlighted(string text, string search, ConsoleColor highlightColor)
+    private static string GetStatusIcon(ItemStatus status) => status switch
+    {
+        ItemStatus.Watched => "✓",
+        ItemStatus.Downloaded => "📥",
+        ItemStatus.InProgress => "▶",
+        ItemStatus.New => "✨",
+        _ => ""
+    };
+
+    private static IEnumerable<string> WordWrap(string text, int maxWidth)
+    {
+        if (string.IsNullOrWhiteSpace(text) || maxWidth <= 0)
+        {
+            yield return "";
+            yield break;
+        }
+
+        text = text.Replace("\n", " ").Replace("\r", "");
+        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var currentLine = new StringBuilder();
+
+        foreach (var word in words)
+        {
+            if (currentLine.Length + word.Length + 1 > maxWidth)
+            {
+                if (currentLine.Length > 0)
+                {
+                    yield return currentLine.ToString();
+                    currentLine.Clear();
+                }
+            }
+
+            if (currentLine.Length > 0)
+            {
+                currentLine.Append(' ');
+            }
+            currentLine.Append(word);
+        }
+
+        if (currentLine.Length > 0)
+        {
+            yield return currentLine.ToString();
+        }
+    }
+
+    private void WriteHighlighted(string text, string search, bool isSelected, ConsoleColor highlightColor)
     {
         if (string.IsNullOrWhiteSpace(search))
         {
@@ -350,7 +503,6 @@ public sealed class InteractiveSelector<T>
         }
 
         var searchLower = search.ToLowerInvariant();
-        var textLower = text.ToLowerInvariant();
         var currentColor = System.Console.ForegroundColor;
         var searchIndex = 0;
 
@@ -359,7 +511,13 @@ public sealed class InteractiveSelector<T>
             var chLower = char.ToLowerInvariant(ch);
             if (searchIndex < searchLower.Length && chLower == searchLower[searchIndex])
             {
+                // Highlight matched characters with underline effect (using brackets)
                 System.Console.ForegroundColor = highlightColor;
+                if (!isSelected)
+                {
+                    // Make matched chars stand out more
+                    System.Console.ForegroundColor = ConsoleColor.Green;
+                }
                 System.Console.Write(ch);
                 System.Console.ForegroundColor = currentColor;
                 searchIndex++;
@@ -470,6 +628,9 @@ public sealed class SelectorOptions<T>
     /// <summary>Whether to show the search/filter box.</summary>
     public bool ShowSearch { get; init; } = true;
 
+    /// <summary>Whether to show the preview pane.</summary>
+    public bool ShowPreview { get; init; } = true;
+
     /// <summary>Color for highlighted/matching text.</summary>
     public ConsoleColor HighlightColor { get; init; } = ConsoleColor.Cyan;
 
@@ -479,8 +640,14 @@ public sealed class SelectorOptions<T>
     /// <summary>Message shown when no items match.</summary>
     public string? EmptyMessage { get; init; }
 
-    /// <summary>Optional function for secondary display text (shown for selected item).</summary>
+    /// <summary>Optional function for secondary display text (legacy, use PreviewFunc).</summary>
     public Func<T, string>? SecondaryDisplayFunc { get; init; }
+
+    /// <summary>Optional function for preview pane content.</summary>
+    public Func<T, string>? PreviewFunc { get; init; }
+
+    /// <summary>Optional function to get item status (watched, downloaded, etc.).</summary>
+    public Func<T, ItemStatus>? StatusFunc { get; init; }
 }
 
 /// <summary>
@@ -577,5 +744,160 @@ public static class InteractiveSelect
         System.Console.WriteLine($"Invalid input. Please enter a number between {min} and {max}.");
         System.Console.ResetColor();
         return null;
+    }
+}
+
+/// <summary>
+/// Episode information for the episode browser.
+/// </summary>
+public sealed class EpisodeItem
+{
+    public int Number { get; init; }
+    public string? Title { get; init; }
+    public bool IsWatched { get; init; }
+    public bool IsDownloaded { get; init; }
+    public string? FilePath { get; init; }
+}
+
+/// <summary>
+/// History entry for the history browser.
+/// </summary>
+public sealed class HistoryItem
+{
+    public string Title { get; init; } = "";
+    public int LastEpisode { get; init; }
+    public int? TotalEpisodes { get; init; }
+    public DateTimeOffset WatchedAt { get; init; }
+    public string? Provider { get; init; }
+    public string? Quality { get; init; }
+}
+
+/// <summary>
+/// Specialized interactive browsers for episodes and history.
+/// </summary>
+public static class InteractiveBrowser
+{
+    /// <summary>
+    /// Show an episode browser with watched/downloaded indicators.
+    /// </summary>
+    /// <param name="episodes">List of episodes.</param>
+    /// <param name="title">Anime/manga title for header.</param>
+    /// <returns>Selected episode number or null if cancelled.</returns>
+    public static int? BrowseEpisodes(IReadOnlyList<EpisodeItem> episodes, string title)
+    {
+        if (episodes.Count == 0) return null;
+
+        var result = InteractiveSelect.Show(
+            episodes,
+            ep => $"Episode {ep.Number}" + (string.IsNullOrWhiteSpace(ep.Title) ? "" : $" - {ep.Title}"),
+            new SelectorOptions<EpisodeItem>
+            {
+                Prompt = $"📺 {title}",
+                MaxVisibleItems = 15,
+                ShowSearch = true,
+                ShowPreview = false,
+                StatusFunc = ep =>
+                {
+                    if (ep.IsDownloaded) return ItemStatus.Downloaded;
+                    if (ep.IsWatched) return ItemStatus.Watched;
+                    return ItemStatus.None;
+                }
+            });
+
+        return result.Cancelled ? null : result.Selected?.Number;
+    }
+
+    /// <summary>
+    /// Show a chapter browser with read/downloaded indicators.
+    /// </summary>
+    /// <param name="chapters">List of chapters (as EpisodeItem with Number as float-compatible int).</param>
+    /// <param name="title">Manga title for header.</param>
+    /// <returns>Selected chapter number or null if cancelled.</returns>
+    public static int? BrowseChapters(IReadOnlyList<EpisodeItem> chapters, string title)
+    {
+        if (chapters.Count == 0) return null;
+
+        var result = InteractiveSelect.Show(
+            chapters,
+            ch => $"Chapter {ch.Number}" + (string.IsNullOrWhiteSpace(ch.Title) ? "" : $" - {ch.Title}"),
+            new SelectorOptions<EpisodeItem>
+            {
+                Prompt = $"📖 {title}",
+                MaxVisibleItems = 15,
+                ShowSearch = true,
+                ShowPreview = false,
+                StatusFunc = ch =>
+                {
+                    if (ch.IsDownloaded) return ItemStatus.Downloaded;
+                    if (ch.IsWatched) return ItemStatus.Watched;
+                    return ItemStatus.None;
+                }
+            });
+
+        return result.Cancelled ? null : result.Selected?.Number;
+    }
+
+    /// <summary>
+    /// Show a history browser with quick replay.
+    /// </summary>
+    /// <param name="history">List of history entries.</param>
+    /// <returns>Selected history entry or null if cancelled.</returns>
+    public static HistoryItem? BrowseHistory(IReadOnlyList<HistoryItem> history)
+    {
+        if (history.Count == 0)
+        {
+            System.Console.ForegroundColor = ConsoleColor.Yellow;
+            System.Console.WriteLine("No watch history found.");
+            System.Console.ResetColor();
+            return null;
+        }
+
+        var result = InteractiveSelect.Show(
+            history,
+            h =>
+            {
+                var progress = h.TotalEpisodes.HasValue
+                    ? $"Ep {h.LastEpisode}/{h.TotalEpisodes}"
+                    : $"Ep {h.LastEpisode}";
+                return $"{h.Title} ({progress})";
+            },
+            new SelectorOptions<HistoryItem>
+            {
+                Prompt = "📜 Watch History",
+                MaxVisibleItems = 12,
+                ShowSearch = true,
+                ShowPreview = true,
+                PreviewFunc = h =>
+                {
+                    var ago = GetTimeAgo(h.WatchedAt);
+                    var details = $"Last watched: {ago}";
+                    if (!string.IsNullOrWhiteSpace(h.Provider))
+                        details += $" • Provider: {h.Provider}";
+                    if (!string.IsNullOrWhiteSpace(h.Quality))
+                        details += $" • Quality: {h.Quality}";
+                    return details;
+                },
+                StatusFunc = h =>
+                {
+                    if (h.TotalEpisodes.HasValue && h.LastEpisode >= h.TotalEpisodes)
+                        return ItemStatus.Watched;
+                    return ItemStatus.InProgress;
+                }
+            });
+
+        return result.Cancelled ? null : result.Selected;
+    }
+
+    private static string GetTimeAgo(DateTimeOffset time)
+    {
+        var span = DateTimeOffset.UtcNow - time;
+
+        if (span.TotalMinutes < 1) return "just now";
+        if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m ago";
+        if (span.TotalHours < 24) return $"{(int)span.TotalHours}h ago";
+        if (span.TotalDays < 7) return $"{(int)span.TotalDays}d ago";
+        if (span.TotalDays < 30) return $"{(int)(span.TotalDays / 7)}w ago";
+        if (span.TotalDays < 365) return $"{(int)(span.TotalDays / 30)}mo ago";
+        return $"{(int)(span.TotalDays / 365)}y ago";
     }
 }
