@@ -37,6 +37,8 @@ public enum ItemStatus
 
 /// <summary>
 /// Interactive fuzzy selector with arrow-key navigation, similar to fzf.
+/// Uses component-based architecture: TerminalBuffer for rendering, 
+/// InputHandler for input, FuzzyMatcher for search, SelectorRenderer for display.
 /// </summary>
 /// <typeparam name="T">Type of items to select from.</typeparam>
 public sealed class InteractiveSelector<T>
@@ -45,26 +47,18 @@ public sealed class InteractiveSelector<T>
     private readonly Func<T, string> _displayFunc;
     private readonly Func<T, string>? _previewFunc;
     private readonly Func<T, ItemStatus>? _statusFunc;
-    private readonly string _prompt;
-    private readonly int _maxVisible;
-    private readonly bool _showSearch;
-    private readonly bool _showPreview;
-    private readonly ConsoleColor _highlightColor;
-    private readonly ConsoleColor _selectedColor;
+    private readonly RenderConfig _renderConfig;
     private readonly string _emptyMessage;
 
+    // State
     private List<(T Item, int OriginalIndex, int Score)> _filtered = new();
     private string _searchText = "";
     private int _selectedIndex;
     private int _scrollOffset;
-    private int _lastRenderedLines;  // Track how many lines were rendered
 
     /// <summary>
     /// Create a new interactive selector.
     /// </summary>
-    /// <param name="items">Items to select from.</param>
-    /// <param name="displayFunc">Function to get display text for an item.</param>
-    /// <param name="options">Optional configuration.</param>
     public InteractiveSelector(
         IReadOnlyList<T> items,
         Func<T, string> displayFunc,
@@ -74,19 +68,28 @@ public sealed class InteractiveSelector<T>
         _displayFunc = displayFunc ?? throw new ArgumentNullException(nameof(displayFunc));
         _previewFunc = options?.PreviewFunc ?? options?.SecondaryDisplayFunc;
         _statusFunc = options?.StatusFunc;
-        _prompt = options?.Prompt ?? "Select";
-        _maxVisible = Math.Min(options?.MaxVisibleItems ?? 10, Math.Max(3, System.Console.WindowHeight - 8));
-        _showSearch = options?.ShowSearch ?? true;
-        _showPreview = options?.ShowPreview ?? (_previewFunc != null);
-        _highlightColor = options?.GetHighlightColor() ?? Theme.Highlight;
-        _selectedColor = options?.GetSelectionColor() ?? Theme.Selection;
         _emptyMessage = options?.EmptyMessage ?? "No items found";
+
+        _renderConfig = new RenderConfig
+        {
+            Prompt = options?.Prompt ?? "Select",
+            MaxVisibleItems = Math.Min(options?.MaxVisibleItems ?? 10, Math.Max(3, GetTerminalHeight() - 8)),
+            ShowSearch = options?.ShowSearch ?? true,
+            ShowPreview = options?.ShowPreview ?? (_previewFunc != null),
+            HighlightColor = options?.GetHighlightColor() ?? Theme.Highlight,
+            SelectionColor = options?.GetSelectionColor() ?? Theme.Selection
+        };
+    }
+
+    private static int GetTerminalHeight()
+    {
+        try { return System.Console.WindowHeight; }
+        catch { return 24; }
     }
 
     /// <summary>
     /// Run the interactive selector and return the selection.
     /// </summary>
-    /// <returns>Selection result with the chosen item or cancellation.</returns>
     public SelectionResult<T> Run()
     {
         if (_items.Count == 0)
@@ -97,95 +100,69 @@ public sealed class InteractiveSelector<T>
             return SelectionResult<T>.Cancel();
         }
 
+        // Initialize components
+        using var buffer = new TerminalBuffer(useAlternateScreen: false);
+        var renderer = new SelectorRenderer(buffer, _renderConfig);
+        var inputHandler = new InputHandler(_renderConfig.ShowSearch);
+
         // Initialize filtered list
         UpdateFilter();
 
-        // Save cursor position and hide cursor
-        var originalCursorVisible = true;
-        try
-        {
-            originalCursorVisible = System.Console.CursorVisible;
-            System.Console.CursorVisible = false;
-        }
-        catch { /* Ignore on non-interactive terminals */ }
+        // Setup terminal and reserve space
+        buffer.Initialize();
+        var totalLinesNeeded = renderer.CalculateTotalLines();
+        var startLine = buffer.ReserveSpace(totalLinesNeeded);
 
-        // Calculate total lines needed and reserve space to prevent scrolling glitches
-        var totalLinesNeeded = _maxVisible + 4 + (_showPreview ? 4 : 0);
-        var currentLine = System.Console.CursorTop;
-        var availableLines = System.Console.WindowHeight - currentLine - 1;
-        
-        // If not enough space, scroll the terminal by printing blank lines
-        if (availableLines < totalLinesNeeded)
-        {
-            var linesToScroll = totalLinesNeeded - availableLines;
-            for (var i = 0; i < linesToScroll; i++)
-            {
-                System.Console.WriteLine();
-            }
-        }
-        
-        // Now set startLine - if we scrolled, we need to account for that
-        var startLine = Math.Max(0, System.Console.CursorTop - (availableLines < totalLinesNeeded ? 0 : 0));
-        if (availableLines < totalLinesNeeded)
-        {
-            startLine = System.Console.WindowHeight - totalLinesNeeded - 1;
-            startLine = Math.Max(0, startLine);
-        }
-        
         var result = SelectionResult<T>.Cancel();
 
         try
         {
-            Render(startLine);
+            RenderFrame(renderer, startLine);
 
             while (true)
             {
-                var key = System.Console.ReadKey(intercept: true);
+                var input = inputHandler.ReadKey(!string.IsNullOrEmpty(_searchText));
 
-                switch (key.Key)
+                switch (input.Action)
                 {
-                    case ConsoleKey.UpArrow:
-                    case ConsoleKey.K when key.Modifiers == ConsoleModifiers.Control:
+                    case InputAction.MoveUp:
                         MoveUp();
                         break;
 
-                    case ConsoleKey.DownArrow:
-                    case ConsoleKey.J when key.Modifiers == ConsoleModifiers.Control:
+                    case InputAction.MoveDown:
                         MoveDown();
                         break;
 
-                    case ConsoleKey.PageUp:
-                        MoveUp(_maxVisible);
+                    case InputAction.PageUp:
+                        MoveUp(_renderConfig.MaxVisibleItems);
                         break;
 
-                    case ConsoleKey.PageDown:
-                        MoveDown(_maxVisible);
+                    case InputAction.PageDown:
+                        MoveDown(_renderConfig.MaxVisibleItems);
                         break;
 
-                    case ConsoleKey.Home:
+                    case InputAction.JumpToStart:
                         _selectedIndex = 0;
                         _scrollOffset = 0;
                         break;
 
-                    case ConsoleKey.End:
+                    case InputAction.JumpToEnd:
                         _selectedIndex = Math.Max(0, _filtered.Count - 1);
-                        _scrollOffset = Math.Max(0, _filtered.Count - _maxVisible);
+                        _scrollOffset = Math.Max(0, _filtered.Count - _renderConfig.MaxVisibleItems);
                         break;
 
-                    case ConsoleKey.Enter:
+                    case InputAction.Select:
                         if (_filtered.Count > 0 && _selectedIndex >= 0 && _selectedIndex < _filtered.Count)
                         {
                             var selected = _filtered[_selectedIndex];
                             result = SelectionResult<T>.Success(selected.Item, selected.OriginalIndex);
                         }
-                        goto done;
+                        return result;
 
-                    case ConsoleKey.Escape:
-                    case ConsoleKey.C when key.Modifiers == ConsoleModifiers.Control:
-                        result = SelectionResult<T>.Cancel();
-                        goto done;
+                    case InputAction.Cancel:
+                        return SelectionResult<T>.Cancel();
 
-                    case ConsoleKey.Backspace:
+                    case InputAction.SearchBackspace:
                         if (_searchText.Length > 0)
                         {
                             _searchText = _searchText[..^1];
@@ -193,65 +170,62 @@ public sealed class InteractiveSelector<T>
                         }
                         break;
 
-                    case ConsoleKey.Tab:
-                        // Tab cycles through matches
-                        if (key.Modifiers == ConsoleModifiers.Shift)
-                            MoveUp();
-                        else
-                            MoveDown();
-                        break;
-
-                    // Quick number jump (1-9)
-                    case ConsoleKey.D1:
-                    case ConsoleKey.D2:
-                    case ConsoleKey.D3:
-                    case ConsoleKey.D4:
-                    case ConsoleKey.D5:
-                    case ConsoleKey.D6:
-                    case ConsoleKey.D7:
-                    case ConsoleKey.D8:
-                    case ConsoleKey.D9:
-                        if (key.Modifiers == 0 && string.IsNullOrEmpty(_searchText))
+                    case InputAction.SearchCharacter:
+                        if (input.Character.HasValue)
                         {
-                            var jumpIndex = key.Key - ConsoleKey.D1;
-                            if (jumpIndex < _filtered.Count)
-                            {
-                                var jumpItem = _filtered[jumpIndex];
-                                result = SelectionResult<T>.Success(jumpItem.Item, jumpItem.OriginalIndex);
-                                goto done;
-                            }
-                        }
-                        else if (_showSearch && !char.IsControl(key.KeyChar))
-                        {
-                            _searchText += key.KeyChar;
+                            _searchText += input.Character.Value;
                             UpdateFilter();
                         }
                         break;
 
-                    default:
-                        // Add character to search if printable
-                        if (_showSearch && !char.IsControl(key.KeyChar))
+                    case InputAction.QuickJump:
+                        if (input.JumpIndex.HasValue && input.JumpIndex.Value < _filtered.Count)
                         {
-                            _searchText += key.KeyChar;
-                            UpdateFilter();
+                            var jumpItem = _filtered[input.JumpIndex.Value];
+                            return SelectionResult<T>.Success(jumpItem.Item, jumpItem.OriginalIndex);
                         }
                         break;
                 }
 
-                Render(startLine);
+                RenderFrame(renderer, startLine);
             }
-
-            done:;
         }
         finally
         {
-            // Clear the selector UI (items + header + search + separator + footer + preview)
-            var totalLines = _maxVisible + 4 + (_showPreview ? 4 : 0);
-            ClearLines(startLine, totalLines);
-            try { System.Console.CursorVisible = originalCursorVisible; } catch { }
+            buffer.ClearArea(startLine, totalLinesNeeded);
+            buffer.Restore();
+        }
+    }
+
+    private void RenderFrame(SelectorRenderer renderer, int startLine)
+    {
+        var renderItems = _filtered
+            .Skip(_scrollOffset)
+            .Take(_renderConfig.MaxVisibleItems)
+            .Select(f => (
+                Display: _displayFunc(f.Item),
+                OriginalIndex: f.OriginalIndex,
+                Status: _statusFunc?.Invoke(f.Item) ?? ItemStatus.None,
+                Preview: _previewFunc?.Invoke(f.Item)
+            ))
+            .ToList();
+
+        // Pad to max visible if we have fewer items
+        while (renderItems.Count < _renderConfig.MaxVisibleItems)
+        {
+            renderItems.Add(("", -1, ItemStatus.None, null));
         }
 
-        return result;
+        var state = new RenderState
+        {
+            Items = renderItems!,
+            TotalCount = _items.Count,
+            SelectedIndex = _selectedIndex - _scrollOffset,
+            ScrollOffset = _scrollOffset,
+            SearchText = _searchText
+        };
+
+        renderer.Render(state, startLine);
     }
 
     private void MoveUp(int count = 1)
@@ -266,28 +240,16 @@ public sealed class InteractiveSelector<T>
     private void MoveDown(int count = 1)
     {
         _selectedIndex = Math.Min(_filtered.Count - 1, _selectedIndex + count);
-        if (_selectedIndex >= _scrollOffset + _maxVisible)
+        if (_selectedIndex >= _scrollOffset + _renderConfig.MaxVisibleItems)
         {
-            _scrollOffset = _selectedIndex - _maxVisible + 1;
+            _scrollOffset = _selectedIndex - _renderConfig.MaxVisibleItems + 1;
         }
     }
 
     private void UpdateFilter()
     {
-        if (string.IsNullOrWhiteSpace(_searchText))
-        {
-            _filtered = _items
-                .Select((item, index) => (item, index, Score: 0))
-                .ToList();
-        }
-        else
-        {
-            _filtered = _items
-                .Select((item, index) => (item, index, Score: FuzzyScore(_displayFunc(item), _searchText)))
-                .Where(x => x.Score > 0)
-                .OrderByDescending(x => x.Score)
-                .ToList();
-        }
+        // Use FuzzyMatcher for filtering
+        _filtered = FuzzyMatcher.Filter(_items, _displayFunc, _searchText).ToList();
 
         // Reset selection if needed
         if (_selectedIndex >= _filtered.Count)
@@ -298,383 +260,6 @@ public sealed class InteractiveSelector<T>
         {
             _scrollOffset = _selectedIndex;
         }
-    }
-
-    private void Render(int startLine)
-    {
-        // Use ANSI escape to move cursor and clear properly
-        // First, clear any previously rendered content
-        if (_lastRenderedLines > 0)
-        {
-            // Move to start and clear each line explicitly
-            for (int i = 0; i < _lastRenderedLines; i++)
-            {
-                System.Console.SetCursorPosition(0, startLine + i);
-                System.Console.Write("\x1b[2K"); // ANSI: clear entire line
-            }
-        }
-        
-        System.Console.SetCursorPosition(0, startLine);
-        var linesRendered = 0;
-
-        // Header with prompt and count
-        System.Console.ForegroundColor = Theme.Primary;
-        System.Console.Write($"❯ {_prompt}");
-        System.Console.ResetColor();
-
-        System.Console.ForegroundColor = Theme.Text;
-        System.Console.Write($" [{_filtered.Count}/{_items.Count}]");
-        System.Console.ResetColor();
-
-        // Scroll indicator
-        if (_filtered.Count > _maxVisible)
-        {
-            System.Console.ForegroundColor = Theme.Muted;
-            var scrollPct = _filtered.Count > 1 ? (_selectedIndex * 100) / (_filtered.Count - 1) : 0;
-            System.Console.Write($" ↕{scrollPct}%");
-            System.Console.ResetColor();
-        }
-
-        System.Console.Write("\x1b[K"); // ANSI: clear to end of line
-        System.Console.WriteLine();
-        linesRendered++;
-
-        // Search box
-        if (_showSearch)
-        {
-            System.Console.ForegroundColor = Theme.Muted;
-            System.Console.Write("  🔍 ");
-            System.Console.ForegroundColor = Theme.Text;
-            System.Console.Write(_searchText);
-            System.Console.ForegroundColor = Theme.Primary;
-            System.Console.Write("▌");
-            System.Console.ResetColor();
-            System.Console.Write("\x1b[K");
-            System.Console.WriteLine();
-            linesRendered++;
-        }
-
-        // Separator
-        System.Console.ForegroundColor = Theme.Muted;
-        System.Console.Write(new string('─', Math.Min(60, System.Console.WindowWidth - 2)));
-        System.Console.Write("\x1b[K");
-        System.Console.WriteLine();
-        System.Console.ResetColor();
-        linesRendered++;
-
-        // Items
-        for (var i = 0; i < _maxVisible; i++)
-        {
-            var itemIndex = _scrollOffset + i;
-            if (itemIndex < _filtered.Count)
-            {
-                var (item, originalIndex, _) = _filtered[itemIndex];
-                var isSelected = itemIndex == _selectedIndex;
-                var displayText = _displayFunc(item);
-                var status = _statusFunc?.Invoke(item) ?? ItemStatus.None;
-
-                // Selection indicator
-                if (isSelected)
-                {
-                    System.Console.ForegroundColor = _selectedColor;
-                    System.Console.Write(" ▶ ");
-                }
-                else
-                {
-                    System.Console.Write("   ");
-                }
-
-                // Quick jump number (1-9)
-                var displayNum = i + 1;
-                if (displayNum <= 9 && string.IsNullOrEmpty(_searchText))
-                {
-                    System.Console.ForegroundColor = Theme.Secondary;
-                    System.Console.Write($"[{displayNum}] ");
-                }
-                else
-                {
-                    System.Console.ForegroundColor = Theme.Muted;
-                    System.Console.Write($"{originalIndex + 1,3}. ");
-                }
-
-                // Status indicator
-                var statusIcon = GetStatusIcon(status);
-                if (!string.IsNullOrEmpty(statusIcon))
-                {
-                    System.Console.ForegroundColor = GetStatusColor(status);
-                    System.Console.Write(statusIcon);
-                    System.Console.ResetColor();
-                    System.Console.Write(" ");
-                }
-
-                // Main text with search highlighting
-                var maxWidth = System.Console.WindowWidth - 16;
-                if (displayText.Length > maxWidth)
-                {
-                    displayText = displayText[..(maxWidth - 3)] + "...";
-                }
-
-                if (isSelected)
-                {
-                    System.Console.ForegroundColor = _selectedColor;
-                }
-                else
-                {
-                    System.Console.ForegroundColor = Theme.Text;
-                }
-
-                WriteHighlighted(displayText, _searchText, isSelected, _highlightColor);
-
-                System.Console.ResetColor();
-            }
-
-            System.Console.Write("\x1b[K");
-            System.Console.WriteLine();
-            linesRendered++;
-        }
-
-        // Preview pane
-        if (_showPreview && _previewFunc != null && _filtered.Count > 0 && _selectedIndex < _filtered.Count)
-        {
-            var selectedItem = _filtered[_selectedIndex].Item;
-            var preview = _previewFunc(selectedItem);
-
-            System.Console.ForegroundColor = Theme.Muted;
-            System.Console.Write(new string('─', Math.Min(60, System.Console.WindowWidth - 2)));
-            System.Console.Write("\x1b[K");
-            System.Console.WriteLine();
-            System.Console.ResetColor();
-            linesRendered++;
-
-            if (!string.IsNullOrWhiteSpace(preview))
-            {
-                System.Console.ForegroundColor = Theme.Muted;
-                System.Console.Write("  📖 ");
-                System.Console.ForegroundColor = Theme.Text;
-
-                // Word-wrap preview text
-                var maxPreviewWidth = System.Console.WindowWidth - 6;
-                var lines = WordWrap(preview, maxPreviewWidth).Take(2).ToList();
-                System.Console.Write(lines[0]);
-                System.Console.Write("\x1b[K");
-                System.Console.WriteLine();
-                linesRendered++;
-
-                if (lines.Count > 1)
-                {
-                    System.Console.Write("     ");
-                    System.Console.Write(lines[1]);
-                    if (preview.Length > maxPreviewWidth * 2)
-                    {
-                        System.Console.ForegroundColor = Theme.Muted;
-                        System.Console.Write("...");
-                    }
-                }
-                System.Console.Write("\x1b[K");
-                System.Console.WriteLine();
-                linesRendered++;
-            }
-            else
-            {
-                System.Console.Write("\x1b[K");
-                System.Console.WriteLine();
-                linesRendered++;
-                System.Console.Write("\x1b[K");
-                System.Console.WriteLine();
-                linesRendered++;
-            }
-
-            System.Console.ResetColor();
-        }
-
-        // Footer with controls
-        System.Console.ForegroundColor = Theme.Muted;
-        System.Console.Write("  ↑↓ move • ");
-        System.Console.ForegroundColor = Theme.Secondary;
-        System.Console.Write("1-9");
-        System.Console.ForegroundColor = Theme.Muted;
-        System.Console.Write(" jump • Enter select • Esc cancel");
-        if (_showSearch)
-        {
-            System.Console.Write(" • Type to search");
-        }
-        System.Console.ResetColor();
-        System.Console.Write("\x1b[K");
-        linesRendered++;
-        
-        _lastRenderedLines = linesRendered;
-    }
-
-    private static string GetStatusIcon(ItemStatus status) => status switch
-    {
-        ItemStatus.Watched => "✓",
-        ItemStatus.Downloaded => "📥",
-        ItemStatus.InProgress => "▶",
-        ItemStatus.New => "✨",
-        _ => ""
-    };
-
-    private static ConsoleColor GetStatusColor(ItemStatus status) => status switch
-    {
-        ItemStatus.Watched => Theme.Success,
-        ItemStatus.Downloaded => Theme.Accent,
-        ItemStatus.InProgress => Theme.Warning,
-        ItemStatus.New => Theme.Primary,
-        _ => Theme.Text
-    };
-
-    private static IEnumerable<string> WordWrap(string text, int maxWidth)
-    {
-        if (string.IsNullOrWhiteSpace(text) || maxWidth <= 0)
-        {
-            yield return "";
-            yield break;
-        }
-
-        text = text.Replace("\n", " ").Replace("\r", "");
-        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var currentLine = new StringBuilder();
-
-        foreach (var word in words)
-        {
-            if (currentLine.Length + word.Length + 1 > maxWidth)
-            {
-                if (currentLine.Length > 0)
-                {
-                    yield return currentLine.ToString();
-                    currentLine.Clear();
-                }
-            }
-
-            if (currentLine.Length > 0)
-            {
-                currentLine.Append(' ');
-            }
-            currentLine.Append(word);
-        }
-
-        if (currentLine.Length > 0)
-        {
-            yield return currentLine.ToString();
-        }
-    }
-
-    private void WriteHighlighted(string text, string search, bool isSelected, ConsoleColor highlightColor)
-    {
-        if (string.IsNullOrWhiteSpace(search))
-        {
-            System.Console.Write(text);
-            return;
-        }
-
-        var searchLower = search.ToLowerInvariant();
-        var currentColor = System.Console.ForegroundColor;
-        var searchIndex = 0;
-
-        foreach (var ch in text)
-        {
-            var chLower = char.ToLowerInvariant(ch);
-            if (searchIndex < searchLower.Length && chLower == searchLower[searchIndex])
-            {
-                // Highlight matched characters with underline effect (using brackets)
-                System.Console.ForegroundColor = highlightColor;
-                if (!isSelected)
-                {
-                    // Make matched chars stand out more
-                    System.Console.ForegroundColor = ConsoleColor.Green;
-                }
-                System.Console.Write(ch);
-                System.Console.ForegroundColor = currentColor;
-                searchIndex++;
-            }
-            else
-            {
-                System.Console.Write(ch);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Calculate fuzzy match score. Higher is better, 0 means no match.
-    /// </summary>
-    private static int FuzzyScore(string text, string pattern)
-    {
-        if (string.IsNullOrEmpty(pattern)) return 1;
-        if (string.IsNullOrEmpty(text)) return 0;
-
-        var textLower = text.ToLowerInvariant();
-        var patternLower = pattern.ToLowerInvariant();
-
-        // Exact match gets highest score
-        if (textLower.Contains(patternLower))
-        {
-            // Bonus for match at start
-            if (textLower.StartsWith(patternLower))
-                return 1000 + patternLower.Length;
-            return 500 + patternLower.Length;
-        }
-
-        // Fuzzy match: all pattern characters must appear in order
-        var score = 0;
-        var patternIndex = 0;
-        var consecutiveBonus = 0;
-        var lastMatchIndex = -1;
-
-        for (var i = 0; i < textLower.Length && patternIndex < patternLower.Length; i++)
-        {
-            if (textLower[i] == patternLower[patternIndex])
-            {
-                score += 10;
-
-                // Bonus for consecutive matches
-                if (lastMatchIndex == i - 1)
-                {
-                    consecutiveBonus += 5;
-                }
-
-                // Bonus for matching at word boundaries
-                if (i == 0 || !char.IsLetterOrDigit(textLower[i - 1]))
-                {
-                    score += 15;
-                }
-
-                lastMatchIndex = i;
-                patternIndex++;
-            }
-        }
-
-        // All pattern characters must match
-        if (patternIndex < patternLower.Length)
-            return 0;
-
-        return score + consecutiveBonus;
-    }
-
-    private static void ClearToEndOfLine()
-    {
-        try
-        {
-            var remaining = System.Console.WindowWidth - System.Console.CursorLeft - 1;
-            if (remaining > 0)
-            {
-                System.Console.Write(new string(' ', remaining));
-            }
-        }
-        catch { }
-    }
-
-    private static void ClearLines(int startLine, int count)
-    {
-        try
-        {
-            for (var i = 0; i < count; i++)
-            {
-                System.Console.SetCursorPosition(0, startLine + i);
-                System.Console.Write(new string(' ', System.Console.WindowWidth - 1));
-            }
-            System.Console.SetCursorPosition(0, startLine);
-        }
-        catch { }
     }
 }
 
