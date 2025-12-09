@@ -18,6 +18,25 @@ public interface IMangaCatalog
     Task<IReadOnlyCollection<Manga>> SearchAsync(string query, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Search for manga with filters.
+    /// </summary>
+    /// <param name="query">Search query (can be empty for browse).</param>
+    /// <param name="filters">Search filters (genre, year, status, etc.).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Collection of matching manga.</returns>
+    Task<IReadOnlyCollection<Manga>> SearchAsync(string query, SearchFilters filters, CancellationToken cancellationToken = default)
+        => SearchAsync(query, cancellationToken); // Default: ignore filters
+
+    /// <summary>
+    /// Browse popular/trending manga (for recommendations).
+    /// </summary>
+    /// <param name="filters">Optional filters to apply.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Collection of popular manga.</returns>
+    Task<IReadOnlyCollection<Manga>> BrowsePopularAsync(SearchFilters? filters = null, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyCollection<Manga>>(Array.Empty<Manga>()); // Optional: not all providers support this
+
+    /// <summary>
     /// Get all chapters for a manga.
     /// </summary>
     /// <param name="manga">The manga to fetch chapters for.</param>

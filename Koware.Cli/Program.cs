@@ -94,6 +94,7 @@ static IHost BuildHost(string[] args)
     builder.Services.AddSingleton<IReadHistoryStore, SqliteReadHistoryStore>();
     builder.Services.AddSingleton<IAnimeListStore, SqliteAnimeListStore>();
     builder.Services.AddSingleton<IMangaListStore, SqliteMangaListStore>();
+    builder.Services.AddSingleton<IDownloadStore, SqliteDownloadStore>();
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware", LogLevel.Information);
     builder.Logging.AddFilter("Koware.Infrastructure.Scraping.AllAnimeCatalog", LogLevel.Error);
@@ -140,7 +141,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
     // Commands that require configured providers
     var providerRequiredCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "search", "plan", "stream", "watch", "play", "download", "read", "last", "continue", "list"
+        "search", "plan", "stream", "watch", "play", "download", "read", "last", "continue", "list", "recommend", "rec"
     };
 
     try
@@ -188,6 +189,12 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandleHistoryAsync(args, services, logger, defaults, cts.Token);
             case "list":
                 return await HandleListAsync(args, services, logger, defaults, cts.Token);
+            case "recommend":
+            case "rec":
+                return await HandleRecommendAsync(args, services, logger, defaults, cts.Token);
+            case "offline":
+            case "downloads":
+                return await HandleOfflineAsync(args, services, logger, defaults, cts.Token);
             case "config":
                 return HandleConfig(args);
             case "doctor":
@@ -2022,36 +2029,26 @@ static async Task<int> HandleListAddAsync(string[] args, IAnimeListStore animeLi
     }
     else
     {
-        // Multiple matches - let user choose
-        Console.Write($"Select anime [1-{matches.Count}] (Enter for 1, ");
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.Write("c to cancel");
-        Console.ResetColor();
-        Console.Write("): ");
-        var input = Console.ReadLine()?.Trim();
+        // Multiple matches - use interactive selector
+        var result = InteractiveSelect.Show(
+            matches.ToList(),
+            a => a.Title,
+            new SelectorOptions<Anime>
+            {
+                Prompt = "Select anime to add",
+                MaxVisibleItems = 10,
+                ShowSearch = true,
+                SecondaryDisplayFunc = a => a.Synopsis ?? ""
+            });
 
-        if (string.IsNullOrEmpty(input))
-        {
-            // Default to first match
-            animeId = matches[0].Id.Value;
-            animeTitle = matches[0].Title;
-        }
-        else if (input.Equals("c", StringComparison.OrdinalIgnoreCase))
+        if (result.Cancelled)
         {
             WriteColoredLine("Cancelled.", ConsoleColor.Yellow);
             return 1;
         }
-        else if (!int.TryParse(input, out var choice) || choice < 1 || choice > matches.Count)
-        {
-            WriteColoredLine("Invalid selection. Cancelled.", ConsoleColor.Yellow);
-            return 1;
-        }
-        else
-        {
-            var selected = matches[choice - 1];
-            animeId = selected.Id.Value;
-            animeTitle = selected.Title;
-        }
+
+        animeId = result.Selected!.Id.Value;
+        animeTitle = result.Selected!.Title;
     }
 
     // Check if already in list
@@ -2426,34 +2423,26 @@ static async Task<int> HandleMangaListAddAsync(string[] args, IMangaListStore ma
     }
     else
     {
-        Console.Write($"Select manga [1-{matches.Count}] (Enter for 1, ");
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.Write("c to cancel");
-        Console.ResetColor();
-        Console.Write("): ");
-        var input = Console.ReadLine()?.Trim();
+        // Interactive selection
+        var result = InteractiveSelect.Show(
+            matches.ToList(),
+            m => m.Title,
+            new SelectorOptions<Manga>
+            {
+                Prompt = "Select manga to add",
+                MaxVisibleItems = 10,
+                ShowSearch = true,
+                SecondaryDisplayFunc = m => m.Synopsis ?? ""
+            });
 
-        if (string.IsNullOrEmpty(input))
-        {
-            mangaId = matches[0].Id.Value;
-            mangaTitle = matches[0].Title;
-        }
-        else if (input.Equals("c", StringComparison.OrdinalIgnoreCase))
+        if (result.Cancelled)
         {
             WriteColoredLine("Cancelled.", ConsoleColor.Yellow);
             return 1;
         }
-        else if (!int.TryParse(input, out var choice) || choice < 1 || choice > matches.Count)
-        {
-            WriteColoredLine("Invalid selection. Cancelled.", ConsoleColor.Yellow);
-            return 1;
-        }
-        else
-        {
-            var selected = matches[choice - 1];
-            mangaId = selected.Id.Value;
-            mangaTitle = selected.Title;
-        }
+
+        mangaId = result.Selected!.Id.Value;
+        mangaTitle = result.Selected!.Title;
     }
 
     var existing = await mangaList.GetByTitleAsync(mangaTitle, cancellationToken);
@@ -2733,10 +2722,35 @@ static async Task<int> LaunchFromHistory(WatchHistoryEntry entry, ScrapeOrchestr
 static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
     var jsonOutput = args.Skip(1).Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
-    var filteredArgs = args.Where((a, idx) => idx == 0 || !a.Equals("--json", StringComparison.OrdinalIgnoreCase)).ToArray();
-
-    var query = string.Join(' ', filteredArgs.Skip(1)).Trim();
-    if (string.IsNullOrWhiteSpace(query))
+    
+    // Parse filters from arguments
+    var filters = SearchFilters.Parse(args);
+    
+    // Extract query (non-filter arguments)
+    var filterFlags = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "--json", "--genre", "--year", "--status", "--sort", "--score", "--country"
+    };
+    
+    var queryParts = new List<string>();
+    for (int i = 1; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if (filterFlags.Contains(arg))
+        {
+            i++; // Skip the flag value
+            continue;
+        }
+        if (!arg.StartsWith("--"))
+        {
+            queryParts.Add(arg);
+        }
+    }
+    
+    var query = string.Join(' ', queryParts).Trim();
+    
+    // Allow empty query when filters are applied (browse mode)
+    if (string.IsNullOrWhiteSpace(query) && !filters.HasFilters)
     {
         logger.LogWarning("search command is missing a query.");
         PrintFriendlyCommandHint("search");
@@ -2744,12 +2758,27 @@ static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string
     }
 
     var mode = defaults.GetMode();
+    
+    // Show filter info if any
+    if (filters.HasFilters)
+    {
+        var filterInfo = new List<string>();
+        if (filters.Genres?.Count > 0) filterInfo.Add($"genre: {string.Join(", ", filters.Genres)}");
+        if (filters.Year.HasValue) filterInfo.Add($"year: {filters.Year}");
+        if (filters.Status != ContentStatus.Any) filterInfo.Add($"status: {filters.Status}");
+        if (filters.Sort != SearchSort.Default) filterInfo.Add($"sort: {filters.Sort}");
+        if (filters.MinScore.HasValue) filterInfo.Add($"min score: {filters.MinScore}");
+        
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"Filters: {string.Join(" | ", filterInfo)}");
+        Console.ResetColor();
+    }
 
     if (mode == CliMode.Manga)
     {
         // Manga search
         var mangaCatalog = services.GetRequiredService<IMangaCatalog>();
-        var mangaMatches = await mangaCatalog.SearchAsync(query, cancellationToken);
+        var mangaMatches = await mangaCatalog.SearchAsync(query, filters, cancellationToken);
 
         if (jsonOutput)
         {
@@ -2757,6 +2786,13 @@ static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string
             {
                 mode = "manga",
                 query,
+                filters = filters.HasFilters ? new
+                {
+                    genres = filters.Genres,
+                    year = filters.Year,
+                    status = filters.Status.ToString(),
+                    sort = filters.Sort.ToString()
+                } : null,
                 count = mangaMatches.Count,
                 matches = mangaMatches.Select(m => new
                 {
@@ -2770,19 +2806,28 @@ static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string
         }
         else
         {
-            RenderMangaSearch(query, mangaMatches);
+            RenderMangaSearch(string.IsNullOrWhiteSpace(query) ? "(browse)" : query, mangaMatches);
         }
     }
     else
     {
         // Anime search (default)
-        var matches = await orchestrator.SearchAsync(query, cancellationToken);
+        var catalog = services.GetRequiredService<IAnimeCatalog>();
+        var matches = await catalog.SearchAsync(query, filters, cancellationToken);
+        
         if (jsonOutput)
         {
             var payload = new
             {
                 mode = "anime",
                 query,
+                filters = filters.HasFilters ? new
+                {
+                    genres = filters.Genres,
+                    year = filters.Year,
+                    status = filters.Status.ToString(),
+                    sort = filters.Sort.ToString()
+                } : null,
                 count = matches.Count,
                 matches = matches.Select(m => new
                 {
@@ -2795,11 +2840,382 @@ static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string
         }
         else
         {
-            RenderSearch(query, matches);
+            RenderSearch(string.IsNullOrWhiteSpace(query) ? "(browse)" : query, matches);
         }
     }
 
     return 0;
+}
+
+/// <summary>
+/// Implement the <c>koware recommend</c> command: suggest anime/manga based on user's list and history.
+/// </summary>
+/// <param name="args">CLI arguments; optional --genre, --limit flags.</param>
+/// <param name="services">Service provider for catalog and list stores.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="defaults">Default CLI options for mode detection.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Exit code: 0 on success.</returns>
+static async Task<int> HandleRecommendAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
+{
+    var jsonOutput = args.Skip(1).Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+    var limit = 10;
+    
+    // Parse limit if specified
+    for (int i = 1; i < args.Length - 1; i++)
+    {
+        if (args[i].Equals("--limit", StringComparison.OrdinalIgnoreCase) && int.TryParse(args[i + 1], out var l))
+        {
+            limit = Math.Clamp(l, 1, 50);
+        }
+    }
+    
+    var mode = defaults.GetMode();
+    
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine($"🎯 Generating recommendations based on your {(mode == CliMode.Manga ? "reading" : "watch")} history...");
+    Console.ResetColor();
+    Console.WriteLine();
+    
+    if (mode == CliMode.Manga)
+    {
+        var mangaList = services.GetRequiredService<IMangaListStore>();
+        var mangaCatalog = services.GetRequiredService<IMangaCatalog>();
+        
+        // Get user's list to exclude already tracked manga
+        var userList = await mangaList.GetAllAsync(cancellationToken: cancellationToken);
+        var trackedIds = userList.Select(e => e.MangaId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var trackedTitles = userList.Select(e => e.MangaTitle.ToLowerInvariant()).ToHashSet();
+        
+        // Get popular manga
+        var popular = await mangaCatalog.BrowsePopularAsync(new SearchFilters { Sort = SearchSort.Popularity }, cancellationToken);
+        
+        // Filter out already tracked manga
+        var recommendations = popular
+            .Where(m => !trackedIds.Contains(m.Id.Value) && !trackedTitles.Contains(m.Title.ToLowerInvariant()))
+            .Take(limit)
+            .ToList();
+        
+        if (recommendations.Count == 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("No recommendations found. Try browsing popular content with:");
+            Console.ResetColor();
+            Console.WriteLine("  koware search --sort popular");
+            return 0;
+        }
+        
+        if (jsonOutput)
+        {
+            var payload = new
+            {
+                mode = "manga",
+                count = recommendations.Count,
+                recommendations = recommendations.Select(m => new
+                {
+                    id = m.Id.Value,
+                    title = m.Title,
+                    synopsis = m.Synopsis
+                })
+            };
+            Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine($"Recommended Manga ({recommendations.Count})");
+            Console.ResetColor();
+            Console.WriteLine(new string('─', 40));
+            
+            for (int i = 0; i < recommendations.Count; i++)
+            {
+                var m = recommendations[i];
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.Write($"{i + 1,2}. ");
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.WriteLine(m.Title);
+                Console.ResetColor();
+                
+                if (!string.IsNullOrWhiteSpace(m.Synopsis))
+                {
+                    var preview = m.Synopsis.Length > 100 ? m.Synopsis[..100] + "..." : m.Synopsis;
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine($"    {preview.Replace("\n", " ")}");
+                    Console.ResetColor();
+                }
+            }
+            
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine("To read: koware read \"<title>\"");
+            Console.ResetColor();
+        }
+    }
+    else
+    {
+        var animeList = services.GetRequiredService<IAnimeListStore>();
+        var animeCatalog = services.GetRequiredService<IAnimeCatalog>();
+        
+        // Get user's list to exclude already tracked anime
+        var userList = await animeList.GetAllAsync(cancellationToken: cancellationToken);
+        var trackedIds = userList.Select(e => e.AnimeId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var trackedTitles = userList.Select(e => e.AnimeTitle.ToLowerInvariant()).ToHashSet();
+        
+        // Get popular anime
+        var popular = await animeCatalog.BrowsePopularAsync(new SearchFilters { Sort = SearchSort.Popularity }, cancellationToken);
+        
+        // Filter out already tracked anime
+        var recommendations = popular
+            .Where(a => !trackedIds.Contains(a.Id.Value) && !trackedTitles.Contains(a.Title.ToLowerInvariant()))
+            .Take(limit)
+            .ToList();
+        
+        if (recommendations.Count == 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("No recommendations found. Try browsing popular content with:");
+            Console.ResetColor();
+            Console.WriteLine("  koware search --sort popular");
+            return 0;
+        }
+        
+        if (jsonOutput)
+        {
+            var payload = new
+            {
+                mode = "anime",
+                count = recommendations.Count,
+                recommendations = recommendations.Select(a => new
+                {
+                    id = a.Id.Value,
+                    title = a.Title
+                })
+            };
+            Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine($"Recommended Anime ({recommendations.Count})");
+            Console.ResetColor();
+            Console.WriteLine(new string('─', 40));
+            
+            for (int i = 0; i < recommendations.Count; i++)
+            {
+                var a = recommendations[i];
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.Write($"{i + 1,2}. ");
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.WriteLine(a.Title);
+                Console.ResetColor();
+            }
+            
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine("To watch: koware watch \"<title>\"");
+            Console.ResetColor();
+        }
+    }
+    
+    return 0;
+}
+
+/// <summary>
+/// Implement the <c>koware offline</c> command: show downloaded content available offline.
+/// </summary>
+/// <param name="args">CLI arguments; optional --stats, --cleanup, --json flags.</param>
+/// <param name="services">Service provider for download store.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="defaults">Default CLI options for mode detection.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Exit code: 0 on success.</returns>
+static async Task<int> HandleOfflineAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
+{
+    var downloadStore = services.GetRequiredService<IDownloadStore>();
+    var jsonOutput = args.Skip(1).Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+    var showStats = args.Skip(1).Any(a => a.Equals("--stats", StringComparison.OrdinalIgnoreCase));
+    var cleanup = args.Skip(1).Any(a => a.Equals("--cleanup", StringComparison.OrdinalIgnoreCase));
+    
+    // Cleanup missing files
+    if (cleanup)
+    {
+        var step = ConsoleStep.Start("Cleaning up missing downloads");
+        var removed = await downloadStore.CleanupMissingAsync(cancellationToken);
+        step.Succeed($"Removed {removed} stale entries");
+        return 0;
+    }
+    
+    // Show stats
+    if (showStats)
+    {
+        var stats = await downloadStore.GetStatsAsync(cancellationToken);
+        
+        if (jsonOutput)
+        {
+            var payload = new
+            {
+                totalEpisodes = stats.TotalEpisodes,
+                totalChapters = stats.TotalChapters,
+                uniqueAnime = stats.UniqueAnime,
+                uniqueManga = stats.UniqueManga,
+                totalSizeBytes = stats.TotalSizeBytes,
+                totalSizeFormatted = FormatFileSize(stats.TotalSizeBytes)
+            };
+            Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("📥 Download Statistics");
+            Console.ResetColor();
+            Console.WriteLine(new string('─', 30));
+            Console.WriteLine($"  Episodes:   {stats.TotalEpisodes} ({stats.UniqueAnime} anime)");
+            Console.WriteLine($"  Chapters:   {stats.TotalChapters} ({stats.UniqueManga} manga)");
+            Console.WriteLine($"  Total Size: {FormatFileSize(stats.TotalSizeBytes)}");
+        }
+        return 0;
+    }
+    
+    // List downloads
+    var mode = defaults.GetMode();
+    var typeFilter = mode == CliMode.Manga ? DownloadType.Chapter : DownloadType.Episode;
+    var downloads = await downloadStore.GetAllAsync(typeFilter, cancellationToken);
+    
+    if (downloads.Count == 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"No {(mode == CliMode.Manga ? "chapters" : "episodes")} downloaded yet.");
+        Console.ResetColor();
+        Console.WriteLine();
+        Console.WriteLine($"Download with: koware download \"<title>\" --{(mode == CliMode.Manga ? "chapter" : "episode")} <n>");
+        return 0;
+    }
+    
+    // Group by content
+    var grouped = downloads
+        .GroupBy(d => d.ContentId)
+        .Select(g => new
+        {
+            ContentId = g.Key,
+            Title = g.First().ContentTitle,
+            Items = g.OrderBy(d => d.Number).ToList(),
+            TotalSize = g.Sum(d => d.FileSizeBytes),
+            AvailableCount = g.Count(d => d.Exists),
+            MissingCount = g.Count(d => !d.Exists)
+        })
+        .OrderByDescending(g => g.Items.Max(d => d.DownloadedAt))
+        .ToList();
+    
+    if (jsonOutput)
+    {
+        var payload = new
+        {
+            mode = mode.ToString().ToLowerInvariant(),
+            count = downloads.Count,
+            content = grouped.Select(g => new
+            {
+                id = g.ContentId,
+                title = g.Title,
+                downloaded = g.Items.Select(d => new
+                {
+                    number = d.Number,
+                    quality = d.Quality,
+                    path = d.FilePath,
+                    sizeBytes = d.FileSizeBytes,
+                    exists = d.Exists,
+                    downloadedAt = d.DownloadedAt
+                }),
+                totalSizeBytes = g.TotalSize
+            })
+        };
+        Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        return 0;
+    }
+    
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine($"📥 Downloaded {(mode == CliMode.Manga ? "Manga" : "Anime")} (Available Offline)");
+    Console.ResetColor();
+    Console.WriteLine(new string('─', 50));
+    Console.WriteLine();
+    
+    foreach (var group in grouped)
+    {
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.Write($"  {group.Title}");
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"  [{FormatFileSize(group.TotalSize)}]");
+        Console.ResetColor();
+        
+        // Show downloaded numbers
+        var numbers = group.Items.Select(d => d.Number).ToList();
+        var ranges = FormatNumberRanges(numbers);
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($"    ✓ {(mode == CliMode.Manga ? "Ch" : "Ep")}: ");
+        Console.ResetColor();
+        Console.WriteLine(ranges);
+        
+        // Show missing count if any
+        if (group.MissingCount > 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"    ⚠ {group.MissingCount} file(s) missing - run 'koware offline --cleanup' to remove stale entries");
+            Console.ResetColor();
+        }
+        
+        Console.WriteLine();
+    }
+    
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine($"Total: {grouped.Count} {(mode == CliMode.Manga ? "manga" : "anime")}, {downloads.Count} {(mode == CliMode.Manga ? "chapters" : "episodes")}");
+    Console.WriteLine("View stats: koware offline --stats | Cleanup: koware offline --cleanup");
+    Console.ResetColor();
+    
+    return 0;
+}
+
+/// <summary>
+/// Format a file size in bytes to a human-readable string.
+/// </summary>
+static string FormatFileSize(long bytes)
+{
+    string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+    double len = bytes;
+    int order = 0;
+    while (len >= 1024 && order < sizes.Length - 1)
+    {
+        order++;
+        len /= 1024;
+    }
+    return $"{len:0.##} {sizes[order]}";
+}
+
+/// <summary>
+/// Format a list of numbers into compact ranges (e.g., "1-5, 7, 10-12").
+/// </summary>
+static string FormatNumberRanges(IReadOnlyList<int> numbers)
+{
+    if (numbers.Count == 0) return "none";
+    
+    var sorted = numbers.OrderBy(n => n).ToList();
+    var ranges = new List<string>();
+    var start = sorted[0];
+    var end = sorted[0];
+    
+    for (int i = 1; i < sorted.Count; i++)
+    {
+        if (sorted[i] == end + 1)
+        {
+            end = sorted[i];
+        }
+        else
+        {
+            ranges.Add(start == end ? start.ToString() : $"{start}-{end}");
+            start = end = sorted[i];
+        }
+    }
+    ranges.Add(start == end ? start.ToString() : $"{start}-{end}");
+    
+    return string.Join(", ", ranges);
 }
 
 /// <summary>
@@ -3086,6 +3502,22 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
                 await DownloadWithHttpAsync(httpClient, stream, outputPath, httpReferrer, httpUserAgent, logger, cancellationToken);
             }
 
+            // Record download in store
+            if (File.Exists(outputPath))
+            {
+                var fileInfo = new FileInfo(outputPath);
+                var downloadStore = services.GetRequiredService<IDownloadStore>();
+                await downloadStore.AddAsync(
+                    DownloadType.Episode,
+                    initial.SelectedAnime.Id.Value,
+                    title,
+                    episode.Number,
+                    stream.Quality,
+                    outputPath,
+                    fileInfo.Length,
+                    cancellationToken);
+            }
+
             var episodesLeft = total - index;
             DownloadConsole.PrintEpisodeResult(outputPath, episodesLeft);
         }
@@ -3215,33 +3647,25 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
     }
     else
     {
-        // Interactive selection with colored output
-        RenderMangaSearch(query, results);
-        Console.Write($"Select manga [1-{results.Count}] (Enter for 1, ");
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.Write("c to cancel");
-        Console.ResetColor();
-        Console.Write("): ");
-        var input = Console.ReadLine();
+        // Interactive selection
+        var selectResult = InteractiveSelect.Show(
+            results.ToList(),
+            m => m.Title,
+            new SelectorOptions<Manga>
+            {
+                Prompt = $"Select manga for \"{query}\"",
+                MaxVisibleItems = 10,
+                ShowSearch = true,
+                SecondaryDisplayFunc = m => m.Synopsis ?? ""
+            });
 
-        if (string.Equals(input?.Trim(), "c", StringComparison.OrdinalIgnoreCase))
+        if (selectResult.Cancelled)
         {
             logger.LogInformation("Selection canceled by user.");
             return 1;
         }
-        if (int.TryParse(input, out var selected) && selected >= 1 && selected <= results.Count)
-        {
-            selectedManga = results.ElementAt(selected - 1);
-        }
-        else if (string.IsNullOrWhiteSpace(input))
-        {
-            selectedManga = results.First();
-        }
-        else
-        {
-            logger.LogWarning("Invalid selection '{Input}'. Defaulting to first match.", input);
-            selectedManga = results.First();
-        }
+
+        selectedManga = selectResult.Selected!;
     }
 
     logger.LogInformation("Selected: {Title}", selectedManga.Title);
@@ -3285,24 +3709,24 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
     else
     {
         // Interactive chapter selection
-        Console.WriteLine();
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine($"Available chapters: {chapters.Min(c => c.Number)} - {chapters.Max(c => c.Number)} ({chapters.Count} total)");
-        Console.ResetColor();
-        Console.Write("Enter chapter number: ");
-        var input = Console.ReadLine();
-        if (!float.TryParse(input, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var num))
+        var sortedChapters = chapters.OrderBy(c => c.Number).ToList();
+        var chapterResult = InteractiveSelect.Show(
+            sortedChapters,
+            c => $"Chapter {c.Number}" + (string.IsNullOrWhiteSpace(c.Title) ? "" : $" - {c.Title}"),
+            new SelectorOptions<Chapter>
+            {
+                Prompt = $"Select chapter ({sortedChapters.First().Number} - {sortedChapters.Last().Number})",
+                MaxVisibleItems = 15,
+                ShowSearch = true
+            });
+
+        if (chapterResult.Cancelled)
         {
-            logger.LogWarning("Invalid chapter number.");
+            logger.LogWarning("Selection cancelled.");
             return 1;
         }
-        selectedChapter = chapters.FirstOrDefault(c => Math.Abs(c.Number - num) < 0.001f)
-                          ?? chapters.FirstOrDefault(c => (int)c.Number == (int)num)!;
-        if (selectedChapter is null)
-        {
-            logger.LogWarning("Chapter {Chapter} not found.", num);
-            return 1;
-        }
+
+        selectedChapter = chapterResult.Selected!;
     }
 
     logger.LogInformation("Reading: {Title} - Chapter {Chapter}", selectedManga.Title, selectedChapter.Number);
@@ -3846,23 +4270,25 @@ static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider 
     }
     else
     {
-        Console.WriteLine();
-        Console.ForegroundColor = ConsoleColor.Magenta;
-        Console.WriteLine($"Found {results.Count} manga for \"{query}\":");
-        Console.ResetColor();
-        var i = 1;
-        foreach (var m in results.Take(10))
+        // Interactive selection
+        var selectResult = InteractiveSelect.Show(
+            results.ToList(),
+            m => m.Title,
+            new SelectorOptions<Manga>
+            {
+                Prompt = $"Select manga to download",
+                MaxVisibleItems = 10,
+                ShowSearch = true,
+                SecondaryDisplayFunc = m => m.Synopsis ?? ""
+            });
+
+        if (selectResult.Cancelled)
         {
-            Console.WriteLine($"  {i++}. {m.Title}");
-        }
-        Console.Write("Select manga (1-{0}): ", Math.Min(results.Count, 10));
-        var input = Console.ReadLine();
-        if (!int.TryParse(input, out var selected) || selected < 1 || selected > Math.Min(results.Count, 10))
-        {
-            logger.LogWarning("Invalid selection.");
+            logger.LogWarning("Selection cancelled.");
             return 1;
         }
-        selectedManga = results.ElementAt(selected - 1);
+
+        selectedManga = selectResult.Selected!;
     }
 
     logger.LogInformation("Selected: {Title}", selectedManga.Title);
@@ -4010,6 +4436,20 @@ static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider 
                 await File.WriteAllBytesAsync(filePath, imageBytes, cancellationToken);
             }
 
+            // Record download in store
+            var chapterDirInfo = new DirectoryInfo(chapterDir);
+            var chapterSize = chapterDirInfo.EnumerateFiles().Sum(f => f.Length);
+            var downloadStore = services.GetRequiredService<IDownloadStore>();
+            await downloadStore.AddAsync(
+                DownloadType.Chapter,
+                selectedManga.Id.Value,
+                selectedManga.Title,
+                (int)chapter.Number,
+                null,
+                chapterDir,
+                chapterSize,
+                cancellationToken);
+
             step.Succeed($"Chapter {chapter.Number} ({pages.Count} pages)");
         }
         catch (Exception ex)
@@ -4152,30 +4592,25 @@ static async Task<ScrapePlan> MaybeSelectMatchAsync(ScrapeOrchestrator orchestra
         return plan with { PreferredMatchIndex = 1 };
     }
 
-    RenderSearch(plan.Query, matches);
-    Console.Write($"Select anime [1-{matches.Count}] (Enter for 1, ");
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.Write("c to cancel");
-    Console.ResetColor();
-    Console.Write("): ");
-    var input = Console.ReadLine();
+    // Use interactive selector for multiple matches
+    var result = InteractiveSelect.Show(
+        matches.ToList(),
+        a => a.Title,
+        new SelectorOptions<Anime>
+        {
+            Prompt = $"Select anime for \"{plan.Query}\"",
+            MaxVisibleItems = 10,
+            ShowSearch = true,
+            SecondaryDisplayFunc = a => a.Synopsis ?? ""
+        });
 
-    if (string.Equals(input?.Trim(), "c", StringComparison.OrdinalIgnoreCase))
+    if (result.Cancelled)
     {
         logger.LogInformation("Selection canceled by user.");
         throw new OperationCanceledException("Selection canceled by user.");
     }
-    if (int.TryParse(input, out var choice) && choice >= 1 && choice <= matches.Count)
-    {
-        return plan with { PreferredMatchIndex = choice };
-    }
 
-    if (!string.IsNullOrWhiteSpace(input))
-    {
-        logger.LogWarning("Invalid selection '{Input}'. Defaulting to the first match.", input);
-    }
-
-    return plan with { PreferredMatchIndex = 1 };
+    return plan with { PreferredMatchIndex = result.SelectedIndex + 1 };
 }
 
 /// <summary>
@@ -5351,7 +5786,7 @@ static void PrintUsage()
 {
     WriteHeader($"Koware CLI {GetVersionLabel()}");
     Console.WriteLine("Usage:");
-    WriteCommand("search <query>", "Find anime and list matches.", ConsoleColor.Cyan);
+    WriteCommand("search <query> [--genre <g>] [--year <y>] [--status <s>] [--sort <o>]", "Find anime/manga with filters.", ConsoleColor.Cyan);
     WriteCommand("stream <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Show plan + streams, no player.", ConsoleColor.Cyan);
     WriteCommand("watch <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Pick a stream and play (alias: play).", ConsoleColor.Green);
     WriteCommand("play <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Same as watch.", ConsoleColor.Green);
@@ -5361,6 +5796,8 @@ static void PrintUsage()
     WriteCommand("continue [<anime>] [--from <episode>] [--quality <label>]", "Resume from history (auto next episode).", ConsoleColor.Yellow);
     WriteCommand("history [options]", "Browse/search history; play entries or show stats.", ConsoleColor.Yellow);
     WriteCommand("list [subcommand]", "Track anime: add, update status, mark complete.", ConsoleColor.Yellow);
+    WriteCommand("recommend [--limit <n>]", "Get personalized recommendations (alias: rec).", ConsoleColor.Yellow);
+    WriteCommand("offline [--stats] [--cleanup]", "Show downloaded content available offline.", ConsoleColor.Yellow);
     WriteCommand("help [command]", "Show this guide or a command-specific help page.", ConsoleColor.Magenta);
     WriteCommand("config [options]", "Persist defaults (quality/index/player) to appsettings.user.json.", ConsoleColor.Magenta);
     WriteCommand("mode [anime|manga]", "Show or switch between anime and manga modes.", ConsoleColor.Magenta);
@@ -5385,7 +5822,7 @@ static int HandleHelp(string[] args, CliMode mode)
         PrintUsage();
         Console.WriteLine();
         Console.WriteLine("For detailed help: koware help <command>");
-        Console.WriteLine("Commands: search, stream, watch, play, download, read, last, continue, history, list, config, mode, provider, doctor, update");
+        Console.WriteLine("Commands: search, stream, watch, play, download, read, last, continue, history, list, recommend, offline, config, mode, provider, doctor, update");
         return 0;
     }
 
@@ -5393,10 +5830,41 @@ static int HandleHelp(string[] args, CliMode mode)
     switch (topic)
     {
         case "search":
-            PrintTopicHeader("search", "Find anime or manga and show a numbered list of matches.");
-            Console.WriteLine("Usage: koware search <query>");
+            PrintTopicHeader("search", "Find anime or manga with optional filters.");
+            Console.WriteLine("Usage: koware search <query> [filters]");
             Console.WriteLine("Mode : searches anime or manga based on current mode (use 'koware mode' to switch).");
-            Console.WriteLine("Tips : use quotes for multi-word queries (e.g., \"demon slayer\").");
+            Console.WriteLine();
+            WriteColoredLine("Filters:", ConsoleColor.Yellow);
+            WriteListOption("--genre <name>", "Filter by genre (Action, Romance, Fantasy, etc.)");
+            WriteListOption("--year <year>", "Filter by release year (e.g., 2024)");
+            WriteListOption("--status <status>", "Filter by status: ongoing, completed, upcoming");
+            WriteListOption("--sort <order>", "Sort by: popular, score, recent, title");
+            WriteListOption("--country <code>", "Country: JP (Japan), KR (Korea), CN (China)");
+            Console.WriteLine();
+            WriteColoredLine("Examples:", ConsoleColor.Yellow);
+            Console.WriteLine("  koware search \"demon slayer\"");
+            Console.WriteLine("  koware search --genre action --status ongoing");
+            Console.WriteLine("  koware search \"romance\" --year 2024 --sort popular");
+            Console.WriteLine("  koware search --sort popular  (browse mode with empty query)");
+            break;
+        case "recommend":
+        case "rec":
+            PrintTopicHeader("recommend", "Get personalized recommendations based on your history.");
+            Console.WriteLine("Usage: koware recommend [--limit <n>] [--json]");
+            Console.WriteLine("Mode : recommends anime or manga based on current mode.");
+            Console.WriteLine();
+            WriteColoredLine("Options:", ConsoleColor.Yellow);
+            WriteListOption("--limit <n>", "Number of recommendations (default: 10, max: 50)");
+            WriteListOption("--json", "Output as JSON");
+            Console.WriteLine();
+            Console.WriteLine("Behavior:");
+            Console.WriteLine("  • Finds popular content you haven't watched/read yet");
+            Console.WriteLine("  • Excludes titles already in your tracking list");
+            Console.WriteLine();
+            WriteColoredLine("Examples:", ConsoleColor.Yellow);
+            Console.WriteLine("  koware recommend");
+            Console.WriteLine("  koware recommend --limit 20");
+            Console.WriteLine("  koware rec --json");
             break;
         case "stream":
         case "plan":
@@ -5419,6 +5887,30 @@ static int HandleHelp(string[] args, CliMode mode)
             Console.WriteLine("Examples:");
             Console.WriteLine("  koware download \"one piece\" --episodes 1-12 --quality 1080p");
             Console.WriteLine("  koware download \"chainsaw man\" --chapter 1-10  (manga mode)");
+            Console.WriteLine();
+            Console.WriteLine("Downloads are tracked. View with 'koware offline'.");
+            break;
+        case "offline":
+        case "downloads":
+            PrintTopicHeader("offline", "View downloaded content available for offline viewing.");
+            Console.WriteLine("Usage: koware offline [--stats] [--cleanup] [--json]");
+            Console.WriteLine("Mode : shows episodes or chapters based on current mode.");
+            Console.WriteLine();
+            WriteColoredLine("Options:", ConsoleColor.Yellow);
+            WriteListOption("--stats", "Show download statistics (total episodes, chapters, size)");
+            WriteListOption("--cleanup", "Remove stale entries for deleted files");
+            WriteListOption("--json", "Output as JSON");
+            Console.WriteLine();
+            WriteColoredLine("What it shows:", ConsoleColor.Yellow);
+            Console.WriteLine("  • List of anime/manga with downloaded content");
+            Console.WriteLine("  • Episode/chapter numbers available offline");
+            Console.WriteLine("  • File sizes and missing file warnings");
+            Console.WriteLine();
+            WriteColoredLine("Examples:", ConsoleColor.Yellow);
+            Console.WriteLine("  koware offline              List downloaded anime");
+            Console.WriteLine("  koware mode manga && koware offline   List downloaded manga");
+            Console.WriteLine("  koware offline --stats      Show total download statistics");
+            Console.WriteLine("  koware offline --cleanup    Remove entries for deleted files");
             break;
         case "read":
             PrintTopicHeader("read", "Search for manga and read chapters in the Koware reader.");
@@ -5553,7 +6045,7 @@ static int HandleHelp(string[] args, CliMode mode)
         default:
             PrintUsage();
             Console.WriteLine();
-            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: search, stream, watch, play, last, continue, history, list, config, provider, doctor, update.");
+            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: search, recommend, offline, stream, watch, play, download, last, continue, history, list, config, provider, doctor, update.");
             return 1;
     }
 

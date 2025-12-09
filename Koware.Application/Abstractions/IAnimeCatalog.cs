@@ -18,6 +18,25 @@ public interface IAnimeCatalog
     Task<IReadOnlyCollection<Anime>> SearchAsync(string query, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Search for anime with filters.
+    /// </summary>
+    /// <param name="query">Search query (can be empty for browse).</param>
+    /// <param name="filters">Search filters (genre, year, status, etc.).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Collection of matching anime.</returns>
+    Task<IReadOnlyCollection<Anime>> SearchAsync(string query, SearchFilters filters, CancellationToken cancellationToken = default)
+        => SearchAsync(query, cancellationToken); // Default: ignore filters
+
+    /// <summary>
+    /// Browse popular/trending anime (for recommendations).
+    /// </summary>
+    /// <param name="filters">Optional filters to apply.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Collection of popular anime.</returns>
+    Task<IReadOnlyCollection<Anime>> BrowsePopularAsync(SearchFilters? filters = null, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyCollection<Anime>>(Array.Empty<Anime>()); // Optional: not all providers support this
+
+    /// <summary>
     /// Get all episodes for an anime.
     /// </summary>
     /// <param name="anime">The anime to fetch episodes for.</param>

@@ -39,7 +39,10 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
     /// </summary>
     public bool IsConfigured => _options.IsConfigured;
 
-    public async Task<IReadOnlyCollection<Anime>> SearchAsync(string query, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyCollection<Anime>> SearchAsync(string query, CancellationToken cancellationToken = default)
+        => SearchAsync(query, SearchFilters.Empty, cancellationToken);
+
+    public async Task<IReadOnlyCollection<Anime>> SearchAsync(string query, SearchFilters filters, CancellationToken cancellationToken = default)
     {
         if (!_options.IsConfigured)
         {
@@ -47,14 +50,80 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             return Array.Empty<Anime>();
         }
 
+        // Build GraphQL query with filter support
         var gql = "query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name availableEpisodes __typename } }}";
+        
+        // Build search input with filter parameters
+        var searchInput = new Dictionary<string, object>
+        {
+            ["allowAdult"] = false,
+            ["allowUnknown"] = false
+        };
+        
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            searchInput["query"] = query;
+        }
+        
+        // Apply genre filter if specified
+        if (filters.Genres?.Count > 0)
+        {
+            searchInput["genres"] = filters.Genres;
+        }
+        
+        // Apply year filter if specified
+        if (filters.Year.HasValue)
+        {
+            searchInput["year"] = filters.Year.Value;
+        }
+        
+        // Apply status filter if specified
+        if (filters.Status != ContentStatus.Any)
+        {
+            var statusValue = filters.Status switch
+            {
+                ContentStatus.Ongoing => "Releasing",
+                ContentStatus.Completed => "Finished",
+                ContentStatus.Upcoming => "Not Yet Aired",
+                _ => null
+            };
+            if (statusValue != null)
+            {
+                searchInput["status"] = statusValue;
+            }
+        }
+        
+        // Map country origin
+        var countryOrigin = filters.CountryOrigin switch
+        {
+            "JP" => "JP",
+            "KR" => "KR", 
+            "CN" => "CN",
+            _ => "ALL"
+        };
+        
+        // Map sort order
+        var sortBy = filters.Sort switch
+        {
+            SearchSort.Popularity => "popularity_desc",
+            SearchSort.Score => "score_desc",
+            SearchSort.Recent => "recent",
+            SearchSort.Title => "name_asc",
+            _ => (string?)null
+        };
+        
+        if (sortBy != null)
+        {
+            searchInput["sortBy"] = sortBy;
+        }
+
         var variables = new
         {
-            search = new { allowAdult = false, allowUnknown = false, query },
+            search = searchInput,
             limit = _options.SearchLimit,
             page = 1,
             translationType = _options.TranslationType,
-            countryOrigin = "ALL"
+            countryOrigin
         };
 
         var uri = BuildApiUri(gql, variables);
@@ -81,6 +150,18 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         }
 
         return results;
+    }
+
+    public async Task<IReadOnlyCollection<Anime>> BrowsePopularAsync(SearchFilters? filters = null, CancellationToken cancellationToken = default)
+    {
+        if (!_options.IsConfigured)
+        {
+            return Array.Empty<Anime>();
+        }
+
+        // Use search with popularity sort and empty query
+        var browseFilters = (filters ?? SearchFilters.Empty) with { Sort = SearchSort.Popularity };
+        return await SearchAsync("", browseFilters, cancellationToken);
     }
 
     public async Task<IReadOnlyCollection<Episode>> GetEpisodesAsync(Anime anime, CancellationToken cancellationToken = default)
