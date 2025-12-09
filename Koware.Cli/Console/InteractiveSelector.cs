@@ -21,6 +21,7 @@ public sealed class SelectionResult<T>
     public static SelectionResult<T> Success(T item, int index) => new() { Selected = item, SelectedIndex = index };
 }
 
+
 /// <summary>
 /// Status indicator for list items (watched, downloaded, etc.)
 /// </summary>
