@@ -423,8 +423,25 @@ public partial class MainWindow : Window
     private void ClearPlaceholder(int pageNumber)
     {
         if (!_pagePlaceholders.TryGetValue(pageNumber, out var container)) return;
+        if (pageNumber <= 0 || pageNumber > _pageImages.Count) return;
+        
         var image = _pageImages[pageNumber - 1];
-        container.Child = image;
+        
+        // Only set as child if not already the child
+        if (container.Child != image)
+        {
+            // First detach from any existing parent
+            if (image.Parent is Border parentBorder)
+            {
+                parentBorder.Child = null;
+            }
+            else if (image.Parent is Panel parentPanel)
+            {
+                parentPanel.Children.Remove(image);
+            }
+            
+            container.Child = image;
+        }
     }
 
     private void ApplyFitMode(Image image)
@@ -863,27 +880,49 @@ public partial class MainWindow : Window
         // First, detach all images from their current parents
         foreach (var image in _pageImages)
         {
-            if (image.Parent is Panel parent)
+            if (image.Parent is Border border)
             {
-                parent.Children.Remove(image);
+                border.Child = null;
+            }
+            else if (image.Parent is Panel panel)
+            {
+                panel.Children.Remove(image);
             }
         }
         
         PagesContainer.Children.Clear();
+        _pagePlaceholders.Clear();
         
         if (_doublePageMode)
         {
-            // Double-page layout: two images per row
+            // Double-page layout: two images per row in borders
             PagesContainer.Orientation = Avalonia.Layout.Orientation.Vertical;
             
             for (int i = 0; i < _pageImages.Count; i += 2)
             {
                 var row = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center };
-                row.Children.Add(_pageImages[i]);
+                
+                var border1 = new Border
+                {
+                    Background = new SolidColorBrush(Color.Parse("#101020")),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(6),
+                    Margin = new Thickness(2)
+                };
+                border1.Child = _pageImages[i];
+                row.Children.Add(border1);
                 
                 if (i + 1 < _pageImages.Count)
                 {
-                    row.Children.Add(_pageImages[i + 1]);
+                    var border2 = new Border
+                    {
+                        Background = new SolidColorBrush(Color.Parse("#101020")),
+                        CornerRadius = new CornerRadius(8),
+                        Padding = new Thickness(6),
+                        Margin = new Thickness(2)
+                    };
+                    border2.Child = _pageImages[i + 1];
+                    row.Children.Add(border2);
                 }
                 
                 PagesContainer.Children.Add(row);
@@ -891,11 +930,20 @@ public partial class MainWindow : Window
         }
         else
         {
-            // Single-page layout
+            // Single-page layout with borders
             PagesContainer.Orientation = Avalonia.Layout.Orientation.Vertical;
-            foreach (var image in _pageImages)
+            for (int i = 0; i < _pageImages.Count; i++)
             {
-                PagesContainer.Children.Add(image);
+                var border = new Border
+                {
+                    Background = new SolidColorBrush(Color.Parse("#101020")),
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(6),
+                    Margin = new Thickness(0, 2, 0, 2)
+                };
+                border.Child = _pageImages[i];
+                PagesContainer.Children.Add(border);
+                _pagePlaceholders[i + 1] = border;
             }
         }
         
