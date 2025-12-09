@@ -326,6 +326,15 @@ public partial class MainWindow : Window
                         if (_loadedCount >= totalPages)
                         {
                             LoadingOverlay.IsVisible = false;
+                            
+                            // Apply single-page mode if enabled
+                            if (_singlePageMode)
+                            {
+                                UpdatePageVisibility();
+                            }
+                            
+                            // Apply theme to page containers
+                            SetTheme(_currentTheme);
                         }
                     });
                 }
@@ -544,9 +553,14 @@ public partial class MainWindow : Window
             ShowToast($"{page} / {Pages.Count}");
         }
         
-        // Scroll to page
-        if (!_singlePageMode && page - 1 < _pageImages.Count)
+        if (_singlePageMode)
         {
+            // Update visibility for single-page mode
+            UpdatePageVisibility();
+        }
+        else if (page - 1 < _pageImages.Count)
+        {
+            // Scroll to page in scroll mode
             var target = _pageImages[page - 1];
             target.BringIntoView();
         }
@@ -680,38 +694,52 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (!_isScrollTracking || _pageImages.Count == 0) return;
+            if (!_isScrollTracking || _pageImages.Count == 0 || _singlePageMode) return;
             
             // Throttle scroll updates
             var now = DateTime.UtcNow;
             if ((now - _lastScrollTime).TotalMilliseconds < 100) return;
             _lastScrollTime = now;
             
-            // Find which page is most visible
-            var scrollOffset = ScrollViewer.Offset.Y;
+            // Find which page is most visible using transform
             var viewportHeight = ScrollViewer.Viewport.Height;
-            var viewportCenter = scrollOffset + viewportHeight / 2;
+            var viewportCenter = viewportHeight / 2;
+            
+            int bestPage = _currentPage;
+            double bestDistance = double.MaxValue;
             
             for (int i = 0; i < _pageImages.Count; i++)
             {
                 var image = _pageImages[i];
-                if (image.Parent == null) continue; // Skip if not attached
+                if (image.Parent is not Visual parent) continue;
                 
-                var bounds = image.Bounds;
-                var imageTop = bounds.Top;
-                var imageBottom = bounds.Bottom;
-                
-                if (viewportCenter >= imageTop && viewportCenter <= imageBottom)
+                try
                 {
-                    var newPage = i + 1;
-                    if (newPage != _currentPage)
+                    // Transform image bounds to ScrollViewer coordinates
+                    var transform = image.TransformToVisual(ScrollViewer);
+                    if (transform == null) continue;
+                    
+                    var topLeft = transform.Value.Transform(new Point(0, 0));
+                    var imageCenter = topLeft.Y + image.Bounds.Height / 2;
+                    var distance = Math.Abs(imageCenter - viewportCenter);
+                    
+                    if (distance < bestDistance)
                     {
-                        _currentPage = newPage;
-                        PageSlider.Value = newPage;
-                        UpdatePageIndicator();
+                        bestDistance = distance;
+                        bestPage = i + 1;
                     }
-                    break;
                 }
+                catch
+                {
+                    // Skip if transform fails
+                }
+            }
+            
+            if (bestPage != _currentPage)
+            {
+                _currentPage = bestPage;
+                PageSlider.Value = bestPage;
+                UpdatePageIndicator();
             }
         }
         catch
@@ -857,17 +885,66 @@ public partial class MainWindow : Window
         
         if (_singlePageMode)
         {
+            ModeButton.Classes.Add("active");
+        }
+        else
+        {
+            ModeButton.Classes.Remove("active");
+        }
+        
+        UpdatePageVisibility();
+        PersistPrefs();
+    }
+    
+    private void UpdatePageVisibility()
+    {
+        if (_singlePageMode)
+        {
+            // Single-page mode: show only current page(s)
+            var step = _doublePageMode ? 2 : 1;
+            var startPage = ((_currentPage - 1) / step) * step + 1;
+            
+            for (int i = 0; i < _pageImages.Count; i++)
+            {
+                var pageNum = i + 1;
+                var shouldShow = pageNum >= startPage && pageNum < startPage + step;
+                
+                if (_pageImages[i].Parent is Border border)
+                {
+                    border.IsVisible = shouldShow;
+                }
+                else if (_pageImages[i].Parent is Panel panel && panel.Parent is Control parentControl)
+                {
+                    // For double-page mode rows
+                    var rowStart = (i / 2) * 2 + 1;
+                    parentControl.IsVisible = _currentPage >= rowStart && _currentPage < rowStart + 2;
+                }
+            }
+            
+            // Reset scroll position
             ScrollViewer.Offset = new Vector(0, 0);
         }
         else
         {
+            // Scroll mode: show all pages
+            foreach (var image in _pageImages)
+            {
+                if (image.Parent is Border border)
+                {
+                    border.IsVisible = true;
+                }
+                else if (image.Parent is Panel panel && panel.Parent is Control parentControl)
+                {
+                    parentControl.IsVisible = true;
+                }
+            }
+            
             // Scroll to current page
             if (_currentPage - 1 < _pageImages.Count)
             {
                 _pageImages[_currentPage - 1].BringIntoView();
             }
         }
-        PersistPrefs();
     }
     
     private void OnModeClick(object? sender, RoutedEventArgs e)
@@ -989,18 +1066,61 @@ public partial class MainWindow : Window
             _ => "Dark"
         };
         
-        var (bg, panel, text, imgFilter) = theme switch
+        // Define theme colors
+        var (bg, panelBg, borderColor, text, muted, accent, btnBg, btnBorder) = theme switch
         {
-            "sepia" => ("#f4ecd8", "#e8dfc9", "#5c4b37", 0.0),
-            "light" => ("#f8fafc", "#ffffff", "#1e293b", 0.0),
-            "contrast" => ("#000000", "#0a0a0a", "#ffffff", 0.0),
-            _ => ("#0f172a", "#0f172a", "#e2e8f0", 0.0) // dark
+            "sepia" => ("#f4ecd8", "#e8dfc9", "#d4c5a9", "#5c4b37", "#8b7355", "#b8860b", "#ddd4c0", "#c9bda0"),
+            "light" => ("#f8fafc", "#ffffff", "#e2e8f0", "#1e293b", "#64748b", "#0284c7", "#f1f5f9", "#e2e8f0"),
+            "contrast" => ("#000000", "#0a0a0a", "#333333", "#ffffff", "#cccccc", "#ffff00", "#1a1a1a", "#444444"),
+            _ => ("#0f172a", "#0f172a", "#1e293b", "#e2e8f0", "#94a3b8", "#38bdf8", "#141e32", "#2a3a52") // dark
         };
 
+        // Apply to content area
         ContentWrapper.Background = new SolidColorBrush(Color.Parse(bg));
         ScrollViewer.Background = new SolidColorBrush(Color.Parse(bg));
+        
+        // Apply to toolbars
+        HeaderBar.Background = new SolidColorBrush(Color.Parse(panelBg));
+        HeaderBar.BorderBrush = new SolidColorBrush(Color.Parse(borderColor));
+        FooterBar.Background = new SolidColorBrush(Color.Parse(panelBg));
+        FooterBar.BorderBrush = new SolidColorBrush(Color.Parse(borderColor));
+        
+        // Apply to text elements
         TitleText.Foreground = new SolidColorBrush(Color.Parse(text));
-        PageIndicator.Foreground = new SolidColorBrush(Color.Parse(text));
+        PageIndicator.Foreground = new SolidColorBrush(Color.Parse(muted));
+        
+        // Apply sepia filter to images
+        if (theme == "sepia")
+        {
+            // Apply sepia tone effect
+            foreach (var image in _pageImages)
+            {
+                image.Opacity = 0.95;
+            }
+        }
+        else
+        {
+            foreach (var image in _pageImages)
+            {
+                image.Opacity = 1.0;
+            }
+        }
+        
+        // Update page container backgrounds for theme
+        foreach (var placeholder in _pagePlaceholders.Values)
+        {
+            placeholder.Background = theme switch
+            {
+                "sepia" => new SolidColorBrush(Color.Parse("#e8dfc9")),
+                "light" => new SolidColorBrush(Color.Parse("#e2e8f0")),
+                "contrast" => new SolidColorBrush(Color.Parse("#1a1a1a")),
+                _ => new SolidColorBrush(Color.Parse("#101020"))
+            };
+        }
+        
+        // Update chapters panel
+        ChaptersPanel.Background = new SolidColorBrush(Color.Parse(panelBg));
+        ChaptersPanel.BorderBrush = new SolidColorBrush(Color.Parse(borderColor));
         
         PersistPrefs();
     }
@@ -1129,6 +1249,7 @@ public partial class MainWindow : Window
             {
                 _singlePageMode = true;
                 ModeText.Text = "Page";
+                ModeButton.Classes.Add("active");
             }
             
             if (root.TryGetProperty("rtl", out var rtl) && rtl.GetBoolean())

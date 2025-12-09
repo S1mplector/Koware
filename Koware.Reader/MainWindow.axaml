@@ -385,7 +385,7 @@
                 Background="#0f172a"
                 BorderBrush="#1e293b"
                 BorderThickness="0,1,0,0"
-                Padding="16,8"
+                Padding="16,6"
                 x:Name="FooterBar">
             <Grid>
                 <Grid.ColumnDefinitions>
