@@ -72,8 +72,15 @@ public sealed class WebViewReaderHost
         core.WebResourceRequested += OnWebResourceRequested;
         core.WebMessageReceived += OnWebMessageReceived;
 
+        // Use a virtual host so localStorage persists properly
+        var tempDir = Path.Combine(userDataFolder, "Content");
+        Directory.CreateDirectory(tempDir);
+        var htmlPath = Path.Combine(tempDir, "reader.html");
         var html = ReaderHtmlBuilder.Build(_args);
-        core.NavigateToString(html);
+        File.WriteAllText(htmlPath, html, Encoding.UTF8);
+
+        core.SetVirtualHostNameToFolderMapping("koware.reader", tempDir, CoreWebView2HostResourceAccessKind.Allow);
+        core.Navigate("https://koware.reader/reader.html");
     }
 
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
