@@ -4,9 +4,11 @@
 
 # Koware
 
-Koware is a console-first link/stream aggregator for **Windows** and **macOS** that helps you search for anime/manga and open streams in a player from your terminal.
+Koware is a **standalone**, console-first link/stream aggregator for **Windows** and **macOS** that helps you search for anime/manga and open streams in a player from your terminal.
 
 It has a text-based user interface but behaves like a regular CLI. You run a command, Koware queries your configured sources, and opens the selected stream in a video player or manga in a reader.
+
+> Koware requires no external dependencies or additional software. Everything—including the TUI components, fuzzy search, and terminal rendering—is built from scratch in pure C#.
 
 > **⚠️ Important:** Koware ships with **no pre-configured sources**. You must configure your own sources before using it. See [Source Configuration](#source-configuration) below.
 
@@ -214,6 +216,38 @@ Koware does not provide or recommend specific sources. You must:
 3. Configure them in your `appsettings.user.json`
 
 **Note:** Without configured sources, Koware will display a warning and return no results.
+
+---
+
+## Technical Highlights
+
+### Custom fzf-Style Selector
+
+Koware includes a custom-built interactive selector inspired by [fzf](https://github.com/junegunn/fzf), implemented entirely from scratch in C# with no external TUI libraries.
+
+**Architecture (Single Responsibility Principle):**
+
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| `InteractiveSelector<T>` | `InteractiveSelector.cs` | Orchestrates selection flow, manages state |
+| `TerminalBuffer` | `TerminalBuffer.cs` | Low-level terminal I/O, ANSI escape codes, double-buffering |
+| `SelectorRenderer` | `SelectorRenderer.cs` | UI rendering logic |
+| `InputHandler` | `InputHandler.cs` | Keyboard input processing |
+| `FuzzyMatcher` | `FuzzyMatcher.cs` | Fuzzy string matching algorithm |
+
+**Features:**
+- **Double-buffered rendering** – Builds output in a buffer before flushing to prevent flicker
+- **Alternate screen buffer** – Uses ANSI `\x1b[?1049h` for a clean, full-screen TUI experience
+- **Terminal resize handling** – Detects terminal size changes and re-renders automatically
+- **Fuzzy search** – Type to filter items with intelligent scoring (exact matches, word boundaries, consecutive characters)
+- **Quick jump** – Press 1-9 to instantly select visible items
+- **Vim-style navigation** – Arrow keys, Page Up/Down, Home/End support
+
+**Why build from scratch?**
+- Zero external dependencies keeps Koware lightweight and portable
+- Full control over rendering behavior and ANSI escape sequences
+- Optimized for the specific use case of selecting anime/manga entries
+- Cross-platform compatibility (Windows, macOS) without platform-specific TUI libraries
 
 ---
 
