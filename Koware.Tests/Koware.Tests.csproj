@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <IsPackable>false</IsPackable>
-    <Version>0.8.0-beta</Version>
+    <Version>0.8.1-beta</Version>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="xunit" Version="2.6.6" />
