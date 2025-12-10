@@ -578,10 +578,61 @@ internal static class ReaderHtmlBuilder
             opacity: 1;
             pointer-events: auto;
         }
+
+        /* Zen mode - distraction-free reading */
+        body.zen-mode #header,
+        body.zen-mode #footer {
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(-100%);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        body.zen-mode #footer {
+            transform: translateY(100%);
+        }
+
+        body.zen-mode #reader {
+            height: 100vh;
+        }
+
+        body.zen-mode.controls-visible #header,
+        body.zen-mode.controls-visible #footer {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateY(0);
+        }
+
+        #header, #footer {
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        /* Zen mode indicator toast */
+        #zen-toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.85);
+            color: var(--text);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 13px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            z-index: 100;
+        }
+
+        #zen-toast.visible {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
     <div id="page-toast"></div>
+    <div id="zen-toast"></div>
     <div id="chapters-overlay"></div>
     <div id="chapters-panel">
         <div id="chapters-panel-header">
@@ -615,6 +666,7 @@ internal static class ReaderHtmlBuilder
                 </div>
             </div>
             <button class="btn btn-sm" id="mode-btn" type="button">Scroll <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M12 3l4 4M12 3L8 7M12 21l4-4M12 21l-4-4"/></svg></button>
+            <button class="btn btn-sm" id="zen-btn" type="button" title="Zen Mode (Z) - Hide UI for distraction-free reading">Zen <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button>
             <div class="dropdown" id="theme-dropdown">
                 <button class="btn btn-sm" id="theme-btn" type="button">Theme <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></button>
                 <div class="dropdown-menu">
@@ -679,6 +731,8 @@ internal static class ReaderHtmlBuilder
         const doubleBtn = document.getElementById("double-btn");
         const themeBtn = document.getElementById("theme-btn");
         const themeDropdown = document.getElementById("theme-dropdown");
+        const zenBtn = document.getElementById("zen-btn");
+        const zenToast = document.getElementById("zen-toast");
 
         let currentPage = 0;
         let currentTheme = "dark";
@@ -689,6 +743,9 @@ internal static class ReaderHtmlBuilder
         let currentZoom = 100;
         let loadedCount = 0;
         let toastTimeout = null;
+        let zenMode = false;
+        let zenHideTimeout = null;
+        let zenToastTimeout = null;
 
         function init() {
             pageSlider.max = pages.length;
@@ -699,6 +756,7 @@ internal static class ReaderHtmlBuilder
             loadPrefs();
             restorePosition();
             initChapters();
+            initZenMode();
         }
 
         // ===== Chapter Navigation =====
@@ -977,6 +1035,7 @@ internal static class ReaderHtmlBuilder
             modeBtn.onclick = toggleMode;
             rtlBtn.onclick = toggleRtl;
             doubleBtn.onclick = toggleDoublePage;
+            zenBtn.onclick = toggleZenMode;
 
             fitBtn.onclick = () => fitDropdown.classList.toggle("open");
             zoomBtn.onclick = () => zoomDropdown.classList.toggle("open");
@@ -1049,6 +1108,10 @@ internal static class ReaderHtmlBuilder
                     case "P":
                         toggleDoublePage();
                         break;
+                    case "z":
+                    case "Z":
+                        toggleZenMode();
+                        break;
                 }
             });
 
@@ -1120,6 +1183,7 @@ internal static class ReaderHtmlBuilder
                     if (prefs.singlePage && !singlePageMode) toggleMode();
                     if (prefs.rtl && !rtlMode) toggleRtl();
                     if (prefs.doublePage && !doublePageMode) toggleDoublePage();
+                    if (prefs.zenMode && !zenMode) toggleZenMode();
                 }
             } catch {}
         }
@@ -1132,9 +1196,63 @@ internal static class ReaderHtmlBuilder
                     theme: currentTheme,
                     singlePage: singlePageMode,
                     rtl: rtlMode,
-                    doublePage: doublePageMode
+                    doublePage: doublePageMode,
+                    zenMode: zenMode
                 }));
             } catch {}
+        }
+
+        // ===== Zen Mode =====
+        
+        function initZenMode() {
+            // Mouse movement shows controls temporarily in zen mode
+            document.addEventListener("mousemove", onZenMouseMove);
+            document.addEventListener("mouseleave", () => {
+                if (zenMode) scheduleZenHide();
+            });
+        }
+        
+        function onZenMouseMove() {
+            if (!zenMode) return;
+            showZenControls();
+            scheduleZenHide();
+        }
+        
+        function showZenControls() {
+            document.body.classList.add("controls-visible");
+        }
+        
+        function hideZenControls() {
+            document.body.classList.remove("controls-visible");
+        }
+        
+        function scheduleZenHide() {
+            clearTimeout(zenHideTimeout);
+            zenHideTimeout = setTimeout(hideZenControls, 2500);
+        }
+        
+        function showZenToast(text) {
+            zenToast.textContent = text;
+            zenToast.classList.add("visible");
+            clearTimeout(zenToastTimeout);
+            zenToastTimeout = setTimeout(() => zenToast.classList.remove("visible"), 1500);
+        }
+        
+        function toggleZenMode() {
+            zenMode = !zenMode;
+            document.body.classList.toggle("zen-mode", zenMode);
+            zenBtn.classList.toggle("active", zenMode);
+            
+            if (zenMode) {
+                showZenToast("Zen Mode ON — Move mouse to show controls");
+                scheduleZenHide();
+            } else {
+                hideZenControls();
+                clearTimeout(zenHideTimeout);
+                showZenToast("Zen Mode OFF");
+            }
+            
+            persistPrefs();
         }
 
         // Save position on page close
