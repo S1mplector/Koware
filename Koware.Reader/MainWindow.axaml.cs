@@ -1145,6 +1145,39 @@ public partial class MainWindow : Window
         ChaptersPanel.Background = new SolidColorBrush(Color.Parse(panelBg));
         ChaptersPanel.BorderBrush = new SolidColorBrush(Color.Parse(borderColor));
         
+        // Apply theme to toolbar buttons
+        var btnBgBrush = new SolidColorBrush(Color.Parse(btnBg));
+        var btnBorderBrush = new SolidColorBrush(Color.Parse(btnBorder));
+        var textBrush = new SolidColorBrush(Color.Parse(text));
+        var accentBrush = new SolidColorBrush(Color.Parse(accent));
+        
+        // Header toolbar buttons
+        foreach (var btn in new[] { RtlButton, DoublePageButton, FitModeButton, ZoomButton, ModeButton, ThemeButton })
+        {
+            btn.Background = btnBgBrush;
+            btn.BorderBrush = btnBorderBrush;
+            btn.Foreground = textBrush;
+        }
+        
+        // Chapters button (has accent styling when active)
+        ChaptersButton.Background = new SolidColorBrush(Color.Parse(theme switch
+        {
+            "sepia" => "#c9b896",
+            "light" => "#dbeafe",
+            "contrast" => "#333300",
+            _ => "#1e3a5f"
+        }));
+        ChaptersButton.BorderBrush = accentBrush;
+        ChaptersButton.Foreground = accentBrush;
+        
+        // Footer nav buttons
+        foreach (var btn in new[] { PrevChapterButton, PrevPageButton, NextPageButton, NextChapterButton })
+        {
+            btn.Background = btnBgBrush;
+            btn.BorderBrush = btnBorderBrush;
+            btn.Foreground = textBrush;
+        }
+        
         PersistPrefs();
     }
 
