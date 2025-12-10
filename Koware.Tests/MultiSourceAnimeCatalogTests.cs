@@ -24,11 +24,11 @@ public class MultiSourceAnimeCatalogTests
     {
         var primary = new StubCatalog(searchResults: new[]
         {
-            new Anime(new AnimeId("primary"), "Primary", null, new Uri("https://example.com/primary"), Array.Empty<Episode>())
+            new Anime(new AnimeId("abc"), "demo", null, null, new Uri("https://test"), Array.Empty<Episode>())
         });
         var secondary = new StubCatalog(searchResults: new[]
         {
-            new Anime(new AnimeId("secondary"), "Secondary", null, new Uri("https://example.com/secondary"), Array.Empty<Episode>())
+            new Anime(new AnimeId("secondary"), "Secondary", null, null, new Uri("https://example.com/secondary"), Array.Empty<Episode>())
         });
 
         var catalog = CreateCatalog(primary, secondary);
@@ -36,7 +36,7 @@ public class MultiSourceAnimeCatalogTests
         var result = await catalog.SearchAsync("q");
 
         Assert.Single(result);
-        Assert.Equal("primary", result.First().Id.Value);
+        Assert.Equal("abc", result.First().Id.Value);
     }
 
     [Fact]
@@ -45,7 +45,7 @@ public class MultiSourceAnimeCatalogTests
         var primary = new StubCatalog(searchResults: Array.Empty<Anime>(), throwOnSearch: true);
         var secondary = new StubCatalog(searchResults: new[]
         {
-            new Anime(new AnimeId("secondary"), "Secondary", null, new Uri("https://example.com/secondary"), Array.Empty<Episode>())
+            new Anime(new AnimeId("secondary"), "Secondary", null, null, new Uri("https://example.com/secondary"), Array.Empty<Episode>())
         });
 
         var catalog = CreateCatalog(primary, secondary);
@@ -65,7 +65,7 @@ public class MultiSourceAnimeCatalogTests
         var secondary = new StubCatalog(searchResults: Array.Empty<Anime>());
 
         var catalog = CreateCatalog(primary, secondary);
-        var episodes = await catalog.GetEpisodesAsync(new Anime(new AnimeId("primary"), "Primary", null, new Uri("https://example.com/primary"), Array.Empty<Episode>()), CancellationToken.None);
+        var episodes = await catalog.GetEpisodesAsync(new Anime(new AnimeId("abc"), "demo", null, null, new Uri("https://test"), Array.Empty<Episode>()), CancellationToken.None);
 
         Assert.Single(episodes);
         Assert.Equal(0, secondary.EpisodeCalls);

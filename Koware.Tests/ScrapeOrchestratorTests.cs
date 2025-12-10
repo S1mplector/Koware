@@ -24,8 +24,8 @@ public class ScrapeOrchestratorTests
         var catalog = new FakeCatalog(
             new[]
             {
-                new Anime(new AnimeId("one"), "One", null, new System.Uri("https://example.com/one"), Array.Empty<Episode>()),
-                new Anime(new AnimeId("two"), "Two", null, new System.Uri("https://example.com/two"), Array.Empty<Episode>())
+                new Anime(new AnimeId("one"), "One", null, null, new System.Uri("https://example.com/one"), Array.Empty<Episode>()),
+                new Anime(new AnimeId("abc"), "demo", null, null, new Uri("https://test"), Array.Empty<Episode>())
             },
             defaultStreams: new[]
             {
@@ -37,7 +37,7 @@ public class ScrapeOrchestratorTests
 
         var result = await orchestrator.ExecuteAsync(plan, CancellationToken.None);
 
-        Assert.Equal("Two", result.SelectedAnime?.Title);
+        Assert.Equal("demo", result.SelectedAnime?.Title);
     }
 
     [Fact]
@@ -46,8 +46,8 @@ public class ScrapeOrchestratorTests
         var catalog = new FakeCatalog(
             new[]
             {
-                new Anime(new AnimeId("one"), "One", null, new System.Uri("https://example.com/one"), Array.Empty<Episode>()),
-                new Anime(new AnimeId("two"), "Two", null, new System.Uri("https://example.com/two"), Array.Empty<Episode>())
+                new Anime(new AnimeId("one"), "One", null, null, new System.Uri("https://example.com/one"), Array.Empty<Episode>()),
+                new Anime(new AnimeId("abc"), "demo", null, null, new Uri("https://test"), Array.Empty<Episode>())
             },
             defaultStreams: new[]
             {
@@ -72,7 +72,7 @@ public class ScrapeOrchestratorTests
         };
 
         var catalog = new FakeCatalog(
-            new[] { new Anime(new AnimeId("one"), "One", null, new System.Uri("https://example.com/one"), Array.Empty<Episode>()) },
+            new[] { new Anime(new AnimeId("one"), "One", null, null, new System.Uri("https://example.com/one"), Array.Empty<Episode>()) },
             defaultStreams: streams);
 
         var orchestrator = new ScrapeOrchestrator(catalog, NullLogger<ScrapeOrchestrator>.Instance);
@@ -95,7 +95,7 @@ public class ScrapeOrchestratorTests
         };
 
         var catalog = new FakeCatalog(
-            new[] { new Anime(new AnimeId("one"), "One", null, new System.Uri("https://example.com/one"), Array.Empty<Episode>()) },
+            new[] { new Anime(new AnimeId("one"), "One", null, null, new System.Uri("https://example.com/one"), Array.Empty<Episode>()) },
             defaultStreams: streams);
 
         var orchestrator = new ScrapeOrchestrator(catalog, NullLogger<ScrapeOrchestrator>.Instance);
@@ -112,7 +112,7 @@ public class ScrapeOrchestratorTests
     public async Task ExecuteAsync_ClampsEpisodeWhenOutOfRange()
     {
         var catalog = new FakeCatalog(
-            new[] { new Anime(new AnimeId("one"), "One", null, new System.Uri("https://example.com/one"), Array.Empty<Episode>()) },
+            new[] { new Anime(new AnimeId("one"), "One", null, null, new System.Uri("https://example.com/one"), Array.Empty<Episode>()) },
             defaultStreams: new[]
             {
                 new StreamLink(new System.Uri("https://media.example.com/stream.m3u8"), "1080p", "demo", null)

@@ -11,13 +11,13 @@ namespace Koware.Tests;
 public class DownloadStoreTests : IAsyncLifetime
 {
     private readonly string _testDbPath;
-    private readonly TestDownloadStore _store;
+    private readonly SqliteDownloadStore _store;
 
     public DownloadStoreTests()
     {
-        // Use a temporary test database
+        // Use a temporary test database - store uses default path
         _testDbPath = Path.Combine(Path.GetTempPath(), $"koware_test_{Guid.NewGuid()}.db");
-        _store = new TestDownloadStore(_testDbPath);
+        _store = new SqliteDownloadStore();
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
@@ -355,19 +355,4 @@ public class DownloadStoreTests : IAsyncLifetime
     #endregion
 }
 
-/// <summary>
-/// Test implementation of DownloadStore that uses a custom database path.
-/// </summary>
-internal sealed class TestDownloadStore : SqliteDownloadStore
-{
-    private readonly string _dbPath;
-
-    public TestDownloadStore(string dbPath)
-    {
-        _dbPath = dbPath;
-        // Use reflection to set the connection string
-        var field = typeof(SqliteDownloadStore).GetField("_connectionString", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field?.SetValue(this, $"Data Source={dbPath};Cache=Shared");
-    }
-}
+// TestDownloadStore removed - SqliteDownloadStore is now sealed

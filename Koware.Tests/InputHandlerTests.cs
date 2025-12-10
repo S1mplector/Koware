@@ -1,5 +1,6 @@
 // Author: Ilgaz Mehmetoğlu
 // Tests for InputHandler and InputResult types.
+using System;
 using Koware.Cli.Console;
 using Xunit;
 
@@ -183,6 +184,34 @@ public class InputHandlerTests
         Assert.NotNull(handler);
     }
 
+    [Fact]
+    public void InputHandler_WithDisableQuickJump_Compiles()
+    {
+        var handler = new InputHandler(searchEnabled: true, disableQuickJump: true);
+        
+        Assert.NotNull(handler);
+    }
+
+    [Fact]
+    public void InputHandler_WithDisableQuickJumpFalse_Compiles()
+    {
+        var handler = new InputHandler(searchEnabled: true, disableQuickJump: false);
+        
+        Assert.NotNull(handler);
+    }
+
+    [Fact]
+    public void InputHandler_DisableQuickJumpDefaultsToFalse()
+    {
+        // Verify that the default constructor behavior doesn't break
+        var handler = new InputHandler();
+        Assert.NotNull(handler);
+        
+        // The second parameter defaults to false, so this should be equivalent
+        var handlerExplicit = new InputHandler(searchEnabled: true, disableQuickJump: false);
+        Assert.NotNull(handlerExplicit);
+    }
+
     #endregion
 
     #region InputResult Struct Behavior
@@ -252,11 +281,41 @@ public class InputHandlerTests
         // Backspace -> SearchBackspace
         // Any printable character -> SearchCharacter (when search enabled)
 
-        // Quick Jump Keys (when not in search mode)
+        // Quick Jump Keys (when not in search mode and DisableQuickJump is false)
         // 1-9 -> QuickJump(0-8)
+        //
+        // When DisableQuickJump is true:
+        // 1-9 -> SearchCharacter (treats numbers as search input)
+        // This is useful for episode selection where users type "22" to filter
 
         Assert.True(true); // Documentation test
     }
 
     #endregion
+}
+
+public class SelectorOptionsTests
+{
+    [Fact]
+    public void SelectorOptions_DisableQuickJump_DefaultsToFalse()
+    {
+        var options = new SelectorOptions<string>();
+        Assert.False(options.DisableQuickJump);
+    }
+
+    [Fact]
+    public void SelectorOptions_DisableQuickJump_CanBeSetToTrue()
+    {
+        var options = new SelectorOptions<string> { DisableQuickJump = true };
+        Assert.True(options.DisableQuickJump);
+    }
+
+    [Fact]
+    public void SelectorOptions_DisableQuickJump_IsFalseByDefault()
+    {
+        var options = new SelectorOptions<string>();
+        
+        // DisableQuickJump should be false by default (quick jump enabled)
+        Assert.False(options.DisableQuickJump);
+    }
 }

@@ -94,7 +94,7 @@ public class AllAnimeCatalogTests
             });
 
         var catalog = new AllAnimeCatalog(httpClient, options, NullLogger<AllAnimeCatalog>.Instance);
-        var episodes = await catalog.GetEpisodesAsync(new Anime(new AnimeId("abc"), "demo", null, new Uri("https://test"), Array.Empty<Episode>()), CancellationToken.None);
+        var episodes = await catalog.GetEpisodesAsync(new Anime(new AnimeId("abc"), "demo", null, null, new Uri("https://test"), Array.Empty<Episode>()), CancellationToken.None);
 
         Assert.Equal(new[] { 1, 2 }, episodes.Select(e => e.Number).ToArray());
     }
@@ -242,7 +242,7 @@ index-f1.m3u8
             });
 
         var catalog = new AllAnimeCatalog(httpClient, options, NullLogger<AllAnimeCatalog>.Instance);
-        var episodes = await catalog.GetEpisodesAsync(new Anime(new AnimeId("abc"), "demo", null, new Uri("https://test"), Array.Empty<Episode>()), CancellationToken.None);
+        var episodes = await catalog.GetEpisodesAsync(new Anime(new AnimeId("abc"), "demo", null, null, new Uri("https://test"), Array.Empty<Episode>()), CancellationToken.None);
 
         Assert.Empty(episodes);
     }
@@ -408,6 +408,71 @@ index.m3u8
         Assert.False(unconfiguredCatalog.IsConfigured);
     }
 
+    [Theory]
+    [InlineData("", "")]
+    [InlineData(null, "")]
+    [InlineData("--", "")]
+    public void Decode_EmptyOrNull_ReturnsEmpty(string? input, string expected)
+    {
+        var result = AllAnimeSourceDecoder.Decode(input!);
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void Decode_SimpleUrl_DecodesCorrectly()
+    {
+        // "https" encoded with XOR 56: h=0x68^56=0x50, t=0x74^56=0x4c, etc.
+        // h(0x68)^56=0x50, t(0x74)^56=0x4c, t(0x74)^56=0x4c, p(0x70)^56=0x48, s(0x73)^56=0x4b
+        // :(0x3a)^56=0x02, /(0x2f)^56=0x17, /(0x2f)^56=0x17
+        var encoded = EncodeForAllAnime("https://example.com/test");
+        var decoded = AllAnimeSourceDecoder.Decode(encoded);
+        Assert.Equal("https://example.com/test", decoded);
+    }
+
+    [Fact]
+    public void Decode_WithDoubleDashPrefix_StripsPrefix()
+    {
+        var encoded = "--" + EncodeForAllAnime("test").TrimStart('-');
+        var decoded = AllAnimeSourceDecoder.Decode(encoded);
+        Assert.Equal("test", decoded);
+    }
+
+    [Fact]
+    public void Decode_WithSingleDashPrefix_StripsPrefix()
+    {
+        var encoded = "-" + EncodeForAllAnime("test").TrimStart('-');
+        var decoded = AllAnimeSourceDecoder.Decode(encoded);
+        Assert.Equal("test", decoded);
+    }
+
+    [Fact]
+    public void Decode_RealWorldUrl_DecodesCorrectly()
+    {
+        // Test with a real-world style URL
+        var original = "https://www038.vipanicdn.net/streamhls/some/path/ep.1.1080.m3u8";
+        var encoded = EncodeForAllAnime(original);
+        var decoded = AllAnimeSourceDecoder.Decode(encoded);
+        Assert.Equal(original, decoded);
+    }
+
+    [Fact]
+    public void Decode_SpecialCharacters_HandlesCorrectly()
+    {
+        var original = "https://test.com/path?query=value&other=123#fragment";
+        var encoded = EncodeForAllAnime(original);
+        var decoded = AllAnimeSourceDecoder.Decode(encoded);
+        Assert.Equal(original, decoded);
+    }
+
+    [Fact]
+    public void Decode_RelativePath_DecodesCorrectly()
+    {
+        var original = "/apivtwo/clock?id=abc123";
+        var encoded = EncodeForAllAnime(original);
+        var decoded = AllAnimeSourceDecoder.Decode(encoded);
+        Assert.Equal(original, decoded);
+    }
+
     private static AllAnimeOptions DefaultOptions() => new()
     {
         Enabled = true,
@@ -419,36 +484,20 @@ index.m3u8
         SearchLimit = 10
     };
 
+    /// <summary>
+    /// Encode a string using XOR 56 (the inverse of AllAnimeSourceDecoder.Decode).
+    /// </summary>
     private static string EncodeForAllAnime(string text)
     {
-        var map = new Dictionary<char, string>
-        {
-            ['A']="79",['B']="7a",['C']="7b",['D']="7c",['E']="7d",['F']="7e",['G']="7f",
-            ['H']="70",['I']="71",['J']="72",['K']="73",['L']="74",['M']="75",['N']="76",['O']="77",
-            ['P']="68",['Q']="69",['R']="6a",['S']="6b",['T']="6c",['U']="6d",['V']="6e",['W']="6f",
-            ['X']="60",['Y']="61",['Z']="62",
-            ['a']="59",['b']="5a",['c']="5b",['d']="5c",['e']="5d",['f']="5e",['g']="5f",
-            ['h']="50",['i']="51",['j']="52",['k']="53",['l']="54",['m']="55",['n']="56",['o']="57",
-            ['p']="48",['q']="49",['r']="4a",['s']="4b",['t']="4c",['u']="4d",['v']="4e",['w']="4f",
-            ['x']="40",['y']="41",['z']="42",
-            ['0']="08",['1']="09",['2']="0a",['3']="0b",['4']="0c",['5']="0d",['6']="0e",['7']="0f",
-            ['8']="00",['9']="01",
-            ['-']="15",['.']="16",['_']="67",['~']="46",[':']="02",['/']="17",['?']="07",['#']="1b",
-            ['[']="63",[']']="65",['@']="78",['!']="19",['$']="1c",['&']="1e",['(']="10",[')']="11",
-            ['*']="12",['+']="13",[',']="14",[';']="03",['=']="05",['%']="1d"
-        };
-
-        var result = new List<string>();
+        const int XorKey = 56;
+        var result = new System.Text.StringBuilder(text.Length * 2 + 2);
+        result.Append("--");
         foreach (var ch in text)
         {
-            if (!map.TryGetValue(ch, out var code))
-            {
-                throw new InvalidOperationException($"Cannot encode character '{ch}'");
-            }
-            result.Add(code);
+            var encoded = (byte)(ch ^ XorKey);
+            result.Append(encoded.ToString("x2"));
         }
-
-        return "--" + string.Join(string.Empty, result);
+        return result.ToString();
     }
 
     private sealed class StubHttpMessageHandler : HttpMessageHandler

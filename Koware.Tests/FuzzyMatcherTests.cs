@@ -1,5 +1,7 @@
 // Author: Ilgaz Mehmetoğlu
 // Tests for the FuzzyMatcher string matching algorithm.
+using System;
+using System.Linq;
 using Koware.Cli.Console;
 using Xunit;
 

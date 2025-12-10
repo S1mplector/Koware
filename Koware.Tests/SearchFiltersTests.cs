@@ -101,7 +101,7 @@ public class SearchFiltersTests
     {
         var filters = new SearchFilters();
 
-        Assert.Empty(filters.Genres);
+        Assert.Null(filters.Genres);
         Assert.Null(filters.Year);
         Assert.Equal(ContentStatus.Any, filters.Status);
         Assert.Null(filters.MinScore);
@@ -117,7 +117,7 @@ public class SearchFiltersTests
             Genres = new List<string> { "Action", "Comedy" },
             Year = 2023,
             Status = ContentStatus.Ongoing,
-            MinScore = 7.5f,
+            MinScore = 7,
             Sort = SearchSort.Popularity,
             CountryOrigin = "JP"
         };
@@ -125,51 +125,51 @@ public class SearchFiltersTests
         Assert.Equal(2, filters.Genres.Count);
         Assert.Equal(2023, filters.Year);
         Assert.Equal(ContentStatus.Ongoing, filters.Status);
-        Assert.Equal(7.5f, filters.MinScore);
+        Assert.Equal(7, filters.MinScore);
         Assert.Equal(SearchSort.Popularity, filters.Sort);
         Assert.Equal("JP", filters.CountryOrigin);
     }
 
     [Fact]
-    public void SearchFilters_IsEmpty_TrueWhenDefault()
+    public void SearchFilters_HasFilters_FalseWhenDefault()
     {
         var filters = new SearchFilters();
-        Assert.True(filters.IsEmpty);
+        Assert.False(filters.HasFilters);
     }
 
     [Fact]
-    public void SearchFilters_IsEmpty_FalseWhenHasGenres()
+    public void SearchFilters_HasFilters_TrueWhenHasGenres()
     {
         var filters = new SearchFilters { Genres = new List<string> { "Action" } };
-        Assert.False(filters.IsEmpty);
+        Assert.True(filters.HasFilters);
     }
 
     [Fact]
-    public void SearchFilters_IsEmpty_FalseWhenHasYear()
+    public void SearchFilters_HasFilters_TrueWhenHasYear()
     {
         var filters = new SearchFilters { Year = 2023 };
-        Assert.False(filters.IsEmpty);
+        Assert.True(filters.HasFilters);
     }
 
     [Fact]
-    public void SearchFilters_IsEmpty_FalseWhenHasStatus()
+    public void SearchFilters_HasFilters_TrueWhenHasStatus()
     {
         var filters = new SearchFilters { Status = ContentStatus.Ongoing };
-        Assert.False(filters.IsEmpty);
+        Assert.True(filters.HasFilters);
     }
 
     [Fact]
-    public void SearchFilters_IsEmpty_FalseWhenHasMinScore()
+    public void SearchFilters_HasFilters_TrueWhenHasMinScore()
     {
-        var filters = new SearchFilters { MinScore = 8.0f };
-        Assert.False(filters.IsEmpty);
+        var filters = new SearchFilters { MinScore = 8 };
+        Assert.True(filters.HasFilters);
     }
 
     [Fact]
-    public void SearchFilters_IsEmpty_FalseWhenHasSort()
+    public void SearchFilters_HasFilters_TrueWhenHasSort()
     {
         var filters = new SearchFilters { Sort = SearchSort.Score };
-        Assert.False(filters.IsEmpty);
+        Assert.True(filters.HasFilters);
     }
 
     #endregion
@@ -179,28 +179,26 @@ public class SearchFiltersTests
     [Fact]
     public void SearchFilters_Parse_EmptyArgs_ReturnsEmpty()
     {
-        var (filters, remaining) = SearchFilters.Parse(Array.Empty<string>());
+        var filters = SearchFilters.Parse(Array.Empty<string>());
 
-        Assert.True(filters.IsEmpty);
-        Assert.Empty(remaining);
+        Assert.False(filters.HasFilters);
     }
 
     [Fact]
     public void SearchFilters_Parse_GenreFlag()
     {
         var args = new[] { "--genre", "action" };
-        var (filters, remaining) = SearchFilters.Parse(args);
+        var filters = SearchFilters.Parse(args);
 
         Assert.Single(filters.Genres);
         Assert.Contains("Action", filters.Genres);
-        Assert.Empty(remaining);
     }
 
     [Fact]
     public void SearchFilters_Parse_MultipleGenres()
     {
         var args = new[] { "--genre", "action", "--genre", "comedy" };
-        var (filters, remaining) = SearchFilters.Parse(args);
+        var filters = SearchFilters.Parse(args);
 
         Assert.Equal(2, filters.Genres.Count);
         Assert.Contains("Action", filters.Genres);
@@ -211,7 +209,7 @@ public class SearchFiltersTests
     public void SearchFilters_Parse_YearFlag()
     {
         var args = new[] { "--year", "2023" };
-        var (filters, remaining) = SearchFilters.Parse(args);
+        var filters = SearchFilters.Parse(args);
 
         Assert.Equal(2023, filters.Year);
     }
@@ -223,7 +221,7 @@ public class SearchFiltersTests
     public void SearchFilters_Parse_InvalidYear_Ignored(string yearValue)
     {
         var args = new[] { "--year", yearValue };
-        var (filters, _) = SearchFilters.Parse(args);
+        var filters = SearchFilters.Parse(args);
 
         Assert.Null(filters.Year);
     }
@@ -239,7 +237,7 @@ public class SearchFiltersTests
     public void SearchFilters_Parse_StatusFlag(string statusValue, ContentStatus expected)
     {
         var args = new[] { "--status", statusValue };
-        var (filters, _) = SearchFilters.Parse(args);
+        var filters = SearchFilters.Parse(args);
 
         Assert.Equal(expected, filters.Status);
     }
@@ -255,7 +253,7 @@ public class SearchFiltersTests
     public void SearchFilters_Parse_SortFlag(string sortValue, SearchSort expected)
     {
         var args = new[] { "--sort", sortValue };
-        var (filters, _) = SearchFilters.Parse(args);
+        var filters = SearchFilters.Parse(args);
 
         Assert.Equal(expected, filters.Sort);
     }
@@ -263,10 +261,10 @@ public class SearchFiltersTests
     [Fact]
     public void SearchFilters_Parse_ScoreFlag()
     {
-        var args = new[] { "--score", "7.5" };
-        var (filters, _) = SearchFilters.Parse(args);
+        var args = new[] { "--score", "8" };
+        var filters = SearchFilters.Parse(args);
 
-        Assert.Equal(7.5f, filters.MinScore);
+        Assert.Equal(8, filters.MinScore);
     }
 
     [Theory]
@@ -276,7 +274,7 @@ public class SearchFiltersTests
     public void SearchFilters_Parse_InvalidScore_Ignored(string scoreValue)
     {
         var args = new[] { "--score", scoreValue };
-        var (filters, _) = SearchFilters.Parse(args);
+        var filters = SearchFilters.Parse(args);
 
         Assert.Null(filters.MinScore);
     }
@@ -289,22 +287,19 @@ public class SearchFiltersTests
     public void SearchFilters_Parse_CountryFlag(string countryValue, string expected)
     {
         var args = new[] { "--country", countryValue };
-        var (filters, _) = SearchFilters.Parse(args);
+        var filters = SearchFilters.Parse(args);
 
         Assert.Equal(expected, filters.CountryOrigin);
     }
 
     [Fact]
-    public void SearchFilters_Parse_PreservesNonFilterArgs()
+    public void SearchFilters_Parse_ExtractsFiltersFromMixedArgs()
     {
         var args = new[] { "search", "one piece", "--genre", "action", "--year", "2023", "--limit", "10" };
-        var (filters, remaining) = SearchFilters.Parse(args);
+        var filters = SearchFilters.Parse(args);
 
         Assert.Single(filters.Genres);
         Assert.Equal(2023, filters.Year);
-        Assert.Equal(3, remaining.Count); // "search", "one piece", "--limit", "10" - wait, limit should be preserved
-        Assert.Contains("search", remaining);
-        Assert.Contains("one piece", remaining);
     }
 
     [Fact]
@@ -320,16 +315,14 @@ public class SearchFiltersTests
             "--score", "8",
             "--country", "jp"
         };
-        var (filters, remaining) = SearchFilters.Parse(args);
+        var filters = SearchFilters.Parse(args);
 
         Assert.Equal(2, filters.Genres.Count);
         Assert.Equal(2023, filters.Year);
         Assert.Equal(ContentStatus.Ongoing, filters.Status);
         Assert.Equal(SearchSort.Popularity, filters.Sort);
-        Assert.Equal(8f, filters.MinScore);
+        Assert.Equal(8, filters.MinScore);
         Assert.Equal("JP", filters.CountryOrigin);
-        Assert.Single(remaining);
-        Assert.Equal("my query", remaining[0]);
     }
 
     #endregion
