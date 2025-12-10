@@ -60,6 +60,17 @@ public sealed class ScrapeOrchestrator
     }
 
     /// <summary>
+    /// Get episodes for a specific anime.
+    /// </summary>
+    /// <param name="anime">The anime to get episodes for.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Collection of episodes.</returns>
+    public Task<IReadOnlyCollection<Episode>> GetEpisodesAsync(Anime anime, CancellationToken cancellationToken = default)
+    {
+        return _catalog.GetEpisodesAsync(anime, cancellationToken);
+    }
+
+    /// <summary>
     /// Execute a scrape plan using default match selection.
     /// </summary>
     /// <param name="plan">The scrape plan with query, episode, and quality preferences.</param>

@@ -63,10 +63,12 @@ public readonly struct InputResult
 public sealed class InputHandler
 {
     private readonly bool _searchEnabled;
+    private readonly bool _disableQuickJump;
 
-    public InputHandler(bool searchEnabled = true)
+    public InputHandler(bool searchEnabled = true, bool disableQuickJump = false)
     {
         _searchEnabled = searchEnabled;
+        _disableQuickJump = disableQuickJump;
     }
 
     /// <summary>
@@ -115,8 +117,8 @@ public sealed class InputHandler
 
     private InputResult HandleNumberKey(ConsoleKeyInfo key, bool searchActive)
     {
-        // If search is active or modifiers present, treat as search character
-        if (searchActive || key.Modifiers != 0)
+        // If quick jump is disabled, search is active, or modifiers present, treat as search character
+        if (_disableQuickJump || searchActive || key.Modifiers != 0)
         {
             if (_searchEnabled && !char.IsControl(key.KeyChar))
             {

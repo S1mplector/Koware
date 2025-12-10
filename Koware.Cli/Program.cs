@@ -99,7 +99,6 @@ static IHost BuildHost(string[] args)
     builder.Services.AddSingleton<IDownloadStore, SqliteDownloadStore>();
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware", LogLevel.Information);
-    builder.Logging.AddFilter("Koware.Infrastructure.Scraping.AllAnimeCatalog", LogLevel.Debug);
 
     return builder.Build();
 }
@@ -3446,6 +3445,7 @@ static async Task<int> HandlePlayAsync(ScrapeOrchestrator orchestrator, string[]
     }
 
     plan = await MaybeSelectMatchAsync(orchestrator, plan, logger, cancellationToken);
+    plan = await MaybeSelectEpisodeAsync(orchestrator, plan, logger, cancellationToken);
 
     var history = services.GetRequiredService<IWatchHistoryStore>();
     return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
@@ -4775,6 +4775,78 @@ static async Task<ScrapePlan> MaybeSelectMatchAsync(ScrapeOrchestrator orchestra
     }
 
     return plan with { PreferredMatchIndex = result.SelectedIndex + 1 };
+}
+
+/// <summary>
+/// If no episode number is set, interactively select one from available episodes.
+/// </summary>
+/// <param name="orchestrator">Scraping orchestrator.</param>
+/// <param name="plan">Current scrape plan.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>A plan with EpisodeNumber set.</returns>
+/// <remarks>
+/// If NonInteractive is true or an episode is already specified, returns the plan unchanged.
+/// Otherwise, fetches episodes and prompts the user to select one.
+/// </remarks>
+static async Task<ScrapePlan> MaybeSelectEpisodeAsync(ScrapeOrchestrator orchestrator, ScrapePlan plan, ILogger logger, CancellationToken cancellationToken)
+{
+    // If episode already specified or non-interactive mode, skip selection
+    if (plan.EpisodeNumber.HasValue || plan.NonInteractive)
+    {
+        return plan;
+    }
+
+    // Need to first get the selected anime to fetch its episodes
+    if (!plan.PreferredMatchIndex.HasValue)
+    {
+        return plan;
+    }
+
+    var matches = await orchestrator.SearchAsync(plan.Query, cancellationToken);
+    if (matches.Count == 0)
+    {
+        return plan;
+    }
+
+    var animeIndex = Math.Min(plan.PreferredMatchIndex.Value, matches.Count) - 1;
+    var selectedAnime = matches.ElementAt(animeIndex);
+
+    var episodes = await orchestrator.GetEpisodesAsync(selectedAnime, cancellationToken);
+    if (episodes.Count == 0)
+    {
+        return plan;
+    }
+
+    // If only one episode, auto-select it
+    if (episodes.Count == 1)
+    {
+        return plan with { EpisodeNumber = episodes.First().Number };
+    }
+
+    // Use interactive selector for multiple episodes (with DisableQuickJump for numeric input)
+    var sortedEpisodes = episodes.OrderBy(e => e.Number).ToList();
+    var result = InteractiveSelect.Show(
+        sortedEpisodes,
+        ep => string.IsNullOrWhiteSpace(ep.Title)
+            ? $"Episode {ep.Number}"
+            : $"Episode {ep.Number}: {ep.Title}",
+        new SelectorOptions<Episode>
+        {
+            Prompt = $"Select episode for \"{selectedAnime.Title}\"",
+            MaxVisibleItems = 15,
+            ShowSearch = true,
+            ShowPreview = false,
+            DisableQuickJump = true // Allow typing episode numbers like "22"
+        });
+
+    if (result.Cancelled)
+    {
+        logger.LogInformation("Episode selection canceled by user.");
+        throw new OperationCanceledException("Episode selection canceled by user.");
+    }
+
+    return plan with { EpisodeNumber = result.Selected?.Number };
 }
 
 /// <summary>

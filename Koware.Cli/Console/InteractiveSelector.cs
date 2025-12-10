@@ -78,7 +78,8 @@ public sealed class InteractiveSelector<T>
             ShowPreview = options?.ShowPreview ?? (_previewFunc != null),
             ShowFooter = false,  // No footer - fzf-style minimal UI
             HighlightColor = options?.GetHighlightColor() ?? Theme.Highlight,
-            SelectionColor = options?.GetSelectionColor() ?? Theme.Selection
+            SelectionColor = options?.GetSelectionColor() ?? Theme.Selection,
+            DisableQuickJump = options?.DisableQuickJump ?? false
         };
     }
 
@@ -104,7 +105,7 @@ public sealed class InteractiveSelector<T>
         // Initialize components - use alternate screen for clean TUI
         using var buffer = new TerminalBuffer(useAlternateScreen: true);
         var renderer = new SelectorRenderer(buffer, _renderConfig);
-        var inputHandler = new InputHandler(_renderConfig.ShowSearch);
+        var inputHandler = new InputHandler(_renderConfig.ShowSearch, _renderConfig.DisableQuickJump);
 
         // Initialize filtered list
         UpdateFilter();
@@ -335,6 +336,9 @@ public sealed class SelectorOptions<T>
 
     /// <summary>Optional function to get item status (watched, downloaded, etc.).</summary>
     public Func<T, ItemStatus>? StatusFunc { get; init; }
+
+    /// <summary>Disable quick jump with number keys (1-9). Useful for episode selection where users type numbers.</summary>
+    public bool DisableQuickJump { get; init; }
 }
 
 /// <summary>

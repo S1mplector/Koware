@@ -51,6 +51,7 @@ public sealed class RenderConfig
     public bool ShowFooter { get; init; } = true;
     public ConsoleColor HighlightColor { get; init; } = Theme.Highlight;
     public ConsoleColor SelectionColor { get; init; } = Theme.Selection;
+    public bool DisableQuickJump { get; init; }
 }
 
 /// <summary>
@@ -222,9 +223,9 @@ public sealed class SelectorRenderer
             _buffer.Write("   ");
         }
 
-        // Quick jump number (1-9)
+        // Quick jump number (1-9) - only show if not disabled
         var displayNum = displayIndex + 1;
-        if (displayNum <= 9 && string.IsNullOrEmpty(searchText))
+        if (!_config.DisableQuickJump && displayNum <= 9 && string.IsNullOrEmpty(searchText))
         {
             _buffer.SetColor(Theme.Secondary);
             _buffer.Write($"[{displayNum}] ");
