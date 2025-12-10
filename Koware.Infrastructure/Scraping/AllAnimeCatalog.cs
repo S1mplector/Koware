@@ -9,6 +9,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Koware.Application.Abstractions;
 using Koware.Domain.Models;
 using Koware.Infrastructure.Configuration;
@@ -26,6 +27,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
     {
         PropertyNameCaseInsensitive = true,
     };
+    private string? _cachedEpisodeIframeHead;
 
     public AllAnimeCatalog(HttpClient httpClient, IOptions<AllAnimeOptions> options, ILogger<AllAnimeCatalog> logger)
     {
@@ -289,15 +291,66 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         try
         {
             var decodedPath = AllAnimeSourceDecoder.Decode(source.Url);
-            var absoluteUrl = EnsureAbsolute(decodedPath);
+            
+            // Handle relative URLs by appending to episodeIframeHead and converting to clock.json
+            string absoluteUrl;
+            if (decodedPath.StartsWith("/", StringComparison.Ordinal))
+            {
+                var iframeHead = await GetEpisodeIframeHeadAsync(timeoutCts.Token);
+                if (string.IsNullOrWhiteSpace(iframeHead))
+                {
+                    absoluteUrl = EnsureAbsolute(decodedPath);
+                }
+                else
+                {
+                    absoluteUrl = ToClockJson(iframeHead.TrimEnd('/') + decodedPath);
+                }
+            }
+            else
+            {
+                absoluteUrl = decodedPath;
+            }
+            
             host = Uri.TryCreate(absoluteUrl, UriKind.Absolute, out var absUri) ? absUri.Host : "unknown";
 
             using var response = await SendWithRetryAsync(new Uri(absoluteUrl), timeoutCts.Token);
             response.EnsureSuccessStatusCode();
             const int maxBytes = 10 * 1024 * 1024; // 10 MB safety cap
             var length = response.Content.Headers.ContentLength;
+            
+            // Check if this is a direct video stream (large payload with video content type or video URL)
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+            var isDirectVideo = contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase) ||
+                               contentType.Equals("application/x-mpegURL", StringComparison.OrdinalIgnoreCase) ||
+                               contentType.Equals("application/vnd.apple.mpegurl", StringComparison.OrdinalIgnoreCase) ||
+                               absoluteUrl.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase) ||
+                               absoluteUrl.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase) ||
+                               absoluteUrl.EndsWith(".webm", StringComparison.OrdinalIgnoreCase);
+            
             if (length.HasValue && length.Value > maxBytes)
             {
+                // If it's a direct video URL, add it as a stream link
+                if (isDirectVideo && Uri.TryCreate(absoluteUrl, UriKind.Absolute, out var videoUri))
+                {
+                    var quality = "auto";
+                    if (absoluteUrl.Contains("1080")) quality = "1080p";
+                    else if (absoluteUrl.Contains("720")) quality = "720p";
+                    else if (absoluteUrl.Contains("480")) quality = "480p";
+                    
+                    collector.Add(new StreamLink(
+                        videoUri,
+                        quality,
+                        source.Name,
+                        _options.Referer,
+                        null,
+                        false,
+                        ComputeHostPriority(videoUri),
+                        source.Name));
+                    attempts.Add($"{source.Name}@{host}: direct-video");
+                    _logger.LogDebug("Source {Source} appears to be a direct video stream, added URL", source.Name);
+                    return;
+                }
+                
                 attempts.Add($"{source.Name}@{host}: payload-too-large");
                 _logger.LogDebug("Skipping source {Source} because payload length {Length} exceeds cap {Cap}", source.Name, length, maxBytes);
                 return;
@@ -369,6 +422,8 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         catch (JsonException)
         {
             _logger.LogDebug("Source payload for {Provider} was not JSON, attempting raw scan.", provider);
+            // Perform raw URL scan on non-JSON payloads
+            ScanForUrls(payload, provider, links, null, null);
         }
 
         var effectiveReferrer = string.IsNullOrWhiteSpace(referrer) ? _options.Referer : referrer;
@@ -607,6 +662,64 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         }
     }
 
+    /// <summary>
+    /// Scans raw text payload for video URLs when JSON parsing fails.
+    /// </summary>
+    private void ScanForUrls(string payload, string provider, List<StreamLink> links, string? referrer, IReadOnlyList<SubtitleTrack>? subtitles)
+    {
+        // Log first 500 chars for debugging (truncated for readability)
+        var preview = payload.Length > 500 ? payload[..500] + "..." : payload;
+        _logger.LogDebug("Raw scan payload preview for {Provider}: {Preview}", provider, preview);
+        
+        // Pattern to match common video stream URLs - more flexible pattern
+        var urlPatterns = new[]
+        {
+            // Direct video file URLs
+            @"https?://[^\s""'<>\]\)\}\\]+\.(m3u8|mp4|webm|mkv)(\?[^\s""'<>\]\)\}\\]*)?",
+            // URLs containing /video/ or /stream/ paths
+            @"https?://[^\s""'<>\]\)\}\\]+/(video|stream|play|watch)/[^\s""'<>\]\)\}\\]+",
+            // URLs with common CDN patterns
+            @"https?://[^\s""'<>\]\)\}\\]*\.(akamaized|cloudfront|fastly|bunnycdn)[^\s""'<>\]\)\}\\]*",
+            // Generic URLs that might be video (fallback)
+            @"https?://[^\s""'<>\]\)\}\\]+/[^\s""'<>\]\)\}\\]*\.(ts|m4s)"
+        };
+        
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var totalMatches = 0;
+
+        foreach (var pattern in urlPatterns)
+        {
+            var regex = new Regex(pattern, RegexOptions.IgnoreCase);
+            var matches = regex.Matches(payload);
+            totalMatches += matches.Count;
+
+            foreach (Match match in matches)
+            {
+                var url = match.Value.TrimEnd(',', ';', '\\', '"', '\'');
+                
+                // Skip duplicates
+                if (!seen.Add(url))
+                    continue;
+
+                // Try to determine quality from URL
+                var quality = "auto";
+                if (url.Contains("1080", StringComparison.OrdinalIgnoreCase))
+                    quality = "1080p";
+                else if (url.Contains("720", StringComparison.OrdinalIgnoreCase))
+                    quality = "720p";
+                else if (url.Contains("480", StringComparison.OrdinalIgnoreCase))
+                    quality = "480p";
+                else if (url.Contains("360", StringComparison.OrdinalIgnoreCase))
+                    quality = "360p";
+
+                AddLinkIfValid(links, url, quality, provider, referrer, subtitles);
+            }
+        }
+
+        _logger.LogDebug("Raw scan for {Provider}: {Total} pattern matches, {Unique} unique URLs added", 
+            provider, totalMatches, seen.Count);
+    }
+
     private static int ComputeHostPriority(Uri uri)
     {
         var host = uri.Host.ToLowerInvariant();
@@ -842,6 +955,83 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
         throw new InvalidOperationException("AllAnime BaseHost is not configured and ApiBase is invalid.");
     }
 
+    private async Task<string?> GetEpisodeIframeHeadAsync(CancellationToken cancellationToken)
+    {
+        if (_cachedEpisodeIframeHead is not null)
+        {
+            return _cachedEpisodeIframeHead;
+        }
+
+        try
+        {
+            var referer = string.IsNullOrWhiteSpace(_options.Referer) ? "https://allanime.to" : _options.Referer;
+            var versionUrl = $"{referer.TrimEnd('/')}/getVersion";
+            
+            using var request = new HttpRequestMessage(HttpMethod.Get, versionUrl);
+            request.Headers.Referrer = new Uri(referer);
+            if (!string.IsNullOrWhiteSpace(_options.UserAgent))
+            {
+                request.Headers.UserAgent.ParseAdd(_options.UserAgent);
+            }
+            request.Headers.Accept.ParseAdd("application/json, */*");
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync(cancellationToken);
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("episodeIframeHead", out var iframeHead) && 
+                    iframeHead.ValueKind == JsonValueKind.String)
+                {
+                    _cachedEpisodeIframeHead = iframeHead.GetString();
+                    _logger.LogDebug("Fetched episodeIframeHead: {IframeHead}", _cachedEpisodeIframeHead);
+                    return _cachedEpisodeIframeHead;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to fetch episodeIframeHead from /getVersion");
+        }
+
+        return null;
+    }
+
+    private static string ToClockJson(string url)
+    {
+        // Convert /path/to/clock to /path/to/clock.json while preserving query string
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return url;
+        }
+
+        var path = uri.AbsolutePath;
+        if (!path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            // Replace the last segment with clock.json if it's "clock", otherwise append .json
+            if (path.EndsWith("/clock", StringComparison.OrdinalIgnoreCase))
+            {
+                path = path + ".json";
+            }
+            else
+            {
+                // For other paths, find the filename and add .json
+                var lastSlash = path.LastIndexOf('/');
+                if (lastSlash >= 0)
+                {
+                    var filename = path[(lastSlash + 1)..];
+                    if (!filename.Contains('.'))
+                    {
+                        path = path + ".json";
+                    }
+                }
+            }
+        }
+
+        var builder = new UriBuilder(uri) { Path = path };
+        return builder.Uri.ToString();
+    }
+
     private HttpRequestMessage BuildRequest(Uri uri)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, uri);
@@ -902,22 +1092,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
 
 internal static class AllAnimeSourceDecoder
 {
-    private static readonly IReadOnlyDictionary<string, char> Map = new Dictionary<string, char>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["79"]='A',["7a"]='B',["7b"]='C',["7c"]='D',["7d"]='E',["7e"]='F',["7f"]='G',
-        ["70"]='H',["71"]='I',["72"]='J',["73"]='K',["74"]='L',["75"]='M',["76"]='N',["77"]='O',
-        ["68"]='P',["69"]='Q',["6a"]='R',["6b"]='S',["6c"]='T',["6d"]='U',["6e"]='V',["6f"]='W',
-        ["60"]='X',["61"]='Y',["62"]='Z',
-        ["59"]='a',["5a"]='b',["5b"]='c',["5c"]='d',["5d"]='e',["5e"]='f',["5f"]='g',
-        ["50"]='h',["51"]='i',["52"]='j',["53"]='k',["54"]='l',["55"]='m',["56"]='n',["57"]='o',
-        ["48"]='p',["49"]='q',["4a"]='r',["4b"]='s',["4c"]='t',["4d"]='u',["4e"]='v',["4f"]='w',
-        ["40"]='x',["41"]='y',["42"]='z',
-        ["08"]='0',["09"]='1',["0a"]='2',["0b"]='3',["0c"]='4',["0d"]='5',["0e"]='6',["0f"]='7',
-        ["00"]='8',["01"]='9',
-        ["15"]='-',["16"]='.',["67"]='_',["46"]='~',["02"]= ':',["17"]='/',["07"]='?',["1b"]='#',
-        ["63"]='[',["65"]=']',["78"]='@',["19"]='!',["1c"]='$',["1e"]='&',["10"]='(',["11"]=')',
-        ["12"]='*',["13"]='+',["14"]=',',["03"]=';',["05"]='=',["1d"]='%'
-    };
+    private const int XorKey = 56;
 
     public static string Decode(string encoded)
     {
@@ -926,19 +1101,20 @@ internal static class AllAnimeSourceDecoder
             return string.Empty;
         }
 
+        // Strip leading dashes (-- or single -)
         var trimmed = encoded.StartsWith("--", StringComparison.Ordinal) ? encoded[2..] : encoded.TrimStart('-');
+        
+        // Convert hex string to bytes and XOR each byte with key 56
         var builder = new StringBuilder(trimmed.Length / 2);
-
         for (var i = 0; i + 1 < trimmed.Length; i += 2)
         {
-            var key = trimmed.Substring(i, 2);
-            if (Map.TryGetValue(key, out var ch))
+            var hexPair = trimmed.Substring(i, 2);
+            if (byte.TryParse(hexPair, System.Globalization.NumberStyles.HexNumber, null, out var b))
             {
-                builder.Append(ch);
+                builder.Append((char)(b ^ XorKey));
             }
         }
 
-        var decoded = builder.ToString().Replace("/clock", "/clock.json", StringComparison.OrdinalIgnoreCase);
-        return decoded;
+        return builder.ToString();
     }
 }
