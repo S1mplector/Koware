@@ -29,6 +29,7 @@ public sealed class RenderState
 {
     public required IReadOnlyList<(string Display, int OriginalIndex, ItemStatus Status, string? Preview)> Items { get; init; }
     public int TotalCount { get; init; }
+    public int FilteredCount { get; init; }  // Actual number of filtered items (not padded)
     public int SelectedIndex { get; init; }
     public int ScrollOffset { get; init; }
     public string SearchText { get; init; } = "";
@@ -110,15 +111,15 @@ public sealed class SelectorRenderer
         _buffer.ResetColor();
 
         _buffer.SetColor(Theme.Text);
-        _buffer.Write($" [{state.Items.Count}/{state.TotalCount}]");
+        _buffer.Write($" [{state.FilteredCount}/{state.TotalCount}]");
         _buffer.ResetColor();
 
         // Scroll indicator
-        if (state.Items.Count > _config.MaxVisibleItems)
+        if (state.FilteredCount > _config.MaxVisibleItems)
         {
             _buffer.SetColor(Theme.Muted);
-            var scrollPct = state.Items.Count > 1 
-                ? (state.SelectedIndex * 100) / (state.Items.Count - 1) 
+            var scrollPct = state.FilteredCount > 1 
+                ? ((state.ScrollOffset + state.SelectedIndex) * 100) / (state.FilteredCount - 1) 
                 : 0;
             _buffer.Write($" ↕{scrollPct}%");
             _buffer.ResetColor();
@@ -173,6 +174,12 @@ public sealed class SelectorRenderer
         int displayIndex,
         string searchText)
     {
+        // Empty item - just render blank line
+        if (string.IsNullOrEmpty(item.Display) && item.OriginalIndex < 0)
+        {
+            return; // Will still get WriteLine() from RenderItems
+        }
+
         // Selection indicator
         if (isSelected)
         {

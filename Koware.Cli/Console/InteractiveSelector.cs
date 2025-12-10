@@ -76,6 +76,7 @@ public sealed class InteractiveSelector<T>
             MaxVisibleItems = Math.Min(options?.MaxVisibleItems ?? 10, Math.Max(3, GetTerminalHeight() - 8)),
             ShowSearch = options?.ShowSearch ?? true,
             ShowPreview = options?.ShowPreview ?? (_previewFunc != null),
+            ShowFooter = false,  // No footer - fzf-style minimal UI
             HighlightColor = options?.GetHighlightColor() ?? Theme.Highlight,
             SelectionColor = options?.GetSelectionColor() ?? Theme.Selection
         };
@@ -100,8 +101,8 @@ public sealed class InteractiveSelector<T>
             return SelectionResult<T>.Cancel();
         }
 
-        // Initialize components
-        using var buffer = new TerminalBuffer(useAlternateScreen: false);
+        // Initialize components - use alternate screen for clean TUI
+        using var buffer = new TerminalBuffer(useAlternateScreen: true);
         var renderer = new SelectorRenderer(buffer, _renderConfig);
         var inputHandler = new InputHandler(_renderConfig.ShowSearch);
 
@@ -121,7 +122,36 @@ public sealed class InteractiveSelector<T>
 
             while (true)
             {
+                // Check for terminal resize before blocking on input
+                if (buffer.CheckResize())
+                {
+                    if (buffer.IsAlternateScreen)
+                    {
+                        buffer.ClearFullScreen();
+                        startLine = 0;
+                    }
+                    else
+                    {
+                        startLine = buffer.ReserveSpace(totalLinesNeeded);
+                    }
+                    RenderFrame(renderer, startLine);
+                }
+
                 var input = inputHandler.ReadKey(!string.IsNullOrEmpty(_searchText));
+
+                // Check for resize after input (terminal might have resized while waiting)
+                if (buffer.CheckResize())
+                {
+                    if (buffer.IsAlternateScreen)
+                    {
+                        buffer.ClearFullScreen();
+                        startLine = 0;
+                    }
+                    else
+                    {
+                        startLine = buffer.ReserveSpace(totalLinesNeeded);
+                    }
+                }
 
                 switch (input.Action)
                 {
@@ -220,6 +250,7 @@ public sealed class InteractiveSelector<T>
         {
             Items = renderItems!,
             TotalCount = _items.Count,
+            FilteredCount = _filtered.Count,  // Actual filtered count, not padded
             SelectedIndex = _selectedIndex - _scrollOffset,
             ScrollOffset = _scrollOffset,
             SearchText = _searchText

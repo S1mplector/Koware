@@ -16,11 +16,15 @@ public sealed class TerminalBuffer : IDisposable
     private readonly bool _useAlternateScreen;
     private bool _inAlternateScreen;
     private int _lastRenderedHeight;
+    private int _lastWidth;
+    private int _lastHeight;
     
     // ANSI escape sequences
     private const string Esc = "\x1b";
     private const string ClearLine = $"{Esc}[2K";
     private const string ClearToEnd = $"{Esc}[K";
+    private const string ClearScreen = $"{Esc}[2J";
+    private const string MoveCursorHome = $"{Esc}[H";
     private const string HideCursor = $"{Esc}[?25l";
     private const string ShowCursor = $"{Esc}[?25h";
     private const string SaveCursor = $"{Esc}[s";
@@ -36,6 +40,8 @@ public sealed class TerminalBuffer : IDisposable
     public TerminalBuffer(bool useAlternateScreen = false)
     {
         _useAlternateScreen = useAlternateScreen && !IsOutputRedirected();
+        _lastWidth = GetTerminalWidth();
+        _lastHeight = GetTerminalHeight();
     }
 
     /// <summary>
@@ -49,6 +55,11 @@ public sealed class TerminalBuffer : IDisposable
     public int Height => GetTerminalHeight();
 
     /// <summary>
+    /// Whether we're using the alternate screen buffer.
+    /// </summary>
+    public bool IsAlternateScreen => _inAlternateScreen;
+
+    /// <summary>
     /// Initialize the terminal for TUI rendering.
     /// </summary>
     public void Initialize()
@@ -56,11 +67,17 @@ public sealed class TerminalBuffer : IDisposable
         if (_useAlternateScreen && !_inAlternateScreen)
         {
             System.Console.Write(EnterAltScreen);
+            System.Console.Write(ClearScreen);
+            System.Console.Write(MoveCursorHome);
             _inAlternateScreen = true;
         }
         
         System.Console.Write(HideCursor);
         System.Console.Out.Flush();
+        
+        // Store initial size
+        _lastWidth = GetTerminalWidth();
+        _lastHeight = GetTerminalHeight();
     }
 
     /// <summary>
@@ -283,6 +300,36 @@ public sealed class TerminalBuffer : IDisposable
         {
             return 0;
         }
+    }
+
+    /// <summary>
+    /// Check if the terminal has been resized since last check.
+    /// </summary>
+    /// <returns>True if terminal size changed.</returns>
+    public bool CheckResize()
+    {
+        var currentWidth = GetTerminalWidth();
+        var currentHeight = GetTerminalHeight();
+        
+        if (currentWidth != _lastWidth || currentHeight != _lastHeight)
+        {
+            _lastWidth = currentWidth;
+            _lastHeight = currentHeight;
+            return true;
+        }
+        
+        return false;
+    }
+
+    /// <summary>
+    /// Clear the entire screen (useful after resize in alternate screen mode).
+    /// </summary>
+    public void ClearFullScreen()
+    {
+        System.Console.Write(ClearScreen);
+        System.Console.Write(MoveCursorHome);
+        System.Console.Out.Flush();
+        _lastRenderedHeight = 0;
     }
 
     public void Dispose()
