@@ -44,16 +44,14 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
 
     public async Task<IReadOnlyCollection<Anime>> SearchAsync(string query, SearchFilters filters, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            _logger.LogDebug("SearchAsync called. IsConfigured={IsConfigured}, ApiBase='{ApiBase}', BaseHost='{BaseHost}'",
-                _options.IsConfigured, _options.ApiBase ?? "(null)", _options.BaseHost ?? "(null)");
+        _logger.LogDebug("SearchAsync called. IsConfigured={IsConfigured}, ApiBase='{ApiBase}', BaseHost='{BaseHost}'",
+            _options.IsConfigured, _options.ApiBase ?? "(null)", _options.BaseHost ?? "(null)");
 
-            if (!_options.IsConfigured)
-            {
-                _logger.LogWarning("AllAnime source not configured. Add configuration to ~/.config/koware/appsettings.user.json");
-                return Array.Empty<Anime>();
-            }
+        if (!_options.IsConfigured)
+        {
+            _logger.LogWarning("AllAnime source not configured. Add configuration to ~/.config/koware/appsettings.user.json");
+            return Array.Empty<Anime>();
+        }
 
         // Build GraphQL query with filter support
         var gql = "query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name availableEpisodes __typename } }}";
@@ -119,47 +117,47 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
             countryOrigin
         };
 
-            var uri = BuildApiUri(gql, variables);
-            using var response = await SendWithRetryAsync(uri, cancellationToken);
-            response.EnsureSuccessStatusCode();
+        var uri = BuildApiUri(gql, variables);
+        using var response = await SendWithRetryAsync(uri, cancellationToken);
+        response.EnsureSuccessStatusCode();
 
-            using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-            var edges = json.RootElement
-                .GetProperty("data")
-                .GetProperty("shows")
-                .GetProperty("edges");
+        using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        var edges = json.RootElement
+            .GetProperty("data")
+            .GetProperty("shows")
+            .GetProperty("edges");
 
-            var results = new List<Anime>();
-            foreach (var edge in edges.EnumerateArray())
+        var results = new List<Anime>();
+        foreach (var edge in edges.EnumerateArray())
+        {
+            var id = edge.GetProperty("_id").GetString()!;
+            var title = edge.GetProperty("name").GetString() ?? id;
+            var synopsis = edge.TryGetProperty("description", out var desc) ? desc.GetString() : null;
+            Uri? coverImage = null;
+            if (edge.TryGetProperty("thumbnail", out var thumb) && thumb.ValueKind == JsonValueKind.String)
             {
-                var id = edge.GetProperty("_id").GetString()!;
-                var title = edge.GetProperty("name").GetString() ?? id;
-                var synopsis = edge.TryGetProperty("description", out var desc) ? desc.GetString() : null;
-                Uri? coverImage = null;
-                if (edge.TryGetProperty("thumbnail", out var thumb) && thumb.ValueKind == JsonValueKind.String)
+                var thumbUrl = thumb.GetString();
+                if (!string.IsNullOrWhiteSpace(thumbUrl))
                 {
-                    var thumbUrl = thumb.GetString();
-                    if (!string.IsNullOrWhiteSpace(thumbUrl))
+                    var absoluteThumb = EnsureAbsolute(thumbUrl);
+                    if (Uri.TryCreate(absoluteThumb, UriKind.Absolute, out var parsedThumb))
                     {
-                        var absoluteThumb = EnsureAbsolute(thumbUrl);
-                        if (Uri.TryCreate(absoluteThumb, UriKind.Absolute, out var parsedThumb))
-                        {
-                            coverImage = parsedThumb;
-                        }
-                        else
-                        {
-                            _logger.LogDebug("Skipping invalid thumbnail '{Thumb}' for anime {AnimeId}", thumbUrl, id);
-                        }
+                        coverImage = parsedThumb;
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Skipping invalid thumbnail '{Thumb}' for anime {AnimeId}", thumbUrl, id);
                     }
                 }
-                results.Add(new Anime(
-                    new AnimeId(id),
-                    title,
-                    synopsis: synopsis,
-                    coverImage: coverImage,
-                    detailPage: BuildDetailUri(id),
-                    episodes: Array.Empty<Episode>()));
             }
+            results.Add(new Anime(
+                new AnimeId(id),
+                title,
+                synopsis: synopsis,
+                coverImage: coverImage,
+                detailPage: BuildDetailUri(id),
+                episodes: Array.Empty<Episode>()));
+        }
 
         return results;
     }

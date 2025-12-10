@@ -26,6 +26,18 @@ Koware does **NOT** host any media. It does **NOT** include any source URLs. It 
 
 ---
 
+## Quickstart (about 5 minutes)
+
+- Install (Windows): `.\install-koware.ps1 -Publish`
+- Install (macOS): `./Scripts/publish-macos.sh` then run the app from `publish/`
+- Auto-configure providers: `koware provider autoconfig`
+- Test connectivity: `koware provider test`
+- Search and play: `koware stream "haikyuu" --episode 1 --quality 720p`
+
+After that, fine-tune `appsettings.user.json` if you need custom hosts.
+
+---
+
 ## Getting started
 
 ### Requirements
@@ -175,12 +187,33 @@ Key settings:
 
 **Koware ships with no pre-configured sources.** You must configure sources yourself before using the app.
 
-### Configuration File Location
+### Where to put your config
 
 Create or edit the configuration file at:
 
 - **Windows**: `%APPDATA%\koware\appsettings.user.json`
 - **macOS/Linux**: `~/.config/koware/appsettings.user.json`
+
+Start from the sample in the repo:
+
+```bash
+cp Koware.Cli/appsettings.json ~/.config/koware/appsettings.user.json
+```
+
+Then edit the copy with your own host/API URLs.
+
+### Auto-configure providers (recommended)
+
+Koware can pull working provider configs from the public `koware-providers` repo and merge them into your `appsettings.user.json`:
+
+```bash
+koware provider autoconfig            # configure all available providers
+koware provider autoconfig --list     # see what’s available
+koware provider autoconfig allanime   # configure a single provider
+koware provider test                  # verify connectivity
+```
+
+The command fetches `providers.json` plus the referenced config files, merges them into your config, and keeps any custom fields you already have. If the request fails, you can still edit manually as described below.
 
 ### Example Configuration
 
@@ -208,16 +241,21 @@ Create or edit the configuration file at:
 }
 ```
 
-### Required Fields
+### What each field means
 
-Each source requires:
+| Field | Purpose | Notes |
+|-------|---------|-------|
+| `Enabled` | Turns the source on/off | Set `true` only for sources you control/trust |
+| `BaseHost` | Host name used to build detail/cover image links | Example: `allanime.to` |
+| `ApiBase` | Base URL for GraphQL/REST calls | Example: `https://api.allanime.to` |
+| `Referer` | Referer/Origin headers | Should match the site you’re calling |
+| `TranslationType` | sub/dub/etc. when the API supports it | `sub` is common |
+| `SearchLimit` (if present) | Max results per query | Lower it if your source rate-limits |
 
-| Field | Description |
-|-------|-------------|
-| `Enabled` | Set to `true` to enable this source |
-| `BaseHost` | The hostname of the source |
-| `ApiBase` | The API endpoint URL |
-| `Referer` | The HTTP Referer header to use |
+**Per source**
+
+- `AllAnime` / `AllManga`: Require `BaseHost`, `ApiBase`, `Referer`, and `TranslationType`.
+- `GogoAnime`: Uses `SiteBase` for page URLs and `ApiBase` for API calls.
 
 ### Finding Sources
 
@@ -228,6 +266,31 @@ Koware does not provide or recommend specific sources. You must:
 3. Configure them in your `appsettings.user.json`
 
 **Note:** Without configured sources, Koware will display a warning and return no results.
+
+### Quick sanity checks
+
+- Run `koware search "<title>"` to confirm you get results; an empty list usually means `ApiBase`/`Referer`/`BaseHost` is incorrect.
+- Logs will warn if a source is disabled or missing required fields.
+- If you rotate hosts often, keep multiple sources in the file and flip `Enabled` as needed.
+
+### Provider commands cheat sheet
+
+| Command | What it does |
+|---------|--------------|
+| `koware provider list` | Show providers and enabled/disabled state |
+| `koware provider autoconfig [name]` | Pull remote config for all or a specific provider |
+| `koware provider autoconfig --list` | Show which remote providers are available |
+| `koware provider test [name]` | Quick connectivity check |
+| `koware provider --enable <name>` / `--disable <name>` | Toggle a provider |
+| `koware provider add <name>` | Interactive manual setup |
+| `koware provider edit` | Open your config in the default editor |
+
+### Troubleshooting
+
+- **No results / empty search**: Run `koware provider test`, confirm `ApiBase` and `Referer` are valid, and re-run `koware provider autoconfig`.
+- **HTTP 403/401**: The source likely requires a specific `Referer`/`Origin`—ensure they match the site host.
+- **Bad host errors**: `BaseHost` must be a hostname only (no protocol). `ApiBase` must be a full URL.
+- **Resetting**: Move/delete `appsettings.user.json`, copy `Koware.Cli/appsettings.json`, then run `koware provider autoconfig`.
 
 ---
 
