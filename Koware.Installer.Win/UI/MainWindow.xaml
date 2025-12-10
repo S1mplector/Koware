@@ -14,31 +14,115 @@
     <Window.Resources>
         <SolidColorBrush x:Key="PanelBackground" Color="#111827" />
         <SolidColorBrush x:Key="Accent" Color="#38BDF8" />
+        <SolidColorBrush x:Key="ButtonBg" Color="#1E3A5F" />
+        <SolidColorBrush x:Key="ButtonHover" Color="#2D4A6F" />
+        <SolidColorBrush x:Key="ButtonPressed" Color="#16304F" />
+        
         <Style TargetType="TextBlock">
             <Setter Property="Margin" Value="0,0,0,6"/>
             <Setter Property="Foreground" Value="#E2E8F0"/>
         </Style>
-        <Style TargetType="Button">
+        
+        <!-- Modern rounded button style -->
+        <Style x:Key="ModernButton" TargetType="Button">
             <Setter Property="Margin" Value="0,4,0,0"/>
-            <Setter Property="Padding" Value="12,8"/>
-            <Setter Property="Foreground" Value="#0B1222"/>
-            <Setter Property="Background" Value="#E2E8F0"/>
+            <Setter Property="Padding" Value="16,10"/>
+            <Setter Property="Foreground" Value="#E2E8F0"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" 
+                                Background="{StaticResource ButtonBg}" 
+                                BorderBrush="#2D4A6F" 
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="{StaticResource ButtonHover}"/>
+                                <Setter TargetName="border" Property="BorderBrush" Value="#3D5A7F"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="{StaticResource ButtonPressed}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="border" Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
+        
+        <!-- Primary action button (Install) -->
+        <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource ModernButton}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" 
+                                CornerRadius="8"
+                                BorderThickness="0"
+                                Padding="{TemplateBinding Padding}">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#2563EB" Offset="0"/>
+                                    <GradientStop Color="#1D4ED8" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background">
+                                    <Setter.Value>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                            <GradientStop Color="#3B82F6" Offset="0"/>
+                                            <GradientStop Color="#2563EB" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="border" Property="Background">
+                                    <Setter.Value>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                            <GradientStop Color="#1E40AF" Offset="0"/>
+                                            <GradientStop Color="#1E3A8A" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="border" Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        
         <Style x:Key="ButtonText" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#0B1222"/>
+            <Setter Property="Foreground" Value="#E2E8F0"/>
             <Setter Property="Margin" Value="0"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
+        
         <Style TargetType="TextBox">
             <Setter Property="Foreground" Value="#E2E8F0"/>
             <Setter Property="Background" Value="#1E293B"/>
             <Setter Property="BorderBrush" Value="#334155"/>
             <Setter Property="Padding" Value="6,4"/>
         </Style>
+        
         <Style TargetType="CheckBox">
             <Setter Property="Foreground" Value="#E2E8F0"/>
             <Setter Property="Margin" Value="0,6,0,0"/>
         </Style>
+        
         <Style TargetType="GroupBox">
             <Setter Property="Foreground" Value="#E2E8F0"/>
             <Setter Property="BorderBrush" Value="#334155"/>
@@ -72,15 +156,15 @@
                 </StackPanel>
             </Border>
             <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Width="120" Height="36" Click="OnContinue">
+                <Button Style="{StaticResource PrimaryButton}" Width="130" Click="OnContinue">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE72A;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0"/>
+                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE72A;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/>
                         <TextBlock Style="{StaticResource ButtonText}" Text="Continue"/>
                     </StackPanel>
                 </Button>
-                <Button Width="100" Height="36" Margin="8,0,0,0" Click="OnClose">
+                <Button Style="{StaticResource ModernButton}" Width="110" Margin="10,0,0,0" Click="OnClose">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0"/>
+                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/>
                         <TextBlock Style="{StaticResource ButtonText}" Text="Close"/>
                     </StackPanel>
                 </Button>
@@ -102,7 +186,7 @@
                 <TextBlock Text="Install directory"/>
                 <DockPanel>
                     <TextBox x:Name="InstallPathBox" DockPanel.Dock="Left" MinWidth="420" />
-                    <Button x:Name="BrowseButton" Width="110" Margin="8,0,0,0" Click="OnBrowse">
+                    <Button x:Name="BrowseButton" Style="{StaticResource ModernButton}" Width="110" Margin="8,0,0,0" Click="OnBrowse">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Style="{StaticResource ButtonText}" Text="&#xE838;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0"/>
                             <TextBlock Style="{StaticResource ButtonText}" Text="Browse"/>
@@ -111,28 +195,30 @@
                 </DockPanel>
             </StackPanel>
 
-            <GroupBox Grid.Row="2" Header="Log" Margin="0,8,0,8">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <TextBlock x:Name="LogBlock" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" />
-                </ScrollViewer>
-            </GroupBox>
+            <!-- Progress Steps Panel -->
+            <Border Grid.Row="2" Background="{StaticResource PanelBackground}" CornerRadius="8" Padding="20" Margin="0,8,0,8">
+                <StackPanel x:Name="StepsPanel">
+                    <!-- Step items will be added dynamically -->
+                    <TextBlock x:Name="StepsPlaceholder" Text="Click Install to begin..." Foreground="#64748B" FontStyle="Italic"/>
+                </StackPanel>
+            </Border>
 
             <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" >
-                <Button x:Name="InstallButton" Width="120" Click="OnInstall">
+                <Button x:Name="InstallButton" Style="{StaticResource PrimaryButton}" Width="140" Click="OnInstall">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE896;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0"/>
+                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE896;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/>
                         <TextBlock x:Name="InstallButtonText" Style="{StaticResource ButtonText}" Text="Install"/>
                     </StackPanel>
                 </Button>
-                <Button x:Name="UninstallButton" Width="120" Margin="8,0,0,0" Click="OnUninstall" Visibility="Collapsed">
+                <Button x:Name="UninstallButton" Style="{StaticResource ModernButton}" Width="130" Margin="10,0,0,0" Click="OnUninstall" Visibility="Collapsed">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE74D;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0"/>
+                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE74D;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/>
                         <TextBlock Style="{StaticResource ButtonText}" Text="Remove"/>
                     </StackPanel>
                 </Button>
-                <Button Width="100" Margin="8,0,0,0" Click="OnClose">
+                <Button Style="{StaticResource ModernButton}" Width="110" Margin="10,0,0,0" Click="OnClose">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0"/>
+                        <TextBlock Style="{StaticResource ButtonText}" Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/>
                         <TextBlock Style="{StaticResource ButtonText}" Text="Close"/>
                     </StackPanel>
                 </Button>
