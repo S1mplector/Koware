@@ -1,8 +1,6 @@
 // Author: Ilgaz Mehmetoğlu
-// Tests for InteractiveSelector fuzzy matching and helper utilities.
+// Tests for InteractiveSelector and related helper utilities.
 using System;
-using System.Collections.Generic;
-using System.Reflection;
 using Koware.Cli.Console;
 using Xunit;
 
@@ -97,26 +95,19 @@ public class InteractiveSelectorTests
 
     #endregion
 
-    #region FuzzyScore Tests (via reflection)
+    #region FuzzyMatcher Integration Tests
+
+    // Note: Detailed FuzzyMatcher tests are in FuzzyMatcherTests.cs
+    // These tests verify integration with InteractiveSelector
 
     [Theory]
     [InlineData("Demon Slayer", "demon", true)]
-    [InlineData("Demon Slayer", "slayer", true)]
     [InlineData("Demon Slayer", "ds", true)]
-    [InlineData("One Piece", "op", true)]
-    [InlineData("Attack on Titan", "aot", true)]
-    [InlineData("My Hero Academia", "mha", true)]
     [InlineData("Naruto", "xyz", false)]
-    public void FuzzyScore_MatchesExpectedPatterns(string text, string pattern, bool shouldMatch)
+    public void FuzzyMatcher_IntegrationWithSelector(string text, string pattern, bool shouldMatch)
     {
-        // Access the private FuzzyScore method via reflection
-        var method = typeof(InteractiveSelector<string>).GetMethod(
-            "FuzzyScore",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        Assert.NotNull(method);
-
-        var score = (int)method!.Invoke(null, new object[] { text, pattern })!;
+        // Use the public FuzzyMatcher API
+        var score = FuzzyMatcher.Score(text, pattern);
 
         if (shouldMatch)
         {
@@ -128,44 +119,15 @@ public class InteractiveSelectorTests
         }
     }
 
-    [Theory]
-    [InlineData("Demon Slayer", "Demon Slayer")] // Exact match should score highest
-    [InlineData("Demon Slayer", "Demon")]        // Prefix match
-    [InlineData("Demon Slayer", "demon")]        // Case insensitive
-    public void FuzzyScore_ExactAndPrefixMatchesScoreHigher(string text, string pattern)
-    {
-        var method = typeof(InteractiveSelector<string>).GetMethod(
-            "FuzzyScore",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        var score = (int)method!.Invoke(null, new object[] { text, pattern })!;
-
-        // Exact/prefix matches should have high scores (500+)
-        Assert.True(score >= 500, $"Expected high score for '{pattern}' matching '{text}', got {score}");
-    }
-
     [Fact]
-    public void FuzzyScore_EmptyPattern_ReturnsOne()
+    public void FuzzyMatcher_Filter_ReturnsCorrectIndices()
     {
-        var method = typeof(InteractiveSelector<string>).GetMethod(
-            "FuzzyScore",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        var score = (int)method!.Invoke(null, new object[] { "Some Text", "" })!;
-
-        Assert.Equal(1, score);
-    }
-
-    [Fact]
-    public void FuzzyScore_EmptyText_ReturnsZero()
-    {
-        var method = typeof(InteractiveSelector<string>).GetMethod(
-            "FuzzyScore",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        var score = (int)method!.Invoke(null, new object[] { "", "pattern" })!;
-
-        Assert.Equal(0, score);
+        var items = new[] { "Apple", "Banana", "Avocado" };
+        
+        var result = FuzzyMatcher.Filter(items, x => x, "a");
+        
+        // All items contain 'a', should preserve original indices
+        Assert.All(result, r => Assert.True(r.OriginalIndex >= 0 && r.OriginalIndex < items.Length));
     }
 
     #endregion
@@ -284,55 +246,5 @@ public class InteractiveSelectorTests
     #endregion
 }
 
-public class WordWrapTests
-{
-    [Fact]
-    public void WordWrap_EmptyString_ReturnsEmptyEnumerable()
-    {
-        // Access via reflection since it's private
-        var method = typeof(InteractiveSelector<string>).GetMethod(
-            "WordWrap",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        var result = method!.Invoke(null, new object[] { "", 50 }) as IEnumerable<string>;
-
-        Assert.NotNull(result);
-        var list = new List<string>(result!);
-        Assert.Single(list);
-        Assert.Equal("", list[0]);
-    }
-
-    [Fact]
-    public void WordWrap_ShortText_SingleLine()
-    {
-        var method = typeof(InteractiveSelector<string>).GetMethod(
-            "WordWrap",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        var result = method!.Invoke(null, new object[] { "Hello World", 50 }) as IEnumerable<string>;
-
-        Assert.NotNull(result);
-        var list = new List<string>(result!);
-        Assert.Single(list);
-        Assert.Equal("Hello World", list[0]);
-    }
-
-    [Fact]
-    public void WordWrap_LongText_MultipleLines()
-    {
-        var method = typeof(InteractiveSelector<string>).GetMethod(
-            "WordWrap",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        var text = "This is a longer text that should be wrapped across multiple lines when the width is small";
-        var result = method!.Invoke(null, new object[] { text, 20 }) as IEnumerable<string>;
-
-        Assert.NotNull(result);
-        var list = new List<string>(result!);
-        Assert.True(list.Count > 1);
-        foreach (var line in list)
-        {
-            Assert.True(line.Length <= 25); // Allow some flexibility
-        }
-    }
-}
+// Note: WordWrap tests removed - WordWrap is now a private method in SelectorRenderer.
+// The functionality is tested indirectly through SelectorRenderer rendering tests.
