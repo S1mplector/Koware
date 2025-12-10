@@ -82,6 +82,17 @@ dotnet publish "$REPO_ROOT/Koware.Reader/Koware.Reader.csproj" \
 
 chmod +x "$READER_DIR/Koware.Reader" 2>/dev/null || true
 
+# Step 1d: Publish Avalonia Browser
+info "Publishing Koware Browser (Avalonia)..."
+BROWSER_DIR="$BUILD_DIR/browser"
+dotnet publish "$REPO_ROOT/Koware.Browser/Koware.Browser.csproj" \
+    -c "$CONFIGURATION" \
+    -r "$RUNTIME" \
+    -o "$BROWSER_DIR" \
+    --self-contained true
+
+chmod +x "$BROWSER_DIR/Koware.Browser" 2>/dev/null || true
+
 # Step 2: Create macOS icon from PNG
 info "Creating app icon..."
 LOGO_PNG="$REPO_ROOT/Assets/Logo/logo.png"
@@ -168,6 +179,10 @@ fi
 if [ -d "$READER_DIR" ]; then
     mkdir -p "$APP_BUNDLE/Contents/Resources/reader"
     cp -r "$READER_DIR/"* "$APP_BUNDLE/Contents/Resources/reader/"
+fi
+if [ -d "$BROWSER_DIR" ]; then
+    mkdir -p "$APP_BUNDLE/Contents/Resources/browser"
+    cp -r "$BROWSER_DIR/"* "$APP_BUNDLE/Contents/Resources/browser/"
 fi
 
 # Copy Usage Notice
@@ -263,7 +278,10 @@ show_main_screen() {
     osascript << EOF
 display dialog "Koware Installer
 
-Install location: $INSTALL_DIR/koware
+This will install:
+• Koware.app → /Applications
+• koware CLI → $INSTALL_DIR
+
 Config location: $CONFIG_DIR/
 
 Click Install to set up Koware on your Mac.
@@ -273,25 +291,107 @@ EOF
 
 # ============== INSTALL ==============
 do_install() {
-    # Use AppleScript to get admin privileges and install
+    # Create temp script for complex installation
+    local INSTALL_SCRIPT=$(mktemp)
+    cat > "$INSTALL_SCRIPT" << 'INSTALLSCRIPT'
+#!/bin/bash
+RESOURCES_DIR="$1"
+INSTALL_DIR="$2"
+APP_DIR="/Applications/Koware.app"
+
+# 1. Install CLI to /usr/local/bin
+mkdir -p "$INSTALL_DIR"
+cp "$RESOURCES_DIR/koware" "$INSTALL_DIR/"
+chmod +x "$INSTALL_DIR/koware"
+
+# 2. Create Koware.app bundle in /Applications
+rm -rf "$APP_DIR"
+mkdir -p "$APP_DIR/Contents/MacOS"
+mkdir -p "$APP_DIR/Contents/Resources"
+
+# Copy Browser as main app
+if [ -d "$RESOURCES_DIR/browser" ]; then
+    cp -r "$RESOURCES_DIR/browser/"* "$APP_DIR/Contents/MacOS/"
+    chmod +x "$APP_DIR/Contents/MacOS/Koware.Browser"
+    # Create launcher script
+    cat > "$APP_DIR/Contents/MacOS/Koware" << 'LAUNCHER'
+#!/bin/bash
+DIR="$(dirname "$0")"
+exec "$DIR/Koware.Browser" "$@"
+LAUNCHER
+    chmod +x "$APP_DIR/Contents/MacOS/Koware"
+fi
+
+# Copy Player and Reader into app bundle
+if [ -d "$RESOURCES_DIR/player" ]; then
+    mkdir -p "$APP_DIR/Contents/Resources/player"
+    cp -r "$RESOURCES_DIR/player/"* "$APP_DIR/Contents/Resources/player/"
+    chmod +x "$APP_DIR/Contents/Resources/player/Koware.Player" 2>/dev/null
+fi
+if [ -d "$RESOURCES_DIR/reader" ]; then
+    mkdir -p "$APP_DIR/Contents/Resources/reader"
+    cp -r "$RESOURCES_DIR/reader/"* "$APP_DIR/Contents/Resources/reader/"
+    chmod +x "$APP_DIR/Contents/Resources/reader/Koware.Reader" 2>/dev/null
+fi
+
+# Copy CLI into app bundle for reference
+cp "$RESOURCES_DIR/koware" "$APP_DIR/Contents/Resources/"
+
+# Create Info.plist
+cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Koware</string>
+    <key>CFBundleDisplayName</key>
+    <string>Koware</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.ilgazmehmetoglu.koware</string>
+    <key>CFBundleVersion</key>
+    <string>0.7.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.7.0-beta</string>
+    <key>CFBundleExecutable</key>
+    <string>Koware</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSRequiresAquaSystemAppearance</key>
+    <false/>
+</dict>
+</plist>
+PLIST
+
+echo "Installation complete"
+INSTALLSCRIPT
+    chmod +x "$INSTALL_SCRIPT"
+
+    # Use AppleScript to get admin privileges and run install script
     osascript << EOF 2>/dev/null
-do shell script "mkdir -p '$INSTALL_DIR' && cp '$RESOURCES_DIR/koware' '$INSTALL_DIR/' && chmod +x '$INSTALL_DIR/koware' && mkdir -p '$INSTALL_DIR/koware-apps' && cp -r '$RESOURCES_DIR/player' '$INSTALL_DIR/koware-apps/' 2>/dev/null; cp -r '$RESOURCES_DIR/reader' '$INSTALL_DIR/koware-apps/' 2>/dev/null; chmod +x '$INSTALL_DIR/koware-apps/player/Koware.Player' 2>/dev/null; chmod +x '$INSTALL_DIR/koware-apps/reader/Koware.Reader' 2>/dev/null; true" with administrator privileges
+do shell script "bash '$INSTALL_SCRIPT' '$RESOURCES_DIR' '$INSTALL_DIR'" with administrator privileges
 EOF
+    local install_result=$?
+    rm -f "$INSTALL_SCRIPT"
     
-    if [ $? -ne 0 ]; then
+    if [ $install_result -ne 0 ]; then
         osascript -e 'display dialog "Installation cancelled or failed." buttons {"OK"} with title "Koware Installer" with icon stop'
         return 1
     fi
 
-    # Note: Config directory will be created by koware on first run with correct permissions
-
     osascript << 'EOF'
 display dialog "Koware installed successfully!
 
-Open Terminal and run:
-    koware --help
+✓ Koware.app installed to /Applications
+✓ CLI available as 'koware' in Terminal
 
-to get started." buttons {"OK"} default button "OK" with title "Koware Installer" with icon note
+You can now:
+• Open Koware from Applications
+• Run 'koware --help' in Terminal" buttons {"OK"} default button "OK" with title "Koware Installer" with icon note
 EOF
     return 0
 }
@@ -300,7 +400,11 @@ EOF
 do_uninstall() {
     # Confirm removal
     local result=$(osascript << 'EOF'
-display dialog "This will remove Koware from this machine, including its files. Your config at ~/.config/koware/ will be preserved.
+display dialog "This will remove Koware from this machine:
+• /Applications/Koware.app
+• /usr/local/bin/koware
+
+Your config at ~/.config/koware/ will be preserved.
 
 Do you want to continue?" buttons {"Cancel", "Remove"} default button "Cancel" with title "Remove Koware" with icon caution
 EOF
@@ -312,7 +416,7 @@ EOF
 
     # Remove with admin privileges
     osascript << EOF 2>/dev/null
-do shell script "rm -f '$INSTALL_DIR/koware' && rm -rf '$INSTALL_DIR/koware-apps'" with administrator privileges
+do shell script "rm -f '$INSTALL_DIR/koware' && rm -rf '$INSTALL_DIR/koware-apps' && rm -rf '/Applications/Koware.app'" with administrator privileges
 EOF
 
     if [ $? -ne 0 ]; then

@@ -22,11 +22,12 @@ public sealed record Anime
     /// <param name="id">Unique identifier for this anime.</param>
     /// <param name="title">Display title (must not be empty).</param>
     /// <param name="synopsis">Optional synopsis/description.</param>
+    /// <param name="coverImage">Optional cover image URL.</param>
     /// <param name="detailPage">URI to the detail page on the provider site.</param>
     /// <param name="episodes">Collection of episodes; can be empty initially.</param>
     /// <exception cref="ArgumentException">Thrown if title is null or whitespace.</exception>
     /// <exception cref="ArgumentNullException">Thrown if id or detailPage is null.</exception>
-    public Anime(AnimeId id, string title, string? synopsis, Uri detailPage, IReadOnlyCollection<Episode> episodes)
+    public Anime(AnimeId id, string title, string? synopsis, Uri? coverImage, Uri detailPage, IReadOnlyCollection<Episode> episodes)
     {
         if (string.IsNullOrWhiteSpace(title))
         {
@@ -36,6 +37,7 @@ public sealed record Anime
         Id = id ?? throw new ArgumentNullException(nameof(id));
         Title = title.Trim();
         Synopsis = synopsis;
+        CoverImage = coverImage;
         DetailPage = detailPage ?? throw new ArgumentNullException(nameof(detailPage));
         Episodes = episodes ?? Array.Empty<Episode>();
     }
@@ -48,6 +50,9 @@ public sealed record Anime
 
     /// <summary>Optional synopsis or description.</summary>
     public string? Synopsis { get; }
+
+    /// <summary>Optional cover image URL.</summary>
+    public Uri? CoverImage { get; }
 
     /// <summary>URI to the detail page on the provider site.</summary>
     public Uri DetailPage { get; }

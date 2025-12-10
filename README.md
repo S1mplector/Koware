@@ -19,7 +19,7 @@ It has a text-based user interface but behaves like a regular CLI. You run a com
 - **Search for anime/manga** by title
 - **Browse episodes/chapters** for a selected show
 - **Open streams** in IINA, mpv, VLC, or the bundled Koware player (Windows)
-- **Read manga** in browser (macOS) or bundled reader (Windows)
+- **Read manga** in the bundled reader (Windows and macOS)
 - **Keep watch history** locally in a small SQLite database
 
 Koware does **NOT** host any media. It does **NOT** include any source URLs. It only provides a framework for accessing user-configured sources.
@@ -55,12 +55,21 @@ koware watch "haikyuu" --episode 1
 
 ### Install via the installer (Windows)
 
-The installer package bundles everything needed to run Koware without needing to build from source. You can download the latest installer from the [releases page](https://github.com/S1mplector/Koware/releases).
+The installer package bundles everything needed to run Koware without needing to build from source. You can download the latest installer from the [releases page](https://github.com/S1mplector/Koware/releases). Koware will be added to your CMD and powershell configuration by default.
 
+#### About powershell script execution policy
+
+If typing koware and other koware commands don't work in a powershell prompt, in an administrator powershell prompt, run: 
+
+```Powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+If you prefer not to, koware will work perfectly fine in any command prompt shell.
 ### Install on macOS
 
 #### Option 1: DMG Installer
-Download the DMG from the [releases page](https://github.com/S1mplector/Koware/releases), open it, and run `install.sh`.
+Download the DMG from the [releases page](https://github.com/S1mplector/Koware/releases), open it, and it will run you through the install process. 
 
 #### Option 2: Build from source
 ```bash
@@ -99,7 +108,7 @@ cd .\Koware
 
 ---
 
-## Commands
+## A few Example Commands 
 
 All examples assume you have the global `koware` command installed. If not, replace `koware` with `dotnet run --project .\Koware.Cli --`.
 
@@ -156,6 +165,9 @@ Key settings:
 
     Or, alternatively by using the config command. For more info, do:
     `koware help config`
+
+- **Reader** 
+  - Koware is installed bundled with the Koware reader. It is recommended to use the bundled reader, as other manga readers haven't been tested yet and compatibility is not guaranteed.
 
 ---
 

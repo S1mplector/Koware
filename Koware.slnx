@@ -10,4 +10,5 @@
   <Project Path="Koware.Reader.Win/Koware.Reader.Win.csproj" />
   <Project Path="Koware.Installer.Win/Koware.Installer.Win.csproj" />
   <Project Path="Koware.Tests/Koware.Tests.csproj" />
+  <Project Path="Koware.Browser/Koware.Browser.csproj" />
 </Solution>

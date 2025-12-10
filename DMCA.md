@@ -2,7 +2,7 @@
 
 ## About Koware
 
-Koware is an **open-source software tool** that functions as a search aggregator and media player launcher. It is designed to be a general-purpose utility that:
+Koware is an **open-source software tool** that functions as a stream aggregator and media player launcher. It is designed to be a general-purpose utility that:
 
 - Does **NOT** host, store, or distribute any media content
 - Does **NOT** include any pre-configured sources or links to streaming services
@@ -29,6 +29,7 @@ Users of Koware are solely responsible for:
 If you are a copyright holder or authorized agent and believe that any code within this repository (not user-configured content) infringes on your copyrights, please contact:
 
 **Email:** mehmetogluilgaz07@gmail.com
+**Email:** mehmetogluilgaz07@gmail.com 
 
 Your notice must include:
 

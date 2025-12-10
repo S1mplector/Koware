@@ -59,6 +59,7 @@ try { $payloadDir = (Resolve-Path -LiteralPath $payloadDir).Path } catch {}
 $cliZip = Join-Path $payloadDir 'koware-cli.zip'
 $playerZip = Join-Path $payloadDir 'koware-player.zip'
 $readerZip = Join-Path $payloadDir 'koware-reader.zip'
+$browserZip = Join-Path $payloadDir 'koware-browser.zip'
 
 if (Test-Path $cliZip) {
     Copy-Item -LiteralPath $cliZip -Destination $resolvedOut -Force
@@ -79,6 +80,13 @@ if (Test-Path $readerZip) {
     Write-Info "Copied payload: $(Split-Path $readerZip -Leaf)"
 } else {
     Write-Warn "Reader payload zip not found at $readerZip (build target may not have run or reader disabled)."
+}
+
+if (Test-Path $browserZip) {
+    Copy-Item -LiteralPath $browserZip -Destination $resolvedOut -Force
+    Write-Info "Copied payload: $(Split-Path $browserZip -Leaf)"
+} else {
+    Write-Warn "Browser payload zip not found at $browserZip (build target may not have run or browser disabled)."
 }
 
 Write-Host ""; Write-Info "Publish complete. Output: $resolvedOut"

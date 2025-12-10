@@ -99,7 +99,7 @@ static IHost BuildHost(string[] args)
     builder.Services.AddSingleton<IDownloadStore, SqliteDownloadStore>();
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware", LogLevel.Information);
-    builder.Logging.AddFilter("Koware.Infrastructure.Scraping.AllAnimeCatalog", LogLevel.Error);
+    builder.Logging.AddFilter("Koware.Infrastructure.Scraping.AllAnimeCatalog", LogLevel.Debug);
 
     return builder.Build();
 }
@@ -569,7 +569,7 @@ static void WriteStatus(string label, bool success, string? detail = null)
 {
     var prev = Console.ForegroundColor;
     Console.ForegroundColor = success ? ConsoleColor.Green : ConsoleColor.Red;
-    Console.Write($"  {label,-6}: ");
+    Console.Write($"  {label,-10}: ");
     Console.ForegroundColor = ConsoleColor.Gray;
     Console.Write(success ? "OK" : "FAIL");
     if (!string.IsNullOrWhiteSpace(detail))
@@ -586,65 +586,113 @@ static void WriteStatus(string label, bool success, string? detail = null)
 /// <param name="services">Service provider for provider options.</param>
 /// <param name="logger">Logger instance for errors.</param>
 /// <param name="cancellationToken">Cancellation token.</param>
-/// <returns>Exit code: 0 if all providers reachable, 1 otherwise.</returns>
+/// <returns>Exit code: 0 if all critical checks pass, 1 otherwise.</returns>
 /// <remarks>
-/// Checks DNS resolution and HTTP connectivity to AllAnime.
-/// Also checks for external tools: ffmpeg, yt-dlp, aria2c, and configured player.
+/// Runs a full health check: version, install/config paths, provider reachability (anime + manga),
+/// player/reader discovery, and external tool availability (ffmpeg/yt-dlp/aria2c).
 /// </remarks>
 static async Task<int> HandleDoctorAsync(IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
 {
+    var overallOk = true;
     var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
     var results = new List<(string name, ProviderCheckResult result)>();
-    
-    var step = ConsoleStep.Start("Checking allanime");
-    try
+    var diagnostics = new ProviderDiagnostics(new HttpClient());
+
+    Console.WriteLine("Koware Doctor");
+    Console.WriteLine(new string('─', 40));
+
+    var cliPath = Environment.ProcessPath ?? Assembly.GetEntryAssembly()?.Location;
+    WriteStatus("Version", true, GetVersionLabel());
+    WriteStatus("CLI Path", !string.IsNullOrWhiteSpace(cliPath) && File.Exists(cliPath!), cliPath ?? "(unknown)");
+
+    var configPath = GetUserConfigFilePath();
+    var configDir = Path.GetDirectoryName(configPath);
+    var configDirExists = !string.IsNullOrWhiteSpace(configDir) && Directory.Exists(configDir);
+    var configExists = File.Exists(configPath);
+    WriteStatus("Config dir", configDirExists, configDirExists ? configDir! : "Missing (create with any config command)");
+    WriteStatus("Config", configExists, configExists ? configPath : "Not created yet (will be written on first config change)");
+    Console.WriteLine();
+
+    Console.WriteLine("Providers");
+    var providerTargets = new List<(string name, bool configured, AllAnimeOptions opt)>();
+    var mangaOptions = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+    providerTargets.Add(("allanime", allAnime.IsConfigured, allAnime));
+    providerTargets.Add(("allmanga", mangaOptions.IsConfigured, new AllAnimeOptions
     {
-        var diagnostics = new ProviderDiagnostics(new HttpClient());
-        var options = new AllAnimeOptions { ApiBase = allAnime.ApiBase, Referer = allAnime.Referer, UserAgent = allAnime.UserAgent };
-        var result = await diagnostics.CheckAsync(options, cancellationToken);
-        results.Add(("allanime", result));
-        step.Succeed("Check complete");
+        ApiBase = mangaOptions.ApiBase,
+        Referer = mangaOptions.Referer,
+        UserAgent = mangaOptions.UserAgent,
+        Enabled = mangaOptions.Enabled,
+        BaseHost = mangaOptions.BaseHost
+    }));
+
+    foreach (var (name, isConfigured, opt) in providerTargets)
+    {
+        if (!isConfigured || string.IsNullOrWhiteSpace(opt.ApiBase))
+        {
+            WriteStatus(name, false, "Not configured");
+            overallOk = false;
+            continue;
+        }
+
+        try
+        {
+            var step = ConsoleStep.Start($"Checking {name}");
+            var result = await diagnostics.CheckAsync(opt, cancellationToken);
+            step.Succeed("done");
+            results.Add((name, result));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "{Provider} doctor check failed.", name);
+            results.Add((name, new ProviderCheckResult { Target = opt.ApiBase ?? "not configured", HttpError = ex.Message }));
+        }
     }
-    catch (Exception ex)
+
+    foreach (var (name, result) in results)
     {
-        step.Fail("Check failed");
-        logger.LogError(ex, "allanime doctor check failed.");
-        results.Add(("allanime", new ProviderCheckResult { Target = allAnime.ApiBase ?? "not configured", HttpError = ex.Message }));
+        var httpDetail = result.HttpError ?? (result.HttpStatus.HasValue ? $"HTTP {result.HttpStatus}" : "No response");
+        WriteStatus($"{name} DNS", result.DnsResolved, result.DnsError);
+        WriteStatus($"{name} HTTP", result.HttpSuccess, httpDetail);
+        overallOk &= result.Success;
     }
 
     Console.WriteLine();
-    foreach (var (name, result) in results)
-    {
-        Console.WriteLine($"{name} ({result.Target})");
-        WriteStatus("DNS", result.DnsResolved, result.DnsError);
-        var detail = result.HttpError ?? (result.HttpStatus.HasValue ? $"HTTP {result.HttpStatus}" : "No response");
-        WriteStatus("HTTP", result.HttpSuccess, detail);
-        Console.WriteLine();
-    }
-
-    var allOk = results.All(r => r.result.Success);
-    if (!allOk)
-    {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("One or more providers are unreachable. Check your connection, DNS, or try again later.");
-        Console.ResetColor();
-        return 1;
-    }
-
-    Console.WriteLine("Player / toolchain:");
+    Console.WriteLine("Toolchain");
     var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
+    var readerOptions = services.GetRequiredService<IOptions<ReaderOptions>>().Value;
+
     var playerResolution = ResolvePlayerExecutable(playerOptions);
-    WriteStatus("Player", playerResolution.Path is not null, playerResolution.Path ?? $"Not found (tried: {string.Join(", ", playerResolution.Candidates)})");
+    var playerVersion = TryGetFileVersion(playerResolution.Path);
+    WriteStatus("Player", playerResolution.Path is not null, playerResolution.Path is null
+        ? $"Not found (tried: {string.Join(", ", playerResolution.Candidates)})"
+        : $"{playerResolution.Path}{(playerVersion is null ? string.Empty : $" [{playerVersion}]")}");
+    overallOk &= playerResolution.Path is not null;
+
+    var readerPath = ResolveExecutablePath(readerOptions.Command);
+    var readerVersion = TryGetFileVersion(readerPath);
+    WriteStatus("Reader", !string.IsNullOrWhiteSpace(readerPath), readerPath is null ? "Not found" : $"{readerPath}{(readerVersion is null ? string.Empty : $" [{readerVersion}]")}");
+    overallOk &= !string.IsNullOrWhiteSpace(readerPath);
 
     foreach (var tool in new[] { "ffmpeg", "yt-dlp", "aria2c" })
     {
         var resolved = ResolveExecutablePath(tool);
-        WriteStatus(tool, !string.IsNullOrWhiteSpace(resolved), resolved ?? "Not found");
+        var version = resolved is null ? null : TryGetCommandVersion(resolved);
+        WriteStatus(tool, !string.IsNullOrWhiteSpace(resolved), resolved is null ? "Not found" : $"{resolved}{(version is null ? string.Empty : $" [{version}]")}");
+        overallOk &= !string.IsNullOrWhiteSpace(resolved);
     }
     Console.WriteLine();
 
+    if (!overallOk)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("Some checks failed. Address the FAIL entries above, then rerun 'koware doctor'.");
+        Console.ResetColor();
+        return 1;
+    }
+
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine("All providers reachable.");
+    Console.WriteLine("All systems look good.");
     Console.ResetColor();
     return 0;
 }
@@ -1788,7 +1836,7 @@ static void RenderHistory(IReadOnlyList<WatchHistoryEntry> entries)
     var index = 1;
     foreach (var e in entries)
     {
-        Console.WriteLine($"{index,3} {Truncate(e.AnimeTitle,30),-30} {e.EpisodeNumber,4} {e.Quality ?? "?",-8} {e.WatchedAt:u,-20} {e.EpisodeTitle ?? string.Empty}");
+        Console.WriteLine($"{index,3} {Truncate(e.AnimeTitle,30),-30} {e.EpisodeNumber,4} {e.Quality ?? "?",-8} {e.WatchedAt,-20:u} {e.EpisodeTitle ?? string.Empty}");
         index++;
     }
 }
@@ -4221,11 +4269,22 @@ static string? ResolveReaderExecutable(ReaderOptions options)
     
     if (OperatingSystem.IsMacOS())
     {
-        // On macOS: try bundled Avalonia reader first, then fall back to browser
-        var macReader = "/usr/local/bin/koware-apps/reader/Koware.Reader";
-        if (File.Exists(macReader))
+        // On macOS: try bundled Avalonia reader from Koware.app bundle
+        var macReaderCandidates = new[]
         {
-            return macReader;
+            "/Applications/Koware.app/Contents/Resources/reader/Koware.Reader",
+            "/usr/local/bin/koware/reader/Koware.Reader",
+            Path.Combine(AppContext.BaseDirectory, "..", "Resources", "reader", "Koware.Reader"),
+            Path.Combine(AppContext.BaseDirectory, "reader", "Koware.Reader"),
+        };
+        
+        foreach (var candidate in macReaderCandidates)
+        {
+            var fullPath = Path.GetFullPath(candidate);
+            if (File.Exists(fullPath))
+            {
+                return fullPath;
+            }
         }
         
         // Fall back to browser-based reader if no bundled reader
@@ -5341,7 +5400,13 @@ static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
     if (OperatingSystem.IsMacOS())
     {
         // macOS: prefer IINA/mpv (native, works best), bundled Avalonia player requires LibVLC which has ARM64 issues
-        candidates.AddRange(new[] { "iina", "mpv", "/usr/local/bin/koware-apps/player/Koware.Player", "vlc" });
+        candidates.AddRange(new[] { 
+            "iina", 
+            "mpv", 
+            "/Applications/Koware.app/Contents/Resources/player/Koware.Player",
+            "/usr/local/bin/koware/player/Koware.Player",
+            "vlc" 
+        });
     }
     else
     {
@@ -5904,9 +5969,9 @@ static void PrintUsage()
     WriteCommand("recommend [--limit <n>]", "Get personalized recommendations (alias: rec).", ConsoleColor.Yellow);
     WriteCommand("offline [--stats] [--cleanup]", "Show downloaded content available offline.", ConsoleColor.Yellow);
     WriteCommand("help [command]", "Show this guide or a command-specific help page.", ConsoleColor.Magenta);
-    WriteCommand("config [options]", "Persist defaults (quality/index/player) to appsettings.user.json.", ConsoleColor.Magenta);
+    WriteCommand("config [show|set|get|path]", "View or edit appsettings.user.json (player/reader/defaults).", ConsoleColor.Magenta);
     WriteCommand("mode [anime|manga]", "Show or switch between anime and manga modes.", ConsoleColor.Magenta);
-    WriteCommand("doctor", "Check provider connectivity (DNS/HTTP).", ConsoleColor.Magenta);
+    WriteCommand("doctor", "Full health check: config, providers, player, external tools.", ConsoleColor.Magenta);
     WriteCommand("provider [options]", "List/enable/disable providers.", ConsoleColor.Magenta);
     WriteCommand("update", "Download and launch the latest Koware installer.", ConsoleColor.Magenta);
 }
@@ -6051,12 +6116,22 @@ static int HandleHelp(string[] args, CliMode mode)
             Console.WriteLine("  • --stats shows counts per anime/manga.");
             break;
         case "config":
-            PrintTopicHeader("config", "Persist preferred defaults to appsettings.user.json.");
-            Console.WriteLine("Usage: koware config [--quality <label>] [--index <n>] [--player <exe>] [--args <string>] [--show]");
-            Console.WriteLine("Examples:");
+            PrintTopicHeader("config", "View or update appsettings.user.json.");
+            Console.WriteLine("Usage:");
+            Console.WriteLine("  koware config                         Show summary");
+            Console.WriteLine("  koware config show [--json]           Show config (raw JSON with --json)");
+            Console.WriteLine("  koware config path                    Print config file path");
+            Console.WriteLine("  koware config get <path> [--json]     Read a value (e.g., Player:Command)");
+            Console.WriteLine("  koware config set <path> <value>      Write a value (creates sections)");
+            Console.WriteLine("  koware config unset <path>            Remove a value");
+            Console.WriteLine("Shortcuts:");
             Console.WriteLine("  koware config --quality 1080p --index 1");
             Console.WriteLine("  koware config --player vlc --args \"--play-and-exit\"");
-            Console.WriteLine("  koware config --show");
+            Console.WriteLine("Examples:");
+            Console.WriteLine("  koware config set Player:Command \"vlc\"");
+            Console.WriteLine("  koware config set Reader:Command \"./reader/Koware.Reader\"");
+            Console.WriteLine("  koware config show --json");
+            Console.WriteLine("  koware config path");
             break;
         case "provider":
             PrintTopicHeader("provider", "List or toggle providers.");
@@ -6064,9 +6139,13 @@ static int HandleHelp(string[] args, CliMode mode)
             Console.WriteLine("Behavior: lists providers; with flags, updates enablement.");
             break;
         case "doctor":
-            PrintTopicHeader("doctor", "Check connectivity to the anime provider.");
+            PrintTopicHeader("doctor", "Run a full health check (config, providers, tools).");
             Console.WriteLine("Usage: koware doctor");
-            Console.WriteLine("Behavior: pings api host, reports DNS + HTTP reachability.");
+            Console.WriteLine("Behavior:");
+            Console.WriteLine("  • Verifies CLI version/path and config file location.");
+            Console.WriteLine("  • Checks anime/manga provider reachability (DNS + HTTP).");
+            Console.WriteLine("  • Confirms player/reader binaries are discoverable.");
+            Console.WriteLine("  • Checks external tools: ffmpeg, yt-dlp, aria2c (with versions when available).");
             break;
         case "mode":
             PrintTopicHeader("mode", "Switch between anime and manga modes.");
@@ -6407,11 +6486,17 @@ static Task<int> HandleModeAsync(string[] args, ILogger logger)
 /// <summary>
 /// Implement the <c>koware config</c> command.
 /// </summary>
-/// <param name="args">CLI arguments; supports --quality, --index, --player, --args, --show.</param>
+/// <param name="args">CLI arguments.</param>
 /// <returns>Exit code: 0 on success.</returns>
 /// <remarks>
-/// Reads/writes appsettings.user.json and updates Player/Defaults sections.
-/// With --show, prints current config as JSON.
+/// Reads/writes appsettings.user.json.
+/// Supports verbs for ease of use:
+/// - <c>show</c> (default): print summary; with --json prints raw config.
+/// - <c>path</c>: print config file location.
+/// - <c>get &lt;path&gt;</c>: read a value such as Player:Command.
+/// - <c>set &lt;path&gt; &lt;value&gt;</c>: update a value, creating sections as needed.
+/// - <c>unset &lt;path&gt;</c>: remove a value.
+/// Legacy flag-style shortcuts (--quality/--index/--player/--args/--show) remain supported.
 /// </remarks>
 static int HandleConfig(string[] args)
 {
@@ -6420,7 +6505,136 @@ static int HandleConfig(string[] args)
         ? (JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? new JsonObject())
         : new JsonObject();
 
+    if (args.Length == 1)
+    {
+        PrintConfigSummary(root, configPath, rawJson: false);
+        return 0;
+    }
+
+    var verb = args[1].ToLowerInvariant();
+    if (verb is "show" or "--show" or "--json")
+    {
+        var extraArgs = args.Skip(2)
+            .Where(a => !a.Equals("--json", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (extraArgs.Count == 0)
+        {
+            var raw = verb == "--json" || args.Skip(2).Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+            PrintConfigSummary(root, configPath, raw);
+            return 0;
+        }
+    }
+
+    switch (verb)
+    {
+        case "path":
+            Console.WriteLine($"Config file: {configPath}");
+            return 0;
+        case "get":
+            {
+                if (args.Length < 3)
+                {
+                    Console.WriteLine("Usage: koware config get <path> [--json]");
+                    return 1;
+                }
+
+                var targetPath = args[2];
+                var raw = args.Skip(3).Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+
+                if (!TryGetConfigValue(root, targetPath, out var value))
+                {
+                    Console.WriteLine($"Setting '{targetPath}' not found.");
+                    return 1;
+                }
+
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                if (raw || value is not JsonValue)
+                {
+                    Console.WriteLine(value?.ToJsonString(options) ?? "null");
+                }
+                else if (value is JsonValue val && val.TryGetValue<string>(out var textValue))
+                {
+                    Console.WriteLine(textValue ?? "null");
+                }
+                else
+                {
+                    Console.WriteLine(value?.ToJsonString(options) ?? "null");
+                }
+
+                return 0;
+            }
+        case "set":
+            {
+                if (args.Length < 4)
+                {
+                    Console.WriteLine("Usage: koware config set <path> <value>");
+                    return 1;
+                }
+
+                var targetPath = args[2];
+                var value = string.Join(' ', args.Skip(3));
+
+                if (!TrySetConfigValue(root, targetPath, value, out var error))
+                {
+                    Console.WriteLine(error ?? $"Could not set '{targetPath}'.");
+                    return 1;
+                }
+
+                SaveUserConfig(root, configPath);
+                Console.WriteLine($"✓ Set {targetPath} = {value}");
+                Console.WriteLine($"   Saved to {configPath}");
+                return 0;
+            }
+        case "unset":
+            {
+                if (args.Length < 3)
+                {
+                    Console.WriteLine("Usage: koware config unset <path>");
+                    return 1;
+                }
+
+                var targetPath = args[2];
+                if (!TryUnsetConfigValue(root, targetPath))
+                {
+                    Console.WriteLine($"Setting '{targetPath}' not found.");
+                    return 1;
+                }
+
+                SaveUserConfig(root, configPath);
+                Console.WriteLine($"✓ Removed {targetPath}");
+                Console.WriteLine($"   Saved to {configPath}");
+                return 0;
+            }
+    }
+
+    return HandleConfigLegacyOptions(args, root, configPath);
+}
+
+/// <summary>
+/// Print a short usage line for the <c>koware config</c> command.
+/// </summary>
+static void PrintConfigUsage()
+{
+    Console.WriteLine("Usage:");
+    Console.WriteLine("  koware config                         Show config summary");
+    Console.WriteLine("  koware config show [--json]           Show config (raw JSON with --json)");
+    Console.WriteLine("  koware config path                    Print config file path");
+    Console.WriteLine("  koware config get <path> [--json]     Read a value (e.g., Player:Command)");
+    Console.WriteLine("  koware config set <path> <value>      Write a value (creates sections)");
+    Console.WriteLine("  koware config unset <path>            Remove a value");
+    Console.WriteLine("Shortcuts:");
+    Console.WriteLine("  koware config --quality 1080p --index 1");
+    Console.WriteLine("  koware config --player vlc --args \"--play-and-exit\"");
+}
+
+/// <summary>
+/// Legacy flag-based configuration handler (kept for backwards compatibility).
+/// </summary>
+static int HandleConfigLegacyOptions(string[] args, JsonObject root, string configPath)
+{
     var player = root["Player"] as JsonObject ?? new JsonObject();
+    var reader = root["Reader"] as JsonObject ?? new JsonObject();
     var defaults = root["Defaults"] as JsonObject ?? new JsonObject();
 
     var showOnly = false;
@@ -6479,42 +6693,296 @@ static int HandleConfig(string[] args)
     }
 
     root["Player"] = player;
+    root["Reader"] = reader;
     root["Defaults"] = defaults;
 
     if (changed)
     {
-        var json = JsonSerializer.Serialize(root, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(configPath, json);
+        SaveUserConfig(root, configPath);
         Console.WriteLine($"Saved preferences to {configPath}");
     }
 
     if (showOnly || !changed)
     {
-        var summary = new
-        {
-            Player = new
-            {
-                Command = player["Command"]?.ToString() ?? "(default)",
-                Args = player["Args"]?.ToString()
-            },
-            Defaults = new
-            {
-                Quality = defaults["Quality"]?.ToString(),
-                PreferredMatchIndex = defaults["PreferredMatchIndex"]?.ToString()
-            }
-        };
-        Console.WriteLine(JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }));
+        PrintConfigSummary(root, configPath, rawJson: false);
     }
 
     return 0;
 }
 
 /// <summary>
-/// Print a short usage line for the <c>koware config</c> command.
+/// Pretty-print a summary of the user configuration or dump the raw JSON.
 /// </summary>
-static void PrintConfigUsage()
+static void PrintConfigSummary(JsonObject root, string configPath, bool rawJson)
 {
-    Console.WriteLine("Usage: koware config [--quality <label>] [--index <n>] [--player <exe>] [--args <string>] [--show]");
+    var options = new JsonSerializerOptions { WriteIndented = true };
+
+    if (rawJson)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(root, options));
+        return;
+    }
+
+    var defaults = root["Defaults"] as JsonObject ?? new JsonObject();
+    var player = root["Player"] as JsonObject ?? new JsonObject();
+    var reader = root["Reader"] as JsonObject ?? new JsonObject();
+
+    Console.WriteLine($"Config file: {configPath}");
+    Console.WriteLine();
+
+    Console.WriteLine("Defaults");
+    Console.WriteLine($"  Mode    : {defaults["Mode"]?.ToString() ?? "anime"}");
+    Console.WriteLine($"  Quality : {defaults["Quality"]?.ToString() ?? "(not set)"}");
+    Console.WriteLine($"  Index   : {defaults["PreferredMatchIndex"]?.ToString() ?? "(not set)"}");
+    Console.WriteLine();
+
+    Console.WriteLine("Player");
+    var playerCommand = player["Command"]?.ToString();
+    var playerArgs = player["Args"]?.ToString();
+    Console.WriteLine($"  Command : {(string.IsNullOrWhiteSpace(playerCommand) ? "(default)" : playerCommand)}");
+    Console.WriteLine($"  Args    : {(string.IsNullOrWhiteSpace(playerArgs) ? "(none)" : playerArgs)}");
+    Console.WriteLine();
+
+    Console.WriteLine("Reader");
+    var readerCommand = reader["Command"]?.ToString();
+    var readerArgs = reader["Args"]?.ToString();
+    Console.WriteLine($"  Command : {(string.IsNullOrWhiteSpace(readerCommand) ? "(default)" : readerCommand)}");
+    Console.WriteLine($"  Args    : {(string.IsNullOrWhiteSpace(readerArgs) ? "(none)" : readerArgs)}");
+    Console.WriteLine();
+
+    Console.WriteLine("Tips:");
+    Console.WriteLine("  koware config set Player:Command \"vlc\"");
+    Console.WriteLine("  koware config set Player:Args \"--play-and-exit\"");
+    Console.WriteLine("  koware config set Reader:Command \"./reader/Koware.Reader\"");
+    Console.WriteLine("  koware config set Defaults:Quality \"1080p\"");
+}
+
+/// <summary>
+/// Try to read the file version from a PE/executable if available.
+/// </summary>
+static string? TryGetFileVersion(string? path)
+{
+    if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+    {
+        return null;
+    }
+
+    try
+    {
+        var info = FileVersionInfo.GetVersionInfo(path);
+        if (!string.IsNullOrWhiteSpace(info.ProductVersion))
+        {
+            return info.ProductVersion;
+        }
+
+        return string.IsNullOrWhiteSpace(info.FileVersion) ? null : info.FileVersion;
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+/// <summary>
+/// Try to execute a command with <c>--version</c> (or custom args) and return the first output line.
+/// </summary>
+static string? TryGetCommandVersion(string path, string args = "--version")
+{
+    if (string.IsNullOrWhiteSpace(path))
+    {
+        return null;
+    }
+
+    try
+    {
+        var start = new ProcessStartInfo
+        {
+            FileName = path,
+            Arguments = string.IsNullOrWhiteSpace(args) ? string.Empty : args,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = Process.Start(start);
+        if (process is null)
+        {
+            return null;
+        }
+
+        if (!process.WaitForExit(3000))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { }
+            return null;
+        }
+
+        var output = process.StandardOutput.ReadToEnd();
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            output = process.StandardError.ReadToEnd();
+        }
+
+        var firstLine = output
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault();
+
+        return firstLine;
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+/// <summary>
+/// Try to fetch a config value using a colon-separated path (case-insensitive).
+/// </summary>
+static bool TryGetConfigValue(JsonObject root, string path, out JsonNode? value)
+{
+    value = root;
+    foreach (var segment in path.Split(':', StringSplitOptions.RemoveEmptyEntries))
+    {
+        if (value is not JsonObject obj)
+        {
+            value = null;
+            return false;
+        }
+
+        var key = FindExistingKey(obj, segment);
+        if (key is null || !obj.TryGetPropertyValue(key, out value))
+        {
+            value = null;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/// <summary>
+/// Set a config value by path, creating intermediate objects as needed.
+/// </summary>
+static bool TrySetConfigValue(JsonObject root, string path, string rawValue, out string? error)
+{
+    error = null;
+    var segments = path.Split(':', StringSplitOptions.RemoveEmptyEntries);
+    if (segments.Length == 0)
+    {
+        error = "Setting path cannot be empty.";
+        return false;
+    }
+
+    JsonObject current = root;
+    for (var i = 0; i < segments.Length - 1; i++)
+    {
+        var key = FindExistingKey(current, segments[i]) ?? segments[i];
+        if (!current.TryGetPropertyValue(key, out var next) || next is not JsonObject nextObj)
+        {
+            nextObj = new JsonObject();
+            current[key] = nextObj;
+        }
+        current = nextObj;
+    }
+
+    var finalKey = FindExistingKey(current, segments[^1]) ?? segments[^1];
+    current[finalKey] = CreateJsonValue(rawValue);
+    return true;
+}
+
+/// <summary>
+/// Remove a config value by path.
+/// </summary>
+static bool TryUnsetConfigValue(JsonObject root, string path)
+{
+    var segments = path.Split(':', StringSplitOptions.RemoveEmptyEntries);
+    if (segments.Length == 0)
+    {
+        return false;
+    }
+
+    JsonObject? current = root;
+    for (var i = 0; i < segments.Length - 1; i++)
+    {
+        if (current is null)
+        {
+            return false;
+        }
+
+        var key = FindExistingKey(current, segments[i]);
+        if (key is null || !current.TryGetPropertyValue(key, out var next) || next is not JsonObject nextObj)
+        {
+            return false;
+        }
+
+        current = nextObj;
+    }
+
+    if (current is null)
+    {
+        return false;
+    }
+
+    var finalKey = FindExistingKey(current, segments[^1]);
+    return finalKey is not null && current.Remove(finalKey);
+}
+
+/// <summary>
+/// Find an existing property name using case-insensitive comparison.
+/// </summary>
+static string? FindExistingKey(JsonObject obj, string name)
+{
+    foreach (var kvp in obj)
+    {
+        if (kvp.Key.Equals(name, StringComparison.OrdinalIgnoreCase))
+        {
+            return kvp.Key;
+        }
+    }
+
+    return null;
+}
+
+/// <summary>
+/// Convert a raw string into a JsonNode with simple type inference.
+/// </summary>
+static JsonNode? CreateJsonValue(string raw)
+{
+    if (bool.TryParse(raw, out var boolValue))
+    {
+        return JsonValue.Create(boolValue);
+    }
+
+    if (int.TryParse(raw, out var intValue))
+    {
+        return JsonValue.Create(intValue);
+    }
+
+    if (double.TryParse(raw, out var doubleValue))
+    {
+        return JsonValue.Create(doubleValue);
+    }
+
+    if (raw.Equals("null", StringComparison.OrdinalIgnoreCase))
+    {
+        return JsonValue.Create<string?>(null);
+    }
+
+    return JsonValue.Create(raw);
+}
+
+/// <summary>
+/// Persist the user configuration to disk, ensuring the directory exists.
+/// </summary>
+static void SaveUserConfig(JsonObject root, string configPath)
+{
+    var configDir = Path.GetDirectoryName(configPath);
+    if (!string.IsNullOrWhiteSpace(configDir) && !Directory.Exists(configDir))
+    {
+        Directory.CreateDirectory(configDir);
+    }
+
+    File.WriteAllText(configPath, JsonSerializer.Serialize(root, new JsonSerializerOptions { WriteIndented = true }));
 }
 
 /// <summary>

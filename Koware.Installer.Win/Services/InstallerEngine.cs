@@ -37,11 +37,13 @@ public sealed class InstallerEngine
         var embeddedUsed = TryExtractEmbedded("Payload.KowareCli", installDir, progress);
         var embeddedPlayerUsed = false;
         var embeddedReaderUsed = false;
+        var embeddedBrowserUsed = false;
 
         if (options.IncludePlayer)
         {
             embeddedPlayerUsed = TryExtractEmbedded("Payload.KowarePlayer", installDir, progress);
             embeddedReaderUsed = TryExtractEmbedded("Payload.KowareReader", installDir, progress);
+            embeddedBrowserUsed = TryExtractEmbedded("Payload.KowareBrowser", installDir, progress);
         }
 
         if (!embeddedUsed && options.Publish)
@@ -69,6 +71,10 @@ public sealed class InstallerEngine
         }
 
         WriteVersionFile(installDir, progress);
+        
+        // Create Start Menu shortcut and register for uninstall
+        CreateStartMenuShortcut(installDir, progress);
+        RegisterUninstall(installDir, progress);
     }
 
     public bool IsInstalled(string? installDir = null)
@@ -153,6 +159,8 @@ public sealed class InstallerEngine
         }
 
         RemoveFromPath(dir, progress);
+        RemoveStartMenuShortcut(progress);
+        UnregisterUninstall(progress);
 
         return Task.CompletedTask;
     }
@@ -330,6 +338,126 @@ public sealed class InstallerEngine
         File.WriteAllText(psShimPath, psContent);
 
         progress?.Report("Created command shims (koware.cmd, koware.ps1).");
+    }
+
+    private static void CreateStartMenuShortcut(string installDir, IProgress<string>? progress)
+    {
+        try
+        {
+            var startMenuPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
+                "Programs", "Koware");
+            
+            Directory.CreateDirectory(startMenuPath);
+            
+            // Look for Browser first, then fall back to CLI
+            var browserExe = Path.Combine(installDir, "Koware.Browser.exe");
+            var cliExe = Path.Combine(installDir, "Koware.Cli.exe");
+            var targetExe = File.Exists(browserExe) ? browserExe : cliExe;
+            var shortcutName = File.Exists(browserExe) ? "Koware.lnk" : "Koware CLI.lnk";
+            
+            if (!File.Exists(targetExe))
+            {
+                progress?.Report("Warning: No executable found for Start Menu shortcut.");
+                return;
+            }
+            
+            var shortcutPath = Path.Combine(startMenuPath, shortcutName);
+            
+            // Use PowerShell to create shortcut (no COM dependency)
+            var ps = new ProcessStartInfo
+            {
+                FileName = "powershell",
+                Arguments = $"-NoProfile -Command \"$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('{shortcutPath}'); $s.TargetPath = '{targetExe}'; $s.WorkingDirectory = '{installDir}'; $s.Description = 'Koware - Anime & Manga Browser'; $s.Save()\"",
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            
+            using var process = Process.Start(ps);
+            process?.WaitForExit(5000);
+            
+            progress?.Report($"Created Start Menu shortcut at {startMenuPath}");
+        }
+        catch (Exception ex)
+        {
+            progress?.Report($"Warning: Failed to create Start Menu shortcut: {ex.Message}");
+        }
+    }
+    
+    private static void RemoveStartMenuShortcut(IProgress<string>? progress)
+    {
+        try
+        {
+            var startMenuPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
+                "Programs", "Koware");
+            
+            if (Directory.Exists(startMenuPath))
+            {
+                Directory.Delete(startMenuPath, recursive: true);
+                progress?.Report("Removed Start Menu shortcut.");
+            }
+        }
+        catch (Exception ex)
+        {
+            progress?.Report($"Warning: Failed to remove Start Menu shortcut: {ex.Message}");
+        }
+    }
+    
+    private static void RegisterUninstall(string installDir, IProgress<string>? progress)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        
+        try
+        {
+            var version = "0.7.0";
+            var versionFile = Path.Combine(installDir, "version.txt");
+            if (File.Exists(versionFile))
+            {
+                version = File.ReadAllText(versionFile).Trim();
+            }
+            
+            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Koware");
+            
+            if (key != null)
+            {
+                var browserExe = Path.Combine(installDir, "Koware.Browser.exe");
+                var iconPath = File.Exists(browserExe) ? browserExe : Path.Combine(installDir, "Koware.Cli.exe");
+                
+                key.SetValue("DisplayName", "Koware");
+                key.SetValue("DisplayVersion", version);
+                key.SetValue("Publisher", "Ilgaz Mehmetoglu");
+                key.SetValue("InstallLocation", installDir);
+                key.SetValue("DisplayIcon", iconPath);
+                key.SetValue("UninstallString", $"\"{Path.Combine(installDir, "Koware.Installer.Win.exe")}\" --uninstall");
+                key.SetValue("NoModify", 1, Microsoft.Win32.RegistryValueKind.DWord);
+                key.SetValue("NoRepair", 1, Microsoft.Win32.RegistryValueKind.DWord);
+                
+                progress?.Report("Registered Koware in Programs and Features.");
+            }
+        }
+        catch (Exception ex)
+        {
+            progress?.Report($"Warning: Failed to register uninstall: {ex.Message}");
+        }
+    }
+    
+    private static void UnregisterUninstall(IProgress<string>? progress)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        
+        try
+        {
+            Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(
+                @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Koware", 
+                throwOnMissingSubKey: false);
+            progress?.Report("Removed Koware from Programs and Features.");
+        }
+        catch (Exception ex)
+        {
+            progress?.Report($"Warning: Failed to unregister: {ex.Message}");
+        }
     }
 
     private bool TryExtractEmbedded(string resourceName, string destinationDir, IProgress<string>? progress)

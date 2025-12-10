@@ -57,7 +57,7 @@ public sealed class GogoAnimeCatalog : IAnimeCatalog
                 var title = item.GetProperty("title").GetString() ?? id;
                 var urlSlug = item.TryGetProperty("url", out var urlProp) ? urlProp.GetString() : null;
                 var detailUrl = BuildSiteUrl(urlSlug ?? $"/category/{id}");
-                list.Add(new Anime(new AnimeId($"gogo:{id}"), title, null, detailUrl, Array.Empty<Episode>()));
+                list.Add(new Anime(new AnimeId($"gogo:{id}"), title, synopsis: null, coverImage: null, detailUrl, Array.Empty<Episode>()));
             }
 
             return list;
