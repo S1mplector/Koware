@@ -2,7 +2,6 @@
 // Handles installer UI interactions and invokes InstallerEngine operations.
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -14,6 +13,13 @@ using WpfMessageBox = System.Windows.MessageBox;
 using Koware.Installer.Win.Models;
 using Koware.Installer.Win.Services;
 using Koware.Updater;
+using Path = System.IO.Path;
+using File = System.IO.File;
+using Color = System.Windows.Media.Color;
+using Point = System.Windows.Point;
+using FontFamily = System.Windows.Media.FontFamily;
+using HorizontalAlignment = System.Windows.HorizontalAlignment;
+using VerticalAlignment = System.Windows.VerticalAlignment;
 
 namespace Koware.Installer.Win.UI;
 
