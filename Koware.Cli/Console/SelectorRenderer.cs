@@ -9,6 +9,37 @@ using Koware.Cli.Config;
 namespace Koware.Cli.Console;
 
 /// <summary>
+/// Provides cross-platform icons that work on both Windows and macOS terminals.
+/// Windows terminals often lack proper emoji font support, so we use ASCII fallbacks.
+/// </summary>
+public static class Icons
+{
+    private static readonly bool IsWindows = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+        System.Runtime.InteropServices.OSPlatform.Windows);
+
+    // UI elements
+    public static string Prompt => IsWindows ? ">" : "❯";
+    public static string Search => IsWindows ? "[?]" : "🔍";
+    public static string Book => IsWindows ? "[#]" : "📖";
+    public static string Selection => IsWindows ? ">" : "▶";
+    public static string Scroll => IsWindows ? "^v" : "↕";
+    public static string Play => IsWindows ? "[>]" : "▶";
+
+    // Status indicators  
+    public static string Success => IsWindows ? "[+]" : "✓";
+    public static string Warning => IsWindows ? "[!]" : "⚠";
+    public static string Error => IsWindows ? "[x]" : "✗";
+    public static string Download => IsWindows ? "[v]" : "📥";
+    public static string New => IsWindows ? "[*]" : "✨";
+    
+    // Aliases for backward compatibility
+    public static string Preview => Book;
+    public static string Watched => Success;
+    public static string Downloaded => Download;
+    public static string InProgress => Play;
+}
+
+/// <summary>
 /// Configuration for how items should be rendered in the selector.
 /// </summary>
 public sealed class RenderConfig
@@ -107,7 +138,7 @@ public sealed class SelectorRenderer
     private void RenderHeader(RenderState state, ref int lines)
     {
         _buffer.SetColor(Theme.Primary);
-        _buffer.Write($"❯ {_config.Prompt}");
+        _buffer.Write($"{Icons.Prompt} {_config.Prompt}");
         _buffer.ResetColor();
 
         _buffer.SetColor(Theme.Text);
@@ -121,7 +152,7 @@ public sealed class SelectorRenderer
             var scrollPct = state.FilteredCount > 1 
                 ? ((state.ScrollOffset + state.SelectedIndex) * 100) / (state.FilteredCount - 1) 
                 : 0;
-            _buffer.Write($" ↕{scrollPct}%");
+            _buffer.Write($" {Icons.Scroll}{scrollPct}%");
             _buffer.ResetColor();
         }
 
@@ -132,7 +163,7 @@ public sealed class SelectorRenderer
     private void RenderSearchBox(string searchText, ref int lines)
     {
         _buffer.SetColor(Theme.Muted);
-        _buffer.Write("  🔍 ");
+        _buffer.Write($"  {Icons.Search} ");
         _buffer.SetColor(Theme.Text);
         _buffer.Write(searchText);
         _buffer.SetColor(Theme.Primary);
@@ -184,7 +215,7 @@ public sealed class SelectorRenderer
         if (isSelected)
         {
             _buffer.SetColor(_config.SelectionColor);
-            _buffer.Write(" ▶ ");
+            _buffer.Write($" {Icons.Selection} ");
         }
         else
         {
@@ -248,7 +279,7 @@ public sealed class SelectorRenderer
         if (!string.IsNullOrWhiteSpace(preview))
         {
             _buffer.SetColor(Theme.Muted);
-            _buffer.Write("  📖 ");
+        _buffer.Write($"  {Icons.Preview} ");
             _buffer.SetColor(Theme.Text);
 
             var maxWidth = _buffer.Width - 6;
@@ -329,10 +360,10 @@ public sealed class SelectorRenderer
 
     private static string GetStatusIcon(ItemStatus status) => status switch
     {
-        ItemStatus.Watched => "✓",
-        ItemStatus.Downloaded => "📥",
-        ItemStatus.InProgress => "▶",
-        ItemStatus.New => "✨",
+        ItemStatus.Watched => Icons.Watched,
+        ItemStatus.Downloaded => Icons.Downloaded,
+        ItemStatus.InProgress => Icons.InProgress,
+        ItemStatus.New => Icons.New,
         _ => ""
     };
 

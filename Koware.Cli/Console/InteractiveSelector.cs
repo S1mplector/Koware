@@ -378,7 +378,7 @@ public static class InteractiveSelect
     public static bool Confirm(string message, bool defaultYes = false)
     {
         System.Console.ForegroundColor = ConsoleColor.Yellow;
-        System.Console.Write($"❯ {message} ");
+        System.Console.Write($"{Icons.Prompt} {message} ");
         System.Console.ForegroundColor = ConsoleColor.DarkGray;
         System.Console.Write(defaultYes ? "[Y/n] " : "[y/N] ");
         System.Console.ResetColor();
@@ -406,7 +406,7 @@ public static class InteractiveSelect
     public static int? SelectNumber(string prompt, int min, int max, int? defaultValue = null)
     {
         System.Console.ForegroundColor = ConsoleColor.Cyan;
-        System.Console.Write($"❯ {prompt} ");
+        System.Console.Write($"{Icons.Prompt} {prompt} ");
         System.Console.ForegroundColor = ConsoleColor.DarkGray;
         System.Console.Write($"[{min}-{max}]");
         if (defaultValue.HasValue)
@@ -509,7 +509,7 @@ public static class InteractiveBrowser
             ch => $"Chapter {ch.Number}" + (string.IsNullOrWhiteSpace(ch.Title) ? "" : $" - {ch.Title}"),
             new SelectorOptions<EpisodeItem>
             {
-                Prompt = $"📖 {title}",
+                Prompt = $"{Icons.Book} {title}",
                 MaxVisibleItems = 15,
                 ShowSearch = true,
                 ShowPreview = false,

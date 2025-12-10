@@ -271,7 +271,7 @@ static bool CheckProvidersConfigured(IServiceProvider services, CliMode mode, IL
     if (!hasConfiguredProvider)
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine($"⚠ No {modeLabel} providers configured.");
+        Console.WriteLine($"{Icons.Warning} No {modeLabel} providers configured.");
         Console.ResetColor();
         Console.WriteLine();
         Console.WriteLine("Quick setup (recommended):");
@@ -888,7 +888,7 @@ static int HandleProviderList(AllAnimeOptions allAnime, AllMangaOptions allManga
         if (!isConfigured)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.Write("✗ Not configured");
+            Console.Write($"{Icons.Error} Not configured");
             Console.ResetColor();
         }
         else if (!isEnabled)
@@ -900,7 +900,7 @@ static int HandleProviderList(AllAnimeOptions allAnime, AllMangaOptions allManga
         else
         {
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.Write("✓ Ready        ");
+            Console.WriteLine($"{Icons.Success} Ready        ");
             Console.ResetColor();
         }
         
@@ -1025,7 +1025,7 @@ static Task<int> HandleProviderAddAsync(string? providerName, string configPath)
     
     Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine($"✓ Provider '{sectionName}' configured successfully!");
+    Console.WriteLine($"{Icons.Success} Provider '{sectionName}' configured successfully!");
     Console.ResetColor();
     Console.WriteLine($"Config saved to: {configPath}");
     
@@ -1124,7 +1124,7 @@ static int HandleProviderInit(string configPath)
     File.WriteAllText(configPath, JsonSerializer.Serialize(template, new JsonSerializerOptions { WriteIndented = true }));
     
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine($"✓ Template config created: {configPath}");
+    Console.WriteLine($"{Icons.Success} Template config created: {configPath}");
     Console.ResetColor();
     Console.WriteLine();
     Console.WriteLine("Next steps:");
@@ -1168,7 +1168,7 @@ static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOpt
         if (!info.configured || string.IsNullOrWhiteSpace(info.apiBase))
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("⚠ Not configured");
+            Console.WriteLine($"{Icons.Warning} Not configured");
             Console.ResetColor();
             continue;
         }
@@ -1189,15 +1189,15 @@ static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOpt
             {
                 Console.ForegroundColor = ConsoleColor.Green;
                 if (code >= 520)
-                    Console.WriteLine($"✓ Reachable (Cloudflare {code})");
+                    Console.WriteLine($"{Icons.Success} Reachable (Cloudflare {code})");
                 else
-                    Console.WriteLine($"✓ Connected ({code})");
+                    Console.WriteLine($"{Icons.Success} Connected ({code})");
                 Console.ResetColor();
             }
             else
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"✗ HTTP {code}");
+                Console.WriteLine($"{Icons.Error} HTTP {code}");
                 Console.ResetColor();
                 allPassed = false;
             }
@@ -1205,7 +1205,7 @@ static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOpt
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"✗ {ex.Message}");
+            Console.WriteLine($"{Icons.Error} {ex.Message}");
             Console.ResetColor();
             allPassed = false;
         }
@@ -1233,13 +1233,13 @@ static async Task<int> HandleProviderAutoConfigAsync(string? providerName, bool 
         var manifestJson = await http.GetStringAsync(manifestUrl);
         manifest = JsonNode.Parse(manifestJson) as JsonObject ?? throw new Exception("Invalid manifest format");
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine("✓");
+        Console.WriteLine($"{Icons.Success}");
         Console.ResetColor();
     }
     catch (Exception ex)
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"✗ {ex.Message}");
+        Console.WriteLine($"{Icons.Error} {ex.Message}");
         Console.ResetColor();
         Console.WriteLine();
         Console.WriteLine("Could not fetch provider manifest. Check your internet connection.");
@@ -1290,7 +1290,7 @@ static async Task<int> HandleProviderAutoConfigAsync(string? providerName, bool 
         if (!providers.ContainsKey(key))
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"⚠ Unknown provider: {key}");
+            Console.WriteLine($"{Icons.Warning} Unknown provider: {key}");
             Console.ResetColor();
             continue;
         }
@@ -1301,7 +1301,7 @@ static async Task<int> HandleProviderAutoConfigAsync(string? providerName, bool 
         
         if (string.IsNullOrWhiteSpace(configFile))
         {
-            Console.WriteLine($"⚠ No config file for {displayName}");
+            Console.WriteLine($"{Icons.Warning} No config file for {displayName}");
             continue;
         }
         
@@ -1316,7 +1316,7 @@ static async Task<int> HandleProviderAutoConfigAsync(string? providerName, bool 
             if (config is null)
             {
                 Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("⚠ Invalid config format");
+                Console.WriteLine($"{Icons.Warning} Invalid config format");
                 Console.ResetColor();
                 continue;
             }
@@ -1338,14 +1338,14 @@ static async Task<int> HandleProviderAutoConfigAsync(string? providerName, bool 
             configJson[sectionName] = existingSection;
             
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("✓");
+            Console.WriteLine($"{Icons.Success}");
             Console.ResetColor();
             configured++;
         }
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"✗ {ex.Message}");
+            Console.WriteLine($"{Icons.Error} {ex.Message}");
             Console.ResetColor();
         }
     }
@@ -1363,7 +1363,7 @@ static async Task<int> HandleProviderAutoConfigAsync(string? providerName, bool 
         
         Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"✓ Configured {configured} provider(s).");
+        Console.WriteLine($"{Icons.Success} Configured {configured} provider(s).");
         Console.ResetColor();
         Console.WriteLine($"  Config saved to: {configPath}");
         Console.WriteLine();
@@ -1408,7 +1408,7 @@ static int HandleProviderToggle(string target, bool enable, string configPath)
     File.WriteAllText(configPath, JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = true }));
     
     Console.ForegroundColor = enable ? ConsoleColor.Green : ConsoleColor.Yellow;
-    Console.WriteLine($"{(enable ? "✓ Enabled" : "○ Disabled")} provider '{sectionName}'.");
+    Console.WriteLine($"{(enable ? $"{Icons.Success} Enabled" : "[-] Disabled")} provider '{sectionName}'.");
     Console.ResetColor();
     
     return 0;
@@ -3181,7 +3181,7 @@ static async Task<int> HandleOfflineAsync(string[] args, IServiceProvider servic
         else
         {
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("📥 Download Statistics");
+            Console.WriteLine($"{Icons.Download} Download Statistics");
             Console.ResetColor();
             Console.WriteLine(new string('─', 30));
             Console.WriteLine($"  Episodes:   {stats.TotalEpisodes} ({stats.UniqueAnime} anime)");
@@ -3248,7 +3248,7 @@ static async Task<int> HandleOfflineAsync(string[] args, IServiceProvider servic
     }
     
     Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine($"📥 Downloaded {(mode == CliMode.Manga ? "Manga" : "Anime")} (Available Offline)");
+    Console.WriteLine($"{Icons.Download} Downloaded {(mode == CliMode.Manga ? "Manga" : "Anime")} (Available Offline)");
     Console.ResetColor();
     Console.WriteLine(new string('─', 50));
     Console.WriteLine();
@@ -3265,7 +3265,7 @@ static async Task<int> HandleOfflineAsync(string[] args, IServiceProvider servic
         var numbers = group.Items.Select(d => d.Number).ToList();
         var ranges = FormatNumberRanges(numbers);
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.Write($"    ✓ {(mode == CliMode.Manga ? "Ch" : "Ep")}: ");
+        Console.Write($"    {Icons.Success} {(mode == CliMode.Manga ? "Ch" : "Ep")}: ");
         Console.ResetColor();
         Console.WriteLine(ranges);
         
@@ -3273,7 +3273,7 @@ static async Task<int> HandleOfflineAsync(string[] args, IServiceProvider servic
         if (group.MissingCount > 0)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"    ⚠ {group.MissingCount} file(s) missing - run 'koware offline --cleanup' to remove stale entries");
+            Console.WriteLine($"    {Icons.Warning} {group.MissingCount} file(s) missing - run 'koware offline --cleanup' to remove stale entries");
             Console.ResetColor();
         }
         
@@ -3969,7 +3969,7 @@ static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> 
     var readerName = Path.GetFileNameWithoutExtension(readerPath);
     Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.Write("📖 ");
+    Console.Write($"{Icons.Book} ");
     Console.ResetColor();
     Console.Write($"Launching ");
     Console.ForegroundColor = ConsoleColor.White;
@@ -4148,7 +4148,7 @@ static int LaunchMacOSBrowserReader(IReadOnlyCollection<ChapterPage> pages, ILog
         Process.Start(start);
         Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine("📖 Reader opened in browser. Press Enter when done reading...");
+        Console.WriteLine($"{Icons.Book} Reader opened in browser. Press Enter when done reading...");
         Console.ResetColor();
         Console.ReadLine();
         
@@ -5464,7 +5464,7 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
     // Show which player is being used
     Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.Write("▶ ");
+    Console.Write($"{Icons.Play} ");
     Console.ResetColor();
     Console.Write($"Launching ");
     Console.ForegroundColor = ConsoleColor.White;
@@ -5784,7 +5784,7 @@ static void RenderSearch(string query, IReadOnlyCollection<Anime> matches)
 {
     Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.Write("🔍 ");
+    Console.Write($"{Icons.Search} ");
     Console.ResetColor();
     Console.Write($"Search results for ");
     Console.ForegroundColor = ConsoleColor.White;
@@ -6582,7 +6582,7 @@ static int HandleConfig(string[] args)
                 }
 
                 SaveUserConfig(root, configPath);
-                Console.WriteLine($"✓ Set {targetPath} = {value}");
+                Console.WriteLine($"{Icons.Success} Set {targetPath} = {value}");
                 Console.WriteLine($"   Saved to {configPath}");
                 return 0;
             }
@@ -6602,7 +6602,7 @@ static int HandleConfig(string[] args)
                 }
 
                 SaveUserConfig(root, configPath);
-                Console.WriteLine($"✓ Removed {targetPath}");
+                Console.WriteLine($"{Icons.Success} Removed {targetPath}");
                 Console.WriteLine($"   Saved to {configPath}");
                 return 0;
             }
@@ -7071,11 +7071,11 @@ static int HandleTheme(string[] args)
         Console.WriteLine("Accent");
         
         Console.ForegroundColor = Theme.Success;
-        Console.Write("  ✓ Success  ");
+        Console.Write($"  {Icons.Success} Success  ");
         Console.ForegroundColor = Theme.Warning;
-        Console.Write("⚠ Warning  ");
+        Console.Write($"{Icons.Warning} Warning  ");
         Console.ForegroundColor = Theme.Error;
-        Console.WriteLine("✗ Error");
+        Console.WriteLine($"{Icons.Error} Error");
         Console.ResetColor();
         
         Console.ForegroundColor = Theme.Muted;
@@ -7168,7 +7168,7 @@ static async Task<int> HandleStatsAsync(string[] args, IServiceProvider services
     var estimatedChaptersRead = totalReadEntries;
 
     Console.ForegroundColor = Theme.Secondary;
-    Console.WriteLine("📖 Manga Reading");
+    Console.WriteLine($"{Icons.Book} Manga Reading");
     Console.ForegroundColor = Theme.Muted;
     Console.WriteLine(new string('─', 30));
     Console.ResetColor();
@@ -7198,7 +7198,7 @@ static async Task<int> HandleStatsAsync(string[] args, IServiceProvider services
     var dlStats = await downloadStore.GetStatsAsync(cancellationToken);
 
     Console.ForegroundColor = Theme.Secondary;
-    Console.WriteLine("📥 Downloads");
+    Console.WriteLine($"{Icons.Download} Downloads");
     Console.ForegroundColor = Theme.Muted;
     Console.WriteLine(new string('─', 30));
     Console.ResetColor();
