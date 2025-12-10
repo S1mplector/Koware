@@ -6050,6 +6050,286 @@ static void PrintUsage()
 }
 
 /// <summary>
+/// Get help text for a command as a list of lines for display in the FZF selector.
+/// </summary>
+static List<string> GetHelpLines(string command, CliMode mode)
+{
+    var lines = new List<string>();
+    
+    switch (command.ToLowerInvariant())
+    {
+        case "search":
+            lines.Add("search - Find anime or manga with optional filters");
+            lines.Add("");
+            lines.Add("Usage: koware search <query> [filters]");
+            lines.Add("Mode : searches anime or manga based on current mode");
+            lines.Add("");
+            lines.Add("Filters:");
+            lines.Add("  --genre <name>     Filter by genre (Action, Romance, Fantasy, etc.)");
+            lines.Add("  --year <year>      Filter by release year (e.g., 2024)");
+            lines.Add("  --status <status>  Filter by status: ongoing, completed, upcoming");
+            lines.Add("  --sort <order>     Sort by: popular, score, recent, title");
+            lines.Add("  --country <code>   Country: JP (Japan), KR (Korea), CN (China)");
+            lines.Add("");
+            lines.Add("Examples:");
+            lines.Add("  koware search \"demon slayer\"");
+            lines.Add("  koware search --genre action --status ongoing");
+            lines.Add("  koware search \"romance\" --year 2024 --sort popular");
+            break;
+            
+        case "recommend":
+            lines.Add("recommend - Get personalized recommendations based on your history");
+            lines.Add("");
+            lines.Add("Usage: koware recommend [--limit <n>] [--json]");
+            lines.Add("Alias: rec");
+            lines.Add("Mode : recommends anime or manga based on current mode");
+            lines.Add("");
+            lines.Add("Options:");
+            lines.Add("  --limit <n>  Number of recommendations (default: 10, max: 50)");
+            lines.Add("  --json       Output as JSON");
+            lines.Add("");
+            lines.Add("Behavior:");
+            lines.Add("  - Finds popular content you haven't watched/read yet");
+            lines.Add("  - Excludes titles already in your tracking list");
+            lines.Add("");
+            lines.Add("Examples:");
+            lines.Add("  koware recommend");
+            lines.Add("  koware recommend --limit 20");
+            break;
+            
+        case "stream":
+            lines.Add("stream - Plan stream selection and print the resolved streams");
+            lines.Add("");
+            lines.Add("Usage: koware stream <query> [options]");
+            lines.Add("");
+            lines.Add("Options:");
+            lines.Add("  --episode <n>       Episode number");
+            lines.Add("  --quality <label>   Quality (e.g., 1080p, 720p)");
+            lines.Add("  --index <match>     Match index from search results");
+            lines.Add("  --non-interactive   Skip prompts");
+            lines.Add("");
+            lines.Add("Notes: Does not launch a player; useful for inspecting streams.");
+            break;
+            
+        case "watch":
+            lines.Add("watch - Pick a stream and launch the configured player");
+            lines.Add("");
+            lines.Add("Usage: koware watch <query> [options]");
+            lines.Add("Alias: play");
+            lines.Add("");
+            lines.Add("Options:");
+            lines.Add("  --episode <n>       Episode number");
+            lines.Add("  --quality <label>   Quality (e.g., 1080p, 720p)");
+            lines.Add("  --index <match>     Match index from search results");
+            lines.Add("  --non-interactive   Skip prompts");
+            lines.Add("");
+            lines.Add("Example:");
+            lines.Add("  koware watch \"one piece\" --episode 1010 --quality 1080p");
+            break;
+            
+        case "download":
+            lines.Add("download - Download episodes or chapters to files on disk");
+            lines.Add("");
+            lines.Add("Usage (anime):");
+            lines.Add("  koware download <query> [--episode <n> | --episodes <n-m|all>]");
+            lines.Add("                          [--quality <label>] [--index <match>] [--dir <path>]");
+            lines.Add("");
+            lines.Add("Usage (manga):");
+            lines.Add("  koware download <query> [--chapter <n|n-m|all>]");
+            lines.Add("                          [--index <match>] [--dir <path>]");
+            lines.Add("");
+            lines.Add("Examples:");
+            lines.Add("  koware download \"one piece\" --episodes 1-12 --quality 1080p");
+            lines.Add("  koware download \"chainsaw man\" --chapter 1-10  (manga mode)");
+            lines.Add("");
+            lines.Add("Downloads are tracked. View with 'koware offline'.");
+            break;
+            
+        case "read":
+            lines.Add("read - Search for manga and read chapters in the Koware reader");
+            lines.Add("");
+            lines.Add("Usage: koware read <query> [options]");
+            lines.Add("");
+            lines.Add("Options:");
+            lines.Add("  --chapter <n>       Chapter number");
+            lines.Add("  --index <match>     Match index from search results");
+            lines.Add("  --non-interactive   Skip prompts");
+            lines.Add("");
+            lines.Add("Examples:");
+            lines.Add("  koware read \"one piece\" --chapter 1");
+            lines.Add("  koware read \"chainsaw man\" --index 1 --chapter 10");
+            lines.Add("");
+            lines.Add("Behavior: searches, fetches chapter pages, and launches the reader.");
+            break;
+            
+        case "last":
+            lines.Add("last - Show the most recent watched/read entry");
+            lines.Add("");
+            lines.Add("Usage: koware last [--play] [--json]");
+            lines.Add("Mode : shows last watched anime or last read manga");
+            lines.Add("");
+            lines.Add("Options:");
+            lines.Add("  --play   Launch the last stream (anime mode)");
+            lines.Add("  --json   Output as JSON");
+            break;
+            
+        case "continue":
+            lines.Add("continue - Resume from history and play/read the next episode/chapter");
+            lines.Add("");
+            lines.Add("Usage (anime): koware continue [<name>] [--from <episode>] [--quality <label>]");
+            lines.Add("Usage (manga): koware continue [<name>] [--from <chapter>]");
+            lines.Add("Mode : continues anime or manga based on current mode");
+            lines.Add("");
+            lines.Add("Behavior:");
+            lines.Add("  - No name: resumes the most recent entry");
+            lines.Add("  - With name: fuzzy-matches history by title");
+            lines.Add("  - --from overrides the episode/chapter number");
+            break;
+            
+        case "history":
+            lines.Add("history - Browse and filter watch/read history");
+            lines.Add("");
+            lines.Add("Usage: koware history [search <query>] [options]");
+            lines.Add("Mode : shows watch history (anime) or read history (manga)");
+            lines.Add("");
+            lines.Add("Options:");
+            lines.Add("  search <query>      Filter by title");
+            lines.Add("  --limit <n>         Limit results");
+            lines.Add("  --after <ISO>       After date");
+            lines.Add("  --before <ISO>      Before date");
+            lines.Add("  --from <ep>         From episode/chapter");
+            lines.Add("  --to <ep>           To episode/chapter");
+            lines.Add("  --json              Output as JSON");
+            lines.Add("  --stats             Show counts per anime/manga");
+            lines.Add("  --play <n>          Play the nth item (anime mode)");
+            break;
+            
+        case "list":
+            var statusValues = mode == CliMode.Manga ? "reading, completed, plan, hold, dropped" : "watching, completed, plan, hold, dropped";
+            var itemType = mode == CliMode.Manga ? "manga" : "anime";
+            var countType = mode == CliMode.Manga ? "chapters" : "episodes";
+            lines.Add($"list - Track your {itemType} watch/read status");
+            lines.Add("");
+            lines.Add("Commands:");
+            lines.Add("  koware list                        Show all in your list");
+            lines.Add("  koware list --status <status>      Filter by status");
+            lines.Add("  koware list add \"<title>\"          Add to plan (default)");
+            lines.Add("  koware list update \"<title>\" ...   Change status");
+            lines.Add("  koware list remove \"<title>\"       Remove from list");
+            lines.Add("  koware list stats                  Show counts by status");
+            lines.Add("");
+            lines.Add("Options:");
+            lines.Add($"  --status <status>  {statusValues}");
+            lines.Add($"  --{countType} <n>     Set total count");
+            lines.Add("  --score <1-10>     Rate the title");
+            lines.Add("  --notes \"...\"      Add personal notes");
+            lines.Add("");
+            lines.Add("Auto-tracking:");
+            lines.Add("  - Entries transition automatically as you watch/read");
+            break;
+            
+        case "offline":
+            lines.Add("offline - View downloaded content available for offline viewing");
+            lines.Add("");
+            lines.Add("Usage: koware offline [--stats] [--cleanup] [--json]");
+            lines.Add("Mode : shows episodes or chapters based on current mode");
+            lines.Add("");
+            lines.Add("Options:");
+            lines.Add("  --stats    Show download statistics (total size, counts)");
+            lines.Add("  --cleanup  Remove stale entries for deleted files");
+            lines.Add("  --json     Output as JSON");
+            lines.Add("");
+            lines.Add("What it shows:");
+            lines.Add("  - List of anime/manga with downloaded content");
+            lines.Add("  - Episode/chapter numbers available offline");
+            lines.Add("  - File sizes and missing file warnings");
+            break;
+            
+        case "config":
+            lines.Add("config - View or update appsettings.user.json");
+            lines.Add("");
+            lines.Add("Commands:");
+            lines.Add("  koware config                    Show summary");
+            lines.Add("  koware config show [--json]      Show config");
+            lines.Add("  koware config path               Print config file path");
+            lines.Add("  koware config get <path>         Read a value");
+            lines.Add("  koware config set <path> <value> Write a value");
+            lines.Add("  koware config unset <path>       Remove a value");
+            lines.Add("");
+            lines.Add("Shortcuts:");
+            lines.Add("  koware config --quality 1080p --index 1");
+            lines.Add("  koware config --player vlc --args \"--play-and-exit\"");
+            lines.Add("");
+            lines.Add("Examples:");
+            lines.Add("  koware config set Player:Command \"vlc\"");
+            lines.Add("  koware config set Reader:Command \"./reader/Koware.Reader\"");
+            break;
+            
+        case "mode":
+            lines.Add("mode - Switch between anime and manga modes");
+            lines.Add("");
+            lines.Add("Usage: koware mode [anime|manga]");
+            lines.Add("");
+            lines.Add("Behavior:");
+            lines.Add("  - No argument: shows current mode");
+            lines.Add("  - 'anime': switches to anime mode (default)");
+            lines.Add("  - 'manga': switches to manga mode");
+            lines.Add("");
+            lines.Add("Mode affects these commands:");
+            lines.Add("  - search   -> searches anime or manga");
+            lines.Add("  - history  -> shows watch or read history");
+            lines.Add("  - last     -> shows last watched or last read");
+            lines.Add("  - continue -> continues anime or manga");
+            break;
+            
+        case "provider":
+            lines.Add("provider - List or toggle providers");
+            lines.Add("");
+            lines.Add("Usage: koware provider [options]");
+            lines.Add("");
+            lines.Add("Options:");
+            lines.Add("  --enable <name>   Enable a provider");
+            lines.Add("  --disable <name>  Disable a provider");
+            lines.Add("");
+            lines.Add("Behavior: Lists providers; with flags, updates enablement.");
+            break;
+            
+        case "doctor":
+            lines.Add("doctor - Run a full health check (config, providers, tools)");
+            lines.Add("");
+            lines.Add("Usage: koware doctor");
+            lines.Add("");
+            lines.Add("Behavior:");
+            lines.Add("  - Verifies CLI version/path and config file location");
+            lines.Add("  - Checks anime/manga provider reachability (DNS + HTTP)");
+            lines.Add("  - Confirms player/reader binaries are discoverable");
+            lines.Add("  - Checks external tools: ffmpeg, yt-dlp, aria2c");
+            break;
+            
+        case "update":
+            lines.Add("update - Download and run the latest Koware installer");
+            lines.Add("");
+            lines.Add("Usage: koware update");
+            lines.Add("");
+            lines.Add("Behavior:");
+            lines.Add("  - Downloads the latest Windows installer from GitHub");
+            lines.Add("  - Launches the installer");
+            lines.Add("  - Follow the GUI to complete the update");
+            break;
+            
+        default:
+            lines.Add($"Unknown command: {command}");
+            break;
+    }
+    
+    // Add navigation hint at the end
+    lines.Add("");
+    lines.Add("Press Esc to go back");
+    
+    return lines;
+}
+
+/// <summary>
 /// Implement <c>koware help</c> and <c>koware help &lt;command&gt;</c>.
 /// </summary>
 /// <param name="args">CLI arguments; second element is the help topic.</param>
@@ -6062,7 +6342,7 @@ static int HandleHelp(string[] args, CliMode mode)
 {
     if (args.Length == 1)
     {
-        // Show interactive command selector
+        // Show interactive command selector with back navigation
         var commands = new (string Name, string Description)[]
         {
             ("search", "Find anime or manga with optional filters"),
@@ -6083,24 +6363,42 @@ static int HandleHelp(string[] args, CliMode mode)
             ("update", "Download and run the latest Koware installer")
         };
 
-        var selector = new InteractiveSelector<(string Name, string Description)>(
-            commands,
-            cmd => cmd.Name,
-            new SelectorOptions<(string Name, string Description)>
-            {
-                Prompt = "Help",
-                PreviewFunc = cmd => cmd.Description,
-                ShowPreview = true,
-                MaxVisibleItems = 12,
-                EmptyMessage = "No commands found"
-            });
+        while (true)
+        {
+            var selector = new InteractiveSelector<(string Name, string Description)>(
+                commands,
+                cmd => cmd.Name,
+                new SelectorOptions<(string Name, string Description)>
+                {
+                    Prompt = "Help",
+                    PreviewFunc = cmd => cmd.Description,
+                    ShowPreview = true,
+                    MaxVisibleItems = 12,
+                    EmptyMessage = "No commands found"
+                });
 
-        var result = selector.Run();
-        if (result.Cancelled)
-            return 0;
+            var result = selector.Run();
+            if (result.Cancelled)
+                return 0;
 
-        // Show detailed help for selected command
-        return HandleHelp(new[] { "help", result.Selected.Name }, mode);
+            // Show detailed help for selected command in FZF menu
+            var helpLines = GetHelpLines(result.Selected.Name, mode);
+            var detailSelector = new InteractiveSelector<string>(
+                helpLines,
+                line => line,
+                new SelectorOptions<string>
+                {
+                    Prompt = $"Help: {result.Selected.Name}",
+                    ShowPreview = false,
+                    ShowSearch = false,
+                    MaxVisibleItems = Math.Min(helpLines.Count, 18),
+                    DisableQuickJump = true
+                });
+
+            var detailResult = detailSelector.Run();
+            // Whether cancelled (Esc) or selected (Enter), go back to main menu
+            // Loop continues until user presses Esc on the main menu
+        }
     }
 
     var topic = args[1].ToLowerInvariant();
