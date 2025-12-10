@@ -1,4 +1,4 @@
-﻿<!-- Author: Ilgaz Mehmetoğlu | Summary: Project file for the Koware command-line interface. -->
+<!-- Author: Ilgaz Mehmetoglu | Summary: Project file for the Koware command-line interface. -->
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
@@ -12,7 +12,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>0.7.0-beta</Version>
+    <Version>0.8.0-beta</Version>
   </PropertyGroup>
 
   <ItemGroup>

@@ -350,9 +350,9 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
     <key>CFBundleIdentifier</key>
     <string>com.ilgazmehmetoglu.koware</string>
     <key>CFBundleVersion</key>
-    <string>0.7.0</string>
+    <string>0.8.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.7.0-beta</string>
+    <string>0.8.0-beta</string>
     <key>CFBundleExecutable</key>
     <string>Koware</string>
     <key>CFBundlePackageType</key>

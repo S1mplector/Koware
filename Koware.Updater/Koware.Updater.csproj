@@ -1,4 +1,4 @@
-﻿<!-- Author: Ilgaz Mehmetoğlu | Summary: Shared updater utilities for Koware installer downloads. -->
+<!-- Author: Ilgaz Mehmetoglu | Summary: Shared updater utilities for Koware installer downloads. -->
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>

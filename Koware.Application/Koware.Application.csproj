@@ -1,4 +1,4 @@
-﻿<!-- Author: Ilgaz Mehmetoğlu
+<!-- Author: Ilgaz Mehmetoglu
 Project file for application-layer services and orchestrator logic. -->
 <Project Sdk="Microsoft.NET.Sdk">
 
@@ -10,7 +10,7 @@ Project file for application-layer services and orchestrator logic. -->
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>0.7.0-beta</Version>
+    <Version>0.8.0-beta</Version>
   </PropertyGroup>
 
   <ItemGroup>

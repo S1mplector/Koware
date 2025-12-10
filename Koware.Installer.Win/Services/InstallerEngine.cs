@@ -410,7 +410,7 @@ public sealed class InstallerEngine
         
         try
         {
-            var version = "0.7.0";
+            var version = "0.8.0";
             var versionFile = Path.Combine(installDir, "version.txt");
             if (File.Exists(versionFile))
             {

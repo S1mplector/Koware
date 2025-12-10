@@ -1,4 +1,4 @@
-﻿<!-- Author: Ilgaz Mehmetoğlu 
+<!-- Author: Ilgaz Mehmetoglu 
  Summary: WPF GUI installer for Koware CLI and player. -->
 <Project Sdk="Microsoft.NET.Sdk">
 
@@ -10,7 +10,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <Version>0.7.0-beta</Version>
+    <Version>0.8.0-beta</Version>
     <ApplicationIcon>Assets\Logo\logo.ico</ApplicationIcon>
   </PropertyGroup>
 
