@@ -6062,11 +6062,45 @@ static int HandleHelp(string[] args, CliMode mode)
 {
     if (args.Length == 1)
     {
-        PrintUsage();
-        Console.WriteLine();
-        Console.WriteLine("For detailed help: koware help <command>");
-        Console.WriteLine("Commands: search, stream, watch, play, download, read, last, continue, history, list, recommend, offline, config, mode, provider, doctor, update");
-        return 0;
+        // Show interactive command selector
+        var commands = new (string Name, string Description)[]
+        {
+            ("search", "Find anime or manga with optional filters"),
+            ("recommend", "Get personalized recommendations based on your history"),
+            ("stream", "Plan stream selection and print the resolved streams"),
+            ("watch", "Pick a stream and launch the configured player"),
+            ("download", "Download episodes or chapters to files on disk"),
+            ("read", "Search for manga and read chapters in the Koware reader"),
+            ("last", "Show the most recent watched/read entry"),
+            ("continue", "Resume from history and play/read the next episode/chapter"),
+            ("history", "Browse and filter watch/read history"),
+            ("list", "Track your anime/manga watch/read status"),
+            ("offline", "View downloaded content available for offline viewing"),
+            ("config", "View or update appsettings.user.json"),
+            ("mode", "Switch between anime and manga modes"),
+            ("provider", "List or toggle providers"),
+            ("doctor", "Run a full health check (config, providers, tools)"),
+            ("update", "Download and run the latest Koware installer")
+        };
+
+        var selector = new InteractiveSelector<(string Name, string Description)>(
+            commands,
+            cmd => cmd.Name,
+            new SelectorOptions<(string Name, string Description)>
+            {
+                Prompt = "Help",
+                PreviewFunc = cmd => cmd.Description,
+                ShowPreview = true,
+                MaxVisibleItems = 12,
+                EmptyMessage = "No commands found"
+            });
+
+        var result = selector.Run();
+        if (result.Cancelled)
+            return 0;
+
+        // Show detailed help for selected command
+        return HandleHelp(new[] { "help", result.Selected.Name }, mode);
     }
 
     var topic = args[1].ToLowerInvariant();
