@@ -98,7 +98,8 @@ static IHost BuildHost(string[] args)
     builder.Services.AddSingleton<IMangaListStore, SqliteMangaListStore>();
     builder.Services.AddSingleton<IDownloadStore, SqliteDownloadStore>();
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
-    builder.Logging.AddFilter("koware", LogLevel.Information);
+    builder.Logging.AddFilter("koware.cli", LogLevel.Warning);
+    builder.Logging.AddFilter("Koware.Infrastructure", LogLevel.Warning);
 
     return builder.Build();
 }
