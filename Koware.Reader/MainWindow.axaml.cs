@@ -26,6 +26,8 @@ public partial class MainWindow : Window
     private readonly List<Image> _pageImages = new();
     private readonly Dictionary<int, Bitmap?> _loadedBitmaps = new();
     private readonly Dictionary<int, Border> _pagePlaceholders = new();
+    private readonly List<Border> _sepiaOverlays = new();
+    private readonly List<Grid> _pageGrids = new(); // Grid wrapper containing image + sepia overlay
     private CancellationTokenSource? _loadCts;
     
     // State
@@ -295,13 +297,30 @@ public partial class MainWindow : Window
                     Margin = new Thickness(0, 2, 0, 2)
                 };
 
+                // Use a Grid to layer the image and sepia overlay
+                var grid = new Grid();
+                
                 var image = new Image
                 {
                     Stretch = Stretch.Uniform,
                     Tag = page.PageNumber
                 };
+                
+                // Sepia overlay - semi-transparent yellowish tint
+                var sepiaOverlay = new Border
+                {
+                    Background = new SolidColorBrush(Color.Parse("#d4a574")),
+                    Opacity = 0,
+                    IsHitTestVisible = false
+                };
+                
+                grid.Children.Add(image);
+                grid.Children.Add(sepiaOverlay);
+                
                 _pageImages.Add(image);
-                container.Child = image;
+                _sepiaOverlays.Add(sepiaOverlay);
+                _pageGrids.Add(grid);
+                container.Child = grid;
                 PagesContainer.Children.Add(container);
                 _pagePlaceholders[page.PageNumber] = container;
             }
@@ -977,51 +996,60 @@ public partial class MainWindow : Window
     
     private void RebuildPageLayout()
     {
-        // First, detach all images from their current parents
-        foreach (var image in _pageImages)
+        // First, detach all page grids from their current parents
+        foreach (var grid in _pageGrids)
         {
-            if (image.Parent is Border border)
+            if (grid.Parent is Border border)
             {
                 border.Child = null;
             }
-            else if (image.Parent is Panel panel)
+            else if (grid.Parent is Panel panel)
             {
-                panel.Children.Remove(image);
+                panel.Children.Remove(grid);
             }
         }
         
         PagesContainer.Children.Clear();
         _pagePlaceholders.Clear();
         
+        // Get current theme background color
+        var containerBg = _currentTheme switch
+        {
+            "sepia" => "#e8dfc9",
+            "light" => "#e2e8f0",
+            "contrast" => "#1a1a1a",
+            _ => "#101020"
+        };
+        
         if (_doublePageMode)
         {
-            // Double-page layout: two images per row in borders
+            // Double-page layout: two grids per row in borders
             PagesContainer.Orientation = Avalonia.Layout.Orientation.Vertical;
             
-            for (int i = 0; i < _pageImages.Count; i += 2)
+            for (int i = 0; i < _pageGrids.Count; i += 2)
             {
                 var row = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center };
                 
                 var border1 = new Border
                 {
-                    Background = new SolidColorBrush(Color.Parse("#101020")),
+                    Background = new SolidColorBrush(Color.Parse(containerBg)),
                     CornerRadius = new CornerRadius(8),
                     Padding = new Thickness(6),
                     Margin = new Thickness(2)
                 };
-                border1.Child = _pageImages[i];
+                border1.Child = _pageGrids[i];
                 row.Children.Add(border1);
                 
-                if (i + 1 < _pageImages.Count)
+                if (i + 1 < _pageGrids.Count)
                 {
                     var border2 = new Border
                     {
-                        Background = new SolidColorBrush(Color.Parse("#101020")),
+                        Background = new SolidColorBrush(Color.Parse(containerBg)),
                         CornerRadius = new CornerRadius(8),
                         Padding = new Thickness(6),
                         Margin = new Thickness(2)
                     };
-                    border2.Child = _pageImages[i + 1];
+                    border2.Child = _pageGrids[i + 1];
                     row.Children.Add(border2);
                 }
                 
@@ -1032,16 +1060,16 @@ public partial class MainWindow : Window
         {
             // Single-page layout with borders
             PagesContainer.Orientation = Avalonia.Layout.Orientation.Vertical;
-            for (int i = 0; i < _pageImages.Count; i++)
+            for (int i = 0; i < _pageGrids.Count; i++)
             {
                 var border = new Border
                 {
-                    Background = new SolidColorBrush(Color.Parse("#101020")),
+                    Background = new SolidColorBrush(Color.Parse(containerBg)),
                     CornerRadius = new CornerRadius(8),
                     Padding = new Thickness(6),
                     Margin = new Thickness(0, 2, 0, 2)
                 };
-                border.Child = _pageImages[i];
+                border.Child = _pageGrids[i];
                 PagesContainer.Children.Add(border);
                 _pagePlaceholders[i + 1] = border;
             }
@@ -1112,20 +1140,21 @@ public partial class MainWindow : Window
         TitleText.Foreground = new SolidColorBrush(Color.Parse(text));
         PageIndicator.Foreground = new SolidColorBrush(Color.Parse(muted));
         
-        // Apply sepia filter to images
+        // Apply sepia filter overlay to images
         if (theme == "sepia")
         {
-            // Apply sepia tone effect
-            foreach (var image in _pageImages)
+            // Show sepia overlay with warm yellowish tint
+            foreach (var overlay in _sepiaOverlays)
             {
-                image.Opacity = 0.95;
+                overlay.Opacity = 0.15; // Subtle sepia tint
             }
         }
         else
         {
-            foreach (var image in _pageImages)
+            // Hide sepia overlay
+            foreach (var overlay in _sepiaOverlays)
             {
-                image.Opacity = 1.0;
+                overlay.Opacity = 0;
             }
         }
         
