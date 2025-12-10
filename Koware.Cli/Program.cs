@@ -6280,6 +6280,7 @@ static List<string> GetHelpLines(string command, CliMode mode)
             lines.Add("  - history  -> shows watch or read history");
             lines.Add("  - last     -> shows last watched or last read");
             lines.Add("  - continue -> continues anime or manga");
+            lines.Add("  - list     -> shows list of anime or manga entries");
             break;
             
         case "provider":
