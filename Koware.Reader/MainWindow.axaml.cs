@@ -49,6 +49,9 @@ public partial class MainWindow : Window
     private float _currentChapterNumber;
     private string _currentTheme = "dark";
     private bool _chaptersOpen;
+    private bool _zenMode;
+    private readonly DispatcherTimer _zenHideTimer;
+    private readonly DispatcherTimer _zenToastTimer;
 
     public List<PageInfo> Pages { get; set; } = new();
     public List<ChapterInfo> Chapters { get; set; } = new();
@@ -110,6 +113,22 @@ public partial class MainWindow : Window
         {
             _toastTimer.Stop();
             PageToast.IsVisible = false;
+        };
+        
+        // Zen mode hide timer (auto-hide UI after 2.5s)
+        _zenHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2500) };
+        _zenHideTimer.Tick += (_, _) =>
+        {
+            _zenHideTimer.Stop();
+            if (_zenMode) SetUiVisibility(false);
+        };
+        
+        // Zen toast timer
+        _zenToastTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
+        _zenToastTimer.Tick += (_, _) =>
+        {
+            _zenToastTimer.Stop();
+            ZenToast.IsVisible = false;
         };
     }
     
@@ -729,6 +748,12 @@ public partial class MainWindow : Window
                 }
                 e.Handled = true;
                 break;
+                
+            // Zen mode
+            case Key.Z:
+                ToggleZenMode();
+                e.Handled = true;
+                break;
         }
     }
     
@@ -1181,7 +1206,7 @@ public partial class MainWindow : Window
         var accentBrush = new SolidColorBrush(Color.Parse(accent));
         
         // Header toolbar buttons
-        foreach (var btn in new[] { RtlButton, DoublePageButton, FitModeButton, ZoomButton, ModeButton, ThemeButton })
+        foreach (var btn in new[] { RtlButton, DoublePageButton, FitModeButton, ZoomButton, ModeButton, ThemeButton, ZenButton })
         {
             btn.Background = btnBgBrush;
             btn.BorderBrush = btnBorderBrush;
@@ -1212,10 +1237,53 @@ public partial class MainWindow : Window
 
     private void ResetUiHideTimer()
     {
-        if (!_autoHideUi) return;
+        if (!_zenMode && !_autoHideUi) return;
         SetUiVisibility(true);
-        _uiHideTimer.Stop();
-        _uiHideTimer.Start();
+        
+        if (_zenMode)
+        {
+            _zenHideTimer.Stop();
+            _zenHideTimer.Start();
+        }
+        else if (_autoHideUi)
+        {
+            _uiHideTimer.Stop();
+            _uiHideTimer.Start();
+        }
+    }
+    
+    private void ToggleZenMode()
+    {
+        _zenMode = !_zenMode;
+        
+        if (_zenMode)
+        {
+            ZenButton.Classes.Add("active");
+            ShowZenToast("Zen Mode ON — Move mouse to show controls");
+            _zenHideTimer.Start();
+        }
+        else
+        {
+            ZenButton.Classes.Remove("active");
+            ShowZenToast("Zen Mode OFF");
+            _zenHideTimer.Stop();
+            SetUiVisibility(true);
+        }
+        
+        PersistPrefs();
+    }
+    
+    private void OnZenClick(object? sender, RoutedEventArgs e)
+    {
+        ToggleZenMode();
+    }
+    
+    private void ShowZenToast(string text)
+    {
+        ZenToastText.Text = text;
+        ZenToast.IsVisible = true;
+        _zenToastTimer.Stop();
+        _zenToastTimer.Start();
     }
 
     private void SetUiVisibility(bool show)
@@ -1355,6 +1423,13 @@ public partial class MainWindow : Window
                 DoublePageText.Text = "2-Page";
                 DoublePageButton.Classes.Add("active");
             }
+            
+            if (root.TryGetProperty("zenMode", out var zen) && zen.GetBoolean())
+            {
+                _zenMode = true;
+                ZenButton.Classes.Add("active");
+                _zenHideTimer.Start();
+            }
         }
         catch
         {
@@ -1387,7 +1462,8 @@ public partial class MainWindow : Window
                 theme = _currentTheme,
                 singlePage = _singlePageMode,
                 rtl = _rtlMode,
-                doublePage = _doublePageMode
+                doublePage = _doublePageMode,
+                zenMode = _zenMode
             };
             
             File.WriteAllText(PrefsPath, JsonSerializer.Serialize(prefs));

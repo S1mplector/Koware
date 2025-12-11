@@ -785,14 +785,44 @@ static async Task<int> HandleUpdateAsync(ILogger logger, CancellationToken cance
         return 1;
     }
 
+    // Log successful update details
     logger.LogInformation(
-        "Launched installer {InstallerPath} from release {ReleaseTag} ({ReleaseName}) asset {AssetName}.",
-        result.InstallerPath ?? "(unknown)",
+        "Update downloaded from release {ReleaseTag} ({ReleaseName}) asset {AssetName}.",
         result.ReleaseTag ?? "(unknown)",
         result.ReleaseName ?? "(unknown)",
         result.AssetName ?? "(unknown)");
 
-    Console.WriteLine("Installer launched. Follow the GUI to complete the update.");
+    // Provide user-friendly output based on what happened
+    Console.WriteLine();
+    Console.WriteLine($"Release: {result.ReleaseTag ?? result.ReleaseName ?? "latest"}");
+    
+    if (!string.IsNullOrEmpty(result.ExtractPath))
+    {
+        Console.WriteLine($"Extracted to: {result.ExtractPath}");
+    }
+
+    if (result.InstallerLaunched)
+    {
+        Console.WriteLine();
+        Console.WriteLine("Installer launched successfully!");
+        Console.WriteLine("Follow the installer GUI to complete the update.");
+        
+        if (!string.IsNullOrEmpty(result.InstallerPath))
+        {
+            logger.LogInformation("Launched installer: {InstallerPath}", result.InstallerPath);
+        }
+    }
+    else
+    {
+        Console.WriteLine();
+        Console.WriteLine("No installer found in the release package.");
+        Console.WriteLine("The update folder has been opened in Explorer.");
+        Console.WriteLine("To complete the update manually:");
+        Console.WriteLine("  1. Close all Koware processes");
+        Console.WriteLine("  2. Copy the new files to your Koware installation folder");
+        Console.WriteLine("  3. Restart Koware");
+    }
+
     return 0;
 }
 

@@ -197,6 +197,11 @@
                 BorderThickness="0,0,0,1"
                 Padding="16,10"
                 x:Name="HeaderBar">
+            <Border.Transitions>
+                <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.3" />
+                </Transitions>
+            </Border.Transitions>
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -330,6 +335,24 @@
                         </StackPanel>
                     </Button>
                     
+                    <!-- Zen Mode button -->
+                    <Button x:Name="ZenButton" Classes="toolbar-sm"
+                            Click="OnZenClick"
+                            ToolTip.Tip="Zen Mode (Z) - Hide UI for distraction-free reading">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="Zen" VerticalAlignment="Center" />
+                            <Viewbox Width="14" Height="14" Stretch="Uniform">
+                                <Canvas Width="24" Height="24">
+                                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                          StrokeThickness="2" Data="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                                    <Ellipse Width="6" Height="6" Canvas.Left="9" Canvas.Top="9"
+                                             Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                             StrokeThickness="2" />
+                                </Canvas>
+                            </Viewbox>
+                        </StackPanel>
+                    </Button>
+                    
                     <!-- Theme dropdown -->
                     <Button x:Name="ThemeButton" Classes="toolbar-sm"
                             ToolTip.Tip="Theme">
@@ -413,6 +436,11 @@
                 BorderThickness="0,1,0,0"
                 Padding="16,6"
                 x:Name="FooterBar">
+            <Border.Transitions>
+                <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.3" />
+                </Transitions>
+            </Border.Transitions>
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -591,6 +619,12 @@
                                 <TextBlock Text="Toggle fullscreen" Foreground="#ccc" />
                             </StackPanel>
                         </Border>
+                        <Border Classes="shortcut-row alt">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Z" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Toggle Zen mode (hide UI)" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
                         
                         <TextBlock Text="General" Foreground="#888" FontWeight="SemiBold" Margin="0,8,0,0" />
                         <Border Classes="shortcut-row alt">
@@ -680,6 +714,24 @@
                        Foreground="#e2e8f0"
                        FontWeight="SemiBold"
                        FontSize="18" />
+        </Border>
+        
+        <!-- Zen Mode Toast (bottom indicator) -->
+        <Border x:Name="ZenToast"
+                Grid.RowSpan="3"
+                Background="#d9000000"
+                CornerRadius="8"
+                Padding="20,10"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Bottom"
+                Margin="0,0,0,20"
+                IsVisible="False"
+                IsHitTestVisible="False">
+            <TextBlock x:Name="ZenToastText"
+                       Text="Zen Mode ON"
+                       Foreground="#e2e8f0"
+                       FontWeight="SemiBold"
+                       FontSize="13" />
         </Border>
         
         <!-- Chapters Panel Overlay (click to close) -->

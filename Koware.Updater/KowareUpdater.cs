@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
@@ -13,19 +14,23 @@ namespace Koware.Updater;
 /// <summary>
 /// Result of an update operation, indicating success/failure and metadata.
 /// </summary>
-/// <param name="Success">True if the installer was downloaded and launched.</param>
+/// <param name="Success">True if the update was downloaded successfully.</param>
 /// <param name="Error">Error message if failed; null on success.</param>
-/// <param name="InstallerPath">Local path to the downloaded installer.</param>
+/// <param name="InstallerPath">Path to the installer executable if found and launched.</param>
+/// <param name="ExtractPath">Path where the update was extracted.</param>
 /// <param name="ReleaseTag">GitHub release tag (e.g., "v1.0.0").</param>
 /// <param name="ReleaseName">GitHub release name.</param>
 /// <param name="AssetName">Downloaded asset filename.</param>
+/// <param name="InstallerLaunched">True if an installer was found and launched.</param>
 public sealed record KowareUpdateResult(
     bool Success,
     string? Error,
     string? InstallerPath,
+    string? ExtractPath,
     string? ReleaseTag,
     string? ReleaseName,
-    string? AssetName);
+    string? AssetName,
+    bool InstallerLaunched);
 
 /// <summary>
 /// Represents the latest release version information from GitHub.
@@ -58,13 +63,15 @@ public static class KowareUpdater
     }
 
     /// <summary>
-    /// Download the latest installer from GitHub Releases and launch it.
+    /// Download the latest release from GitHub and extract/run the installer.
     /// </summary>
     /// <param name="progress">Optional progress reporter for status messages.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Result indicating success/failure with metadata.</returns>
     /// <remarks>
-    /// Windows only. Downloads .exe or .zip assets, extracts if needed, and launches the installer.
+    /// Windows only. Downloads to the user's Downloads folder, extracts if needed,
+    /// and attempts to find and launch an installer. If no installer is found,
+    /// the extracted folder is opened for manual installation.
     /// </remarks>
     public static async Task<KowareUpdateResult> DownloadAndRunLatestInstallerAsync(
         IProgress<string>? progress = null,
@@ -72,7 +79,15 @@ public static class KowareUpdater
     {
         if (!OperatingSystem.IsWindows())
         {
-            return new KowareUpdateResult(false, "Updater currently supports Windows installers only.", null, null, null, null);
+            return new KowareUpdateResult(
+                Success: false,
+                Error: "Updater currently supports Windows only.",
+                InstallerPath: null,
+                ExtractPath: null,
+                ReleaseTag: null,
+                ReleaseName: null,
+                AssetName: null,
+                InstallerLaunched: false);
         }
 
         using var httpClient = CreateGitHubClient();
@@ -84,55 +99,205 @@ public static class KowareUpdater
             var latest = await GetLatestInstallerAssetAsync(httpClient, cancellationToken).ConfigureAwait(false);
             if (latest.AssetUrl is null || string.IsNullOrWhiteSpace(latest.AssetName))
             {
-                return new KowareUpdateResult(false, "No suitable installer asset found in the latest GitHub release.", null, latest.Tag, latest.Name, null);
+                return new KowareUpdateResult(
+                    Success: false,
+                    Error: "No suitable release asset found in the latest GitHub release.",
+                    InstallerPath: null,
+                    ExtractPath: null,
+                    ReleaseTag: latest.Tag,
+                    ReleaseName: latest.Name,
+                    AssetName: null,
+                    InstallerLaunched: false);
             }
 
-            var tempRoot = Path.Combine(Path.GetTempPath(), "koware-updater");
-            Directory.CreateDirectory(tempRoot);
-
+            // Use Downloads folder for better user experience
+            var downloadsFolder = GetDownloadsFolder();
             var safeTag = string.IsNullOrWhiteSpace(latest.Tag) ? "latest" : SanitizeForPath(latest.Tag);
-            var downloadPath = Path.Combine(tempRoot, safeTag + "-" + latest.AssetName);
+            var downloadPath = Path.Combine(downloadsFolder, latest.AssetName);
 
-            progress?.Report($"Downloading {latest.AssetName}...");
+            progress?.Report($"Downloading {latest.AssetName} to Downloads folder...");
             var containerPath = await DownloadAsync(httpClient, latest.AssetUrl, downloadPath, progress, cancellationToken).ConfigureAwait(false);
 
             var extension = Path.GetExtension(containerPath);
-            string installerPath;
+            string? installerPath = null;
+            string? extractPath = null;
+            bool installerLaunched = false;
 
             if (extension.Equals(".exe", StringComparison.OrdinalIgnoreCase))
             {
+                // Direct executable download
                 installerPath = containerPath;
+                extractPath = downloadsFolder;
+                
+                progress?.Report($"Launching {Path.GetFileName(installerPath)}...");
+                LaunchExecutable(installerPath);
+                installerLaunched = true;
             }
             else if (extension.Equals(".zip", StringComparison.OrdinalIgnoreCase))
             {
-                var extractDir = Path.Combine(tempRoot, safeTag + "-installer");
-                if (Directory.Exists(extractDir))
+                // Extract zip to a dedicated folder in Downloads
+                var extractFolderName = Path.GetFileNameWithoutExtension(latest.AssetName);
+                extractPath = Path.Combine(downloadsFolder, extractFolderName);
+                
+                // Clean up existing extraction if present
+                if (Directory.Exists(extractPath))
                 {
-                    Directory.Delete(extractDir, true);
+                    try
+                    {
+                        Directory.Delete(extractPath, true);
+                    }
+                    catch
+                    {
+                        // If we can't delete, append timestamp
+                        extractPath = Path.Combine(downloadsFolder, $"{extractFolderName}-{DateTime.Now:yyyyMMdd-HHmmss}");
+                    }
                 }
 
-                progress?.Report("Extracting installer...");
-                ZipFile.ExtractToDirectory(containerPath, extractDir, overwriteFiles: true);
+                progress?.Report($"Extracting to: {extractPath}");
+                ZipFile.ExtractToDirectory(containerPath, extractPath, overwriteFiles: true);
 
-                installerPath = Directory
-                    .EnumerateFiles(extractDir, "Koware.Installer.Win.exe", SearchOption.AllDirectories)
-                    .FirstOrDefault()
-                    ?? throw new InvalidOperationException("Installer executable 'Koware.Installer.Win.exe' not found in the downloaded archive.");
+                // Try to find an installer executable
+                installerPath = FindInstallerExecutable(extractPath);
+
+                if (installerPath != null)
+                {
+                    progress?.Report($"Found installer: {Path.GetFileName(installerPath)}");
+                    progress?.Report("Launching installer...");
+                    LaunchExecutable(installerPath);
+                    installerLaunched = true;
+                }
+                else
+                {
+                    // No installer found - open the folder for manual installation
+                    progress?.Report("No installer executable found in archive.");
+                    progress?.Report($"Opening folder: {extractPath}");
+                    OpenFolder(extractPath);
+                }
+
+                // Optionally clean up the zip file after successful extraction
+                try
+                {
+                    File.Delete(containerPath);
+                }
+                catch
+                {
+                    // Ignore cleanup errors
+                }
             }
             else
             {
-                return new KowareUpdateResult(false, $"Unsupported installer asset type: {extension}", containerPath, latest.Tag, latest.Name, latest.AssetName);
+                return new KowareUpdateResult(
+                    Success: false,
+                    Error: $"Unsupported file type: {extension}. Expected .exe or .zip.",
+                    InstallerPath: null,
+                    ExtractPath: null,
+                    ReleaseTag: latest.Tag,
+                    ReleaseName: latest.Name,
+                    AssetName: latest.AssetName,
+                    InstallerLaunched: false);
             }
 
-            progress?.Report("Launching installer...");
-            LaunchInstaller(installerPath);
-
-            return new KowareUpdateResult(true, null, installerPath, latest.Tag, latest.Name, latest.AssetName);
+            return new KowareUpdateResult(
+                Success: true,
+                Error: null,
+                InstallerPath: installerPath,
+                ExtractPath: extractPath,
+                ReleaseTag: latest.Tag,
+                ReleaseName: latest.Name,
+                AssetName: latest.AssetName,
+                InstallerLaunched: installerLaunched);
+        }
+        catch (HttpRequestException ex)
+        {
+            return new KowareUpdateResult(
+                Success: false,
+                Error: $"Network error: {ex.Message}",
+                InstallerPath: null,
+                ExtractPath: null,
+                ReleaseTag: null,
+                ReleaseName: null,
+                AssetName: null,
+                InstallerLaunched: false);
         }
         catch (Exception ex)
         {
-            return new KowareUpdateResult(false, ex.Message, null, null, null, null);
+            return new KowareUpdateResult(
+                Success: false,
+                Error: ex.Message,
+                InstallerPath: null,
+                ExtractPath: null,
+                ReleaseTag: null,
+                ReleaseName: null,
+                AssetName: null,
+                InstallerLaunched: false);
         }
+    }
+
+    /// <summary>Get the user's Downloads folder path.</summary>
+    private static string GetDownloadsFolder()
+    {
+        // Try the known folder API first (Windows)
+        var downloads = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var downloadsPath = Path.Combine(downloads, "Downloads");
+        
+        if (Directory.Exists(downloadsPath))
+        {
+            return downloadsPath;
+        }
+
+        // Fallback to temp if Downloads doesn't exist
+        var fallback = Path.Combine(Path.GetTempPath(), "koware-updates");
+        Directory.CreateDirectory(fallback);
+        return fallback;
+    }
+
+    /// <summary>
+    /// Find the best installer executable in an extracted directory.
+    /// Searches for common installer patterns with priority ordering.
+    /// </summary>
+    private static string? FindInstallerExecutable(string directory)
+    {
+        if (!Directory.Exists(directory))
+        {
+            return null;
+        }
+
+        var allExeFiles = Directory
+            .EnumerateFiles(directory, "*.exe", SearchOption.AllDirectories)
+            .ToList();
+
+        if (allExeFiles.Count == 0)
+        {
+            return null;
+        }
+
+        // Priority patterns for installer detection (ordered by preference)
+        var installerPatterns = new[]
+        {
+            "Koware.Installer.Win.exe",     // Exact match for Koware installer
+            "*Installer*.exe",               // Any installer
+            "*Setup*.exe",                   // Setup executables
+            "install*.exe",                  // Install prefixed
+            "setup*.exe",                    // Setup prefixed
+            "Koware.exe",                    // Main application (fallback)
+            "koware.exe",                    // Main application lowercase
+        };
+
+        foreach (var pattern in installerPatterns)
+        {
+            var matches = Directory
+                .EnumerateFiles(directory, pattern, SearchOption.AllDirectories)
+                .ToList();
+
+            if (matches.Count > 0)
+            {
+                // Return the first match for this pattern
+                return matches[0];
+            }
+        }
+
+        // No pattern matched - return null (will open folder instead)
+        return null;
     }
 
     /// <summary>Create an HttpClient configured for GitHub API requests.</summary>
@@ -185,20 +350,33 @@ public static class KowareUpdater
         return destinationPath;
     }
 
-    /// <summary>Launch the installer executable using shell execute.</summary>
-    private static void LaunchInstaller(string installerPath)
+    /// <summary>Launch an executable using shell execute.</summary>
+    private static void LaunchExecutable(string executablePath)
     {
         var startInfo = new ProcessStartInfo
         {
-            FileName = installerPath,
+            FileName = executablePath,
             UseShellExecute = true
         };
 
         var process = Process.Start(startInfo);
         if (process is null)
         {
-            throw new InvalidOperationException("Failed to start installer process.");
+            throw new InvalidOperationException($"Failed to start process: {Path.GetFileName(executablePath)}");
         }
+    }
+
+    /// <summary>Open a folder in the system file explorer.</summary>
+    private static void OpenFolder(string folderPath)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "explorer.exe",
+            Arguments = $"\"{folderPath}\"",
+            UseShellExecute = true
+        };
+
+        Process.Start(startInfo);
     }
 
     /// <summary>
