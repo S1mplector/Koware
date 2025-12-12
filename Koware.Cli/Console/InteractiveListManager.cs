@@ -569,23 +569,38 @@ public sealed class InteractiveListManager
 
         public void Render()
         {
-            _buffer.ClearFullScreen();
-            _buffer.MoveTo(0, 0);
-
-            var width = GetTerminalWidth();
+            _buffer.BeginFrame();
+            var lines = 0;
+            var width = _buffer.Width;
 
             // Header
-            System.Console.ForegroundColor = ConsoleColor.Cyan;
-            System.Console.WriteLine($" Anime List ({_allItems.Count} entries)");
-            System.Console.ResetColor();
-            System.Console.WriteLine(new string('─', Math.Min(width, 80)));
+            _buffer.SetColor(ConsoleColor.Cyan);
+            _buffer.Write($" {Icons.Prompt} Anime List");
+            _buffer.ResetColor();
+            _buffer.SetColor(ConsoleColor.DarkGray);
+            _buffer.Write($" [{_filtered.Count}/{_allItems.Count}]");
+            _buffer.ResetColor();
+            _buffer.WriteLine();
+            lines++;
+
+            // Separator
+            _buffer.WriteLine(new string('─', Math.Min(width - 2, 70)), ConsoleColor.DarkGray);
+            lines++;
 
             // Search box
-            System.Console.Write(" Filter: ");
-            System.Console.ForegroundColor = ConsoleColor.Yellow;
-            System.Console.WriteLine(_searchText + "_");
-            System.Console.ResetColor();
-            System.Console.WriteLine(new string('─', Math.Min(width, 80)));
+            _buffer.SetColor(ConsoleColor.DarkGray);
+            _buffer.Write($"  {Icons.Search} ");
+            _buffer.SetColor(ConsoleColor.White);
+            _buffer.Write(_searchText);
+            _buffer.SetColor(ConsoleColor.Cyan);
+            _buffer.Write("▌");
+            _buffer.ResetColor();
+            _buffer.WriteLine();
+            lines++;
+
+            // Separator
+            _buffer.WriteLine(new string('─', Math.Min(width - 2, 70)), ConsoleColor.DarkGray);
+            lines++;
 
             // Items
             var visibleItems = _filtered.Skip(_scrollOffset).Take(MaxVisible).ToList();
@@ -596,66 +611,72 @@ public sealed class InteractiveListManager
                     var item = visibleItems[i];
                     var isSelected = (_scrollOffset + i) == _selectedIndex;
 
+                    // Selection indicator
                     if (isSelected)
                     {
-                        System.Console.ForegroundColor = ConsoleColor.Black;
-                        System.Console.BackgroundColor = ConsoleColor.White;
-                        System.Console.Write(" ▶ ");
+                        _buffer.SetColor(ConsoleColor.Cyan);
+                        _buffer.Write($" {Icons.Selection} ");
                     }
                     else
                     {
-                        System.Console.Write("   ");
+                        _buffer.Write("   ");
                     }
 
-                    // Status color
-                    if (!isSelected)
-                    {
-                        System.Console.ForegroundColor = item.Entry.Status.ToColor();
-                    }
+                    // Status with color
+                    _buffer.SetColor(item.Entry.Status.ToColor());
+                    _buffer.Write($"[{item.Entry.Status.ToDisplayString(),-13}] ");
 
-                    var displayText = item.DisplayText;
-                    if (displayText.Length > width - 4)
-                    {
-                        displayText = displayText[..(width - 7)] + "...";
-                    }
-                    System.Console.Write(displayText);
+                    // Progress
+                    _buffer.SetColor(ConsoleColor.DarkGray);
+                    var progress = item.Entry.TotalEpisodes.HasValue
+                        ? $"{item.Entry.EpisodesWatched}/{item.Entry.TotalEpisodes}"
+                        : $"{item.Entry.EpisodesWatched}/?";
+                    _buffer.Write($"{progress,-10} ");
 
+                    // Title
                     if (isSelected)
                     {
-                        // Pad to clear background
-                        var padding = Math.Max(0, width - 3 - displayText.Length);
-                        System.Console.Write(new string(' ', padding));
+                        _buffer.SetColor(ConsoleColor.White);
+                    }
+                    else
+                    {
+                        _buffer.SetColor(ConsoleColor.Gray);
                     }
 
-                    System.Console.ResetColor();
-                    System.Console.WriteLine();
+                    var maxTitleLen = width - 32;
+                    var title = item.Entry.AnimeTitle;
+                    if (title.Length > maxTitleLen && maxTitleLen > 3)
+                    {
+                        title = title[..(maxTitleLen - 3)] + "...";
+                    }
+                    _buffer.Write(title);
+                    _buffer.ResetColor();
                 }
-                else
-                {
-                    System.Console.WriteLine();
-                }
+                _buffer.WriteLine();
+                lines++;
             }
 
             // Scroll indicator
             if (_filtered.Count > MaxVisible)
             {
-                var scrollPercent = _filtered.Count > MaxVisible
-                    ? (int)((_scrollOffset / (float)(_filtered.Count - MaxVisible)) * 100)
-                    : 0;
-                System.Console.ForegroundColor = ConsoleColor.DarkGray;
-                System.Console.WriteLine($" [{_selectedIndex + 1}/{_filtered.Count}] {scrollPercent}%");
-                System.Console.ResetColor();
+                var scrollPercent = (int)((_scrollOffset / (float)Math.Max(1, _filtered.Count - MaxVisible)) * 100);
+                _buffer.SetColor(ConsoleColor.DarkGray);
+                _buffer.Write($" [{_selectedIndex + 1}/{_filtered.Count}] {scrollPercent}%");
+                _buffer.ResetColor();
             }
-            else
-            {
-                System.Console.WriteLine();
-            }
+            _buffer.WriteLine();
+            lines++;
 
             // Footer
-            System.Console.WriteLine(new string('─', Math.Min(width, 80)));
-            System.Console.ForegroundColor = ConsoleColor.DarkGray;
-            System.Console.WriteLine(" [Enter] Actions  [s] Status  [e] Edit  [d] Delete  [p] Play  [a] Add  [Esc] Exit");
-            System.Console.ResetColor();
+            _buffer.WriteLine(new string('─', Math.Min(width - 2, 70)), ConsoleColor.DarkGray);
+            lines++;
+            _buffer.SetColor(ConsoleColor.DarkGray);
+            _buffer.Write(" [Enter] Actions  [s] Status  [e] Edit  [d] Delete  [p] Play  [a] Add  [Esc] Exit");
+            _buffer.ResetColor();
+            _buffer.WriteLine();
+            lines++;
+
+            _buffer.EndFrame(0, lines);
         }
 
         private static int GetTerminalWidth()
@@ -1114,22 +1135,40 @@ public sealed class InteractiveMangaListManager
 
         public void Render()
         {
-            _buffer.ClearFullScreen();
-            _buffer.MoveTo(0, 0);
+            _buffer.BeginFrame();
+            var lines = 0;
+            var width = _buffer.Width;
 
-            var width = GetTerminalWidth();
+            // Header
+            _buffer.SetColor(ConsoleColor.Magenta);
+            _buffer.Write($" {Icons.Prompt} Manga List");
+            _buffer.ResetColor();
+            _buffer.SetColor(ConsoleColor.DarkGray);
+            _buffer.Write($" [{_filtered.Count}/{_allItems.Count}]");
+            _buffer.ResetColor();
+            _buffer.WriteLine();
+            lines++;
 
-            System.Console.ForegroundColor = ConsoleColor.Magenta;
-            System.Console.WriteLine($" Manga List ({_allItems.Count} entries)");
-            System.Console.ResetColor();
-            System.Console.WriteLine(new string('─', Math.Min(width, 80)));
+            // Separator
+            _buffer.WriteLine(new string('─', Math.Min(width - 2, 70)), ConsoleColor.DarkGray);
+            lines++;
 
-            System.Console.Write(" Filter: ");
-            System.Console.ForegroundColor = ConsoleColor.Yellow;
-            System.Console.WriteLine(_searchText + "_");
-            System.Console.ResetColor();
-            System.Console.WriteLine(new string('─', Math.Min(width, 80)));
+            // Search box
+            _buffer.SetColor(ConsoleColor.DarkGray);
+            _buffer.Write($"  {Icons.Search} ");
+            _buffer.SetColor(ConsoleColor.White);
+            _buffer.Write(_searchText);
+            _buffer.SetColor(ConsoleColor.Magenta);
+            _buffer.Write("▌");
+            _buffer.ResetColor();
+            _buffer.WriteLine();
+            lines++;
 
+            // Separator
+            _buffer.WriteLine(new string('─', Math.Min(width - 2, 70)), ConsoleColor.DarkGray);
+            lines++;
+
+            // Items
             var visibleItems = _filtered.Skip(_scrollOffset).Take(MaxVisible).ToList();
             for (var i = 0; i < MaxVisible; i++)
             {
@@ -1138,56 +1177,72 @@ public sealed class InteractiveMangaListManager
                     var item = visibleItems[i];
                     var isSelected = (_scrollOffset + i) == _selectedIndex;
 
+                    // Selection indicator
                     if (isSelected)
                     {
-                        System.Console.ForegroundColor = ConsoleColor.Black;
-                        System.Console.BackgroundColor = ConsoleColor.White;
-                        System.Console.Write(" ▶ ");
+                        _buffer.SetColor(ConsoleColor.Magenta);
+                        _buffer.Write($" {Icons.Selection} ");
                     }
                     else
                     {
-                        System.Console.Write("   ");
+                        _buffer.Write("   ");
                     }
 
-                    if (!isSelected) System.Console.ForegroundColor = item.Entry.Status.ToColor();
+                    // Status with color
+                    _buffer.SetColor(item.Entry.Status.ToColor());
+                    _buffer.Write($"[{item.Entry.Status.ToDisplayString(),-13}] ");
 
-                    var displayText = item.DisplayText;
-                    if (displayText.Length > width - 4) displayText = displayText[..(width - 7)] + "...";
-                    System.Console.Write(displayText);
+                    // Progress
+                    _buffer.SetColor(ConsoleColor.DarkGray);
+                    var progress = item.Entry.TotalChapters.HasValue
+                        ? $"{item.Entry.ChaptersRead}/{item.Entry.TotalChapters}"
+                        : $"{item.Entry.ChaptersRead}/?";
+                    _buffer.Write($"{progress,-10} ");
 
+                    // Title
                     if (isSelected)
                     {
-                        var padding = Math.Max(0, width - 3 - displayText.Length);
-                        System.Console.Write(new string(' ', padding));
+                        _buffer.SetColor(ConsoleColor.White);
+                    }
+                    else
+                    {
+                        _buffer.SetColor(ConsoleColor.Gray);
                     }
 
-                    System.Console.ResetColor();
-                    System.Console.WriteLine();
+                    var maxTitleLen = width - 32;
+                    var title = item.Entry.MangaTitle;
+                    if (title.Length > maxTitleLen && maxTitleLen > 3)
+                    {
+                        title = title[..(maxTitleLen - 3)] + "...";
+                    }
+                    _buffer.Write(title);
+                    _buffer.ResetColor();
                 }
-                else
-                {
-                    System.Console.WriteLine();
-                }
+                _buffer.WriteLine();
+                lines++;
             }
 
+            // Scroll indicator
             if (_filtered.Count > MaxVisible)
             {
-                var scrollPercent = _filtered.Count > MaxVisible
-                    ? (int)((_scrollOffset / (float)(_filtered.Count - MaxVisible)) * 100)
-                    : 0;
-                System.Console.ForegroundColor = ConsoleColor.DarkGray;
-                System.Console.WriteLine($" [{_selectedIndex + 1}/{_filtered.Count}] {scrollPercent}%");
-                System.Console.ResetColor();
+                var scrollPercent = (int)((_scrollOffset / (float)Math.Max(1, _filtered.Count - MaxVisible)) * 100);
+                _buffer.SetColor(ConsoleColor.DarkGray);
+                _buffer.Write($" [{_selectedIndex + 1}/{_filtered.Count}] {scrollPercent}%");
+                _buffer.ResetColor();
             }
-            else
-            {
-                System.Console.WriteLine();
-            }
+            _buffer.WriteLine();
+            lines++;
 
-            System.Console.WriteLine(new string('─', Math.Min(width, 80)));
-            System.Console.ForegroundColor = ConsoleColor.DarkGray;
-            System.Console.WriteLine(" [Enter] Actions  [s] Status  [e] Edit  [d] Delete  [r] Read  [a] Add  [Esc] Exit");
-            System.Console.ResetColor();
+            // Footer
+            _buffer.WriteLine(new string('─', Math.Min(width - 2, 70)), ConsoleColor.DarkGray);
+            lines++;
+            _buffer.SetColor(ConsoleColor.DarkGray);
+            _buffer.Write(" [Enter] Actions  [s] Status  [e] Edit  [d] Delete  [r] Read  [a] Add  [Esc] Exit");
+            _buffer.ResetColor();
+            _buffer.WriteLine();
+            lines++;
+
+            _buffer.EndFrame(0, lines);
         }
 
         private static int GetTerminalWidth()
