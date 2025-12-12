@@ -2140,8 +2140,9 @@ static async Task<int> HandleListAsync(string[] args, IServiceProvider services,
 
     if (args.Length < 2)
     {
-        // Default: show all anime in list
-        return await ShowListAsync(animeList, null, false, cancellationToken);
+        // Default: interactive list manager
+        var listManager = new Koware.Cli.Console.InteractiveListManager(animeList, cancellationToken: cancellationToken);
+        return await listManager.RunAsync();
     }
 
     var subcommand = args[1].ToLowerInvariant();
@@ -2540,7 +2541,9 @@ static async Task<int> HandleMangaListAsync(string[] args, IServiceProvider serv
 
     if (args.Length < 2)
     {
-        return await ShowMangaListAsync(mangaList, null, false, cancellationToken);
+        // Default: interactive list manager
+        var listManager = new Koware.Cli.Console.InteractiveMangaListManager(mangaList, cancellationToken: cancellationToken);
+        return await listManager.RunAsync();
     }
 
     var subcommand = args[1].ToLowerInvariant();
