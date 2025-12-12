@@ -70,6 +70,18 @@ internal static class ReaderHtmlBuilder
             color-scheme: dark;
         }
 
+        /* Monokai theme */
+        body.theme-monokai {
+            --bg: #272822;
+            --panel: #1e1f1c;
+            --border: rgba(166, 226, 46, 0.15);
+            --text: #f8f8f2;
+            --muted: #75715e;
+            --accent: #a6e22e;
+            --img-filter: sepia(10%) saturate(1.1) hue-rotate(-10deg);
+            color-scheme: dark;
+        }
+
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
         html, body {
@@ -676,6 +688,7 @@ internal static class ReaderHtmlBuilder
                     <button class="dropdown-item" data-theme="sepia">Sepia</button>
                     <button class="dropdown-item" data-theme="light">Light</button>
                     <button class="dropdown-item" data-theme="contrast">High Contrast</button>
+                    <button class="dropdown-item" data-theme="monokai">Monokai</button>
                 </div>
             </div>
         </div>
@@ -1020,7 +1033,7 @@ internal static class ReaderHtmlBuilder
                 document.body.classList.add(`theme-${theme}`);
             }
             
-            const themeNames = { dark: "Dark", sepia: "Sepia", light: "Light", contrast: "High Contrast" };
+            const themeNames = { dark: "Dark", sepia: "Sepia", light: "Light", contrast: "High Contrast", monokai: "Monokai" };
             themeBtn.innerHTML = (themeNames[theme] || "Theme") + " " + themeIcon;
             
             themeDropdown.querySelectorAll(".dropdown-item").forEach(item => {
