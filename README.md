@@ -17,13 +17,7 @@ It has a text-based user interface but behaves like a regular CLI. You run a com
 ## Demo
 
 <p align="center">
-  <a href="Assets/Demo/demo_video.mp4">
-    <img src="Assets/Demo/demo_player_win.png" alt="Watch demo video" width="60%" />
-  </a>
-</p>
-
-<p align="center">
-  <em>Click the image above to watch the demo video</em>
+  <img src="Assets/Demo/demo_video.gif" alt="Koware Demo" width="90%" />
 </p>
 
 <p align="center">
@@ -32,7 +26,7 @@ It has a text-based user interface but behaves like a regular CLI. You run a com
 </p>
 
 <p align="center">
-  <em>Left: Koware Player streaming anime | Right: Koware Reader displaying manga</em>
+  <em>Left: Koware Player | Right: Koware Reader</em>
 </p>
 
 ---
