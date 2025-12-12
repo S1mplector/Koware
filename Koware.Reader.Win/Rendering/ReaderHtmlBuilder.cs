@@ -94,6 +94,8 @@ internal static class ReaderHtmlBuilder
             border-bottom: 1px solid var(--border);
             gap: 12px;
             flex-shrink: 0;
+            position: relative;
+            z-index: 100;
         }
 
         #title {
