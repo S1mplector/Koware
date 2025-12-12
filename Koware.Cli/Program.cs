@@ -212,7 +212,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
             case "mode":
                 return await HandleModeAsync(args, logger);
             case "update":
-                return await HandleUpdateAsync(logger, cts.Token);
+                return await HandleUpdateAsync(args, logger, cts.Token);
             case "version":
             case "--version":
             case "-v":
@@ -700,18 +700,52 @@ static async Task<int> HandleDoctorAsync(IServiceProvider services, ILogger logg
 /// <summary>
 /// Implement the <c>koware update</c> command (Windows only).
 /// </summary>
+/// <param name="args">CLI arguments; supports --check, --force, --help flags.</param>
 /// <param name="logger">Logger for progress and errors.</param>
 /// <param name="cancellationToken">Cancellation token.</param>
-/// <returns>Exit code: 0 on success, 1 on failure or non-Windows.</returns>
+/// <returns>Exit code: 0 on success, 1 on failure, 2 if update available (with --check).</returns>
 /// <remarks>
 /// Queries GitHub Releases for the latest Koware installer.
 /// Prints current vs latest version, downloads the installer, and launches it.
+/// 
+/// Flags:
+///   --check, -c   Check for updates without downloading
+///   --force, -f   Download even if already on the latest version
+///   --help, -h    Show help message
 /// </remarks>
-static async Task<int> HandleUpdateAsync(ILogger logger, CancellationToken cancellationToken)
+static async Task<int> HandleUpdateAsync(string[] args, ILogger logger, CancellationToken cancellationToken)
 {
+    // Parse flags
+    var checkOnly = args.Contains("--check", StringComparer.OrdinalIgnoreCase) 
+                 || args.Contains("-c", StringComparer.OrdinalIgnoreCase);
+    var force = args.Contains("--force", StringComparer.OrdinalIgnoreCase)
+             || args.Contains("-f", StringComparer.OrdinalIgnoreCase);
+    var showHelp = args.Contains("--help", StringComparer.OrdinalIgnoreCase)
+                || args.Contains("-h", StringComparer.OrdinalIgnoreCase);
+
+    if (showHelp)
+    {
+        Console.WriteLine("Usage: koware update [options]");
+        Console.WriteLine();
+        Console.WriteLine("Check for updates and download the latest version of Koware.");
+        Console.WriteLine();
+        Console.WriteLine("Options:");
+        Console.WriteLine("  -c, --check    Check for updates without downloading");
+        Console.WriteLine("  -f, --force    Download even if already on the latest version");
+        Console.WriteLine("  -h, --help     Show this help message");
+        Console.WriteLine();
+        Console.WriteLine("Examples:");
+        Console.WriteLine("  koware update           Download and install the latest version");
+        Console.WriteLine("  koware update --check   Check if an update is available");
+        Console.WriteLine("  koware update --force   Force re-download of the latest version");
+        return 0;
+    }
+
     if (!OperatingSystem.IsWindows())
     {
         Console.WriteLine("The 'update' command is only available on Windows.");
+        Console.WriteLine("Please download the latest release manually from:");
+        Console.WriteLine("  https://github.com/S1mplector/Koware/releases");
         return 1;
     }
 
@@ -731,17 +765,46 @@ static async Task<int> HandleUpdateAsync(ILogger logger, CancellationToken cance
     var latestDisplay = !string.IsNullOrWhiteSpace(latestLabel) ? latestLabel : "unknown";
     var currentCore = TryParseVersionCore(current);
     var latestCore = TryParseVersionCore(latestLabel);
+    var isUpToDate = currentCore is not null && latestCore is not null && currentCore >= latestCore;
 
-    if (currentCore is not null && latestCore is not null && currentCore >= latestCore)
+    Console.WriteLine($"Current version: {currentLabel}");
+    Console.WriteLine($"Latest version:  {latestDisplay}");
+    Console.WriteLine();
+
+    if (isUpToDate && !force)
     {
-        Console.WriteLine($"Version: {currentLabel} (latest {latestDisplay})");
+        Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine("You are already running the latest version of Koware.");
+        Console.ResetColor();
         return 0;
     }
 
-    Console.WriteLine($"Version: {currentLabel} (latest {latestDisplay})");
+    if (!isUpToDate)
+    {
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine("A new version is available!");
+        Console.ResetColor();
+    }
 
-    Console.Write("Do you want to download and install the latest version? [y/N] ");
+    if (checkOnly)
+    {
+        if (!isUpToDate)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Run 'koware update' to download and install.");
+        }
+        return isUpToDate ? 0 : 2; // Exit code 2 = update available
+    }
+
+    if (force && isUpToDate)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("Forcing update (already on latest version)...");
+        Console.ResetColor();
+    }
+
+    Console.WriteLine();
+    Console.Write("Do you want to download and install? [y/N] ");
     var response = Console.ReadLine()?.Trim();
     if (!string.Equals(response, "y", StringComparison.OrdinalIgnoreCase) &&
         !string.Equals(response, "yes", StringComparison.OrdinalIgnoreCase))

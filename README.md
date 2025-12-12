@@ -14,6 +14,19 @@ It has a text-based user interface but behaves like a regular CLI. You run a com
 
 ---
 
+## Demo
+
+<p align="center">
+  <img src="Assets/Demo/demo_player_win.png" alt="Koware Player" width="45%" />
+  <img src="Assets/Demo/demo_reader_win.png" alt="Koware Reader" width="45%" />
+</p>
+
+<p align="center">
+  <em>Left: Koware Player streaming anime | Right: Koware Reader displaying manga</em>
+</p>
+
+---
+
 ## Features
 
 - **Search for anime/manga** by title
