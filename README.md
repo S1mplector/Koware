@@ -17,6 +17,10 @@ It has a text-based user interface but behaves like a regular CLI. You run a com
 ## Demo
 
 <p align="center">
+  <video src="Assets/Demo/demo_video.mp4" width="90%" autoplay loop muted></video>
+</p>
+
+<p align="center">
   <img src="Assets/Demo/demo_player_win.png" alt="Koware Player" width="45%" />
   <img src="Assets/Demo/demo_reader_win.png" alt="Koware Reader" width="45%" />
 </p>
