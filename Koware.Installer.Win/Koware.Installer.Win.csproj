@@ -10,7 +10,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <Version>0.8.1-beta</Version>
+    <Version>0.8.2-beta</Version>
     <ApplicationIcon>Assets\Logo\logo.ico</ApplicationIcon>
   </PropertyGroup>
 
