@@ -1258,10 +1258,22 @@ static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOpt
         
         Console.Write($"Testing {name}... ");
         
-        if (!info.configured || string.IsNullOrWhiteSpace(info.apiBase))
+        var missing = new List<string>();
+        if (string.IsNullOrWhiteSpace(info.apiBase)) missing.Add("ApiBase");
+        if (string.IsNullOrWhiteSpace(info.referer)) missing.Add("Referer");
+        if (string.IsNullOrWhiteSpace(info.userAgent)) missing.Add("UserAgent");
+
+        if (!info.configured || missing.Count > 0)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"{Icons.Warning} Not configured");
+            if (missing.Count > 0)
+            {
+                Console.WriteLine($"{Icons.Warning} Not configured (missing: {string.Join(", ", missing)})");
+            }
+            else
+            {
+                Console.WriteLine($"{Icons.Warning} Not configured");
+            }
             Console.ResetColor();
             continue;
         }
@@ -1292,6 +1304,19 @@ static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOpt
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine($"{Icons.Error} HTTP {code}");
                 Console.ResetColor();
+                if (code is 401 or 403)
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("  Hint: Access denied. This is commonly caused by a wrong/missing Referer/Origin header or a blocked User-Agent.");
+                    Console.WriteLine("  Try: koware provider autoconfig  (or verify ApiBase + Referer in appsettings.user.json)");
+                    Console.ResetColor();
+                }
+                else if (code == 429)
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("  Hint: Rate limited (HTTP 429). Wait a bit, reduce SearchLimit, or rotate provider hosts.");
+                    Console.ResetColor();
+                }
                 allPassed = false;
             }
         }
