@@ -1,0 +1,82 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Provider Setup tutorial page. -->
+<Page x:Class="Koware.Tutorial.Pages.ProviderSetupPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:controls="clr-namespace:Koware.Tutorial.Controls"
+      Title="Provider Setup"
+      Background="Transparent">
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Koware.Tutorial;component/Styles/SharedStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Page.Resources>
+    
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Text="⚙️ Provider Setup" 
+                       FontSize="24" 
+                       FontWeight="Bold" 
+                       Foreground="{StaticResource AccentBrush}"
+                       Margin="0,0,0,8"/>
+            <TextBlock Text="Configure your streaming sources to start watching." 
+                       FontSize="14" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,20"/>
+            
+            <TextBlock Text="What are Providers?" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,16">
+                Koware doesn't come with built-in sources. You need to configure providers 
+                in your settings file. Each provider defines where to search and stream content from.
+            </TextBlock>
+            
+            <TextBlock Text="Configuration File Location" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <Border Background="{StaticResource PanelBrush}" CornerRadius="6" Padding="12" Margin="0,0,0,16">
+                <TextBlock FontFamily="Consolas" Text="%APPDATA%\koware\appsettings.user.json"/>
+            </Border>
+            
+            <TextBlock Text="Opening the Config" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            
+            <controls:FakeTerminal x:Name="Terminal" Height="180" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="Provider Structure" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                Each provider needs these fields configured:
+            </TextBlock>
+            <StackPanel Margin="12,0,0,16">
+                <TextBlock Text="• BaseUrl - The provider's base URL" Margin="0,4"/>
+                <TextBlock Text="• SearchPath - Path for search queries" Margin="0,4"/>
+                <TextBlock Text="• Type - 'anime' or 'manga'" Margin="0,4"/>
+                <TextBlock Text="• Selectors - CSS selectors for scraping" Margin="0,4"/>
+            </StackPanel>
+            
+            <Border Background="#7C2D12" CornerRadius="6" Padding="12" Margin="0,8,0,0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="⚠️" FontSize="16" Margin="0,0,8,0"/>
+                    <TextBlock TextWrapping="Wrap" VerticalAlignment="Center">
+                        <Run Text="Important:" FontWeight="SemiBold"/>
+                        <Run Text=" You are responsible for configuring your own sources. Koware does not endorse or provide any streaming sources."/>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

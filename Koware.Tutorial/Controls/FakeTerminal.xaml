@@ -1,0 +1,60 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Terminal-style preview control for displaying example commands and output. -->
+<UserControl x:Class="Koware.Tutorial.Controls.FakeTerminal"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Koware.Tutorial;component/Styles/SharedStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+    
+    <Border Background="{StaticResource TerminalBrush}" 
+            BorderBrush="{StaticResource BorderBrush}" 
+            BorderThickness="1" 
+            CornerRadius="8">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            
+            <!-- Terminal title bar -->
+            <Border Background="#161B22" CornerRadius="8,8,0,0" Padding="12,8">
+                <Grid>
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse Width="12" Height="12" Fill="#FF5F56" Margin="0,0,8,0"/>
+                        <Ellipse Width="12" Height="12" Fill="#FFBD2E" Margin="0,0,8,0"/>
+                        <Ellipse Width="12" Height="12" Fill="#27CA40"/>
+                    </StackPanel>
+                    <TextBlock Text="PowerShell" 
+                               HorizontalAlignment="Center" 
+                               Foreground="{StaticResource SecondaryBrush}"
+                               FontSize="12"/>
+                </Grid>
+            </Border>
+            
+            <!-- Terminal content -->
+            <ScrollViewer Grid.Row="1" 
+                          VerticalScrollBarVisibility="Auto" 
+                          HorizontalScrollBarVisibility="Disabled"
+                          Padding="16,12">
+                <RichTextBox x:Name="TerminalContent"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             IsReadOnly="True"
+                             FontFamily="Cascadia Code, Consolas, Courier New"
+                             FontSize="13"
+                             Foreground="{StaticResource ForegroundBrush}">
+                    <RichTextBox.Resources>
+                        <Style TargetType="Paragraph">
+                            <Setter Property="Margin" Value="0,0,0,4"/>
+                        </Style>
+                    </RichTextBox.Resources>
+                </RichTextBox>
+            </ScrollViewer>
+        </Grid>
+    </Border>
+</UserControl>

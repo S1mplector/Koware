@@ -1,0 +1,165 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Shared styles matching the Koware installer theme. -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    
+    <!-- Colors -->
+    <Color x:Key="BackgroundColor">#0B1222</Color>
+    <Color x:Key="PanelColor">#111827</Color>
+    <Color x:Key="TerminalColor">#0D1117</Color>
+    <Color x:Key="ForegroundColor">#E2E8F0</Color>
+    <Color x:Key="AccentColor">#38BDF8</Color>
+    <Color x:Key="SecondaryColor">#94A3B8</Color>
+    <Color x:Key="ButtonBgColor">#1E3A5F</Color>
+    <Color x:Key="ButtonHoverColor">#2D4A6F</Color>
+    <Color x:Key="ButtonPressedColor">#16304F</Color>
+    <Color x:Key="BorderColor">#334155</Color>
+    
+    <!-- Terminal Colors -->
+    <Color x:Key="TerminalGreen">#4ADE80</Color>
+    <Color x:Key="TerminalCyan">#22D3EE</Color>
+    <Color x:Key="TerminalYellow">#FACC15</Color>
+    <Color x:Key="TerminalMagenta">#F472B6</Color>
+    <Color x:Key="TerminalGray">#6B7280</Color>
+    
+    <!-- Brushes -->
+    <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource BackgroundColor}" />
+    <SolidColorBrush x:Key="PanelBrush" Color="{StaticResource PanelColor}" />
+    <SolidColorBrush x:Key="TerminalBrush" Color="{StaticResource TerminalColor}" />
+    <SolidColorBrush x:Key="ForegroundBrush" Color="{StaticResource ForegroundColor}" />
+    <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
+    <SolidColorBrush x:Key="SecondaryBrush" Color="{StaticResource SecondaryColor}" />
+    <SolidColorBrush x:Key="ButtonBgBrush" Color="{StaticResource ButtonBgColor}" />
+    <SolidColorBrush x:Key="ButtonHoverBrush" Color="{StaticResource ButtonHoverColor}" />
+    <SolidColorBrush x:Key="ButtonPressedBrush" Color="{StaticResource ButtonPressedColor}" />
+    <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource BorderColor}" />
+    
+    <!-- Terminal Brushes -->
+    <SolidColorBrush x:Key="TerminalGreenBrush" Color="{StaticResource TerminalGreen}" />
+    <SolidColorBrush x:Key="TerminalCyanBrush" Color="{StaticResource TerminalCyan}" />
+    <SolidColorBrush x:Key="TerminalYellowBrush" Color="{StaticResource TerminalYellow}" />
+    <SolidColorBrush x:Key="TerminalMagentaBrush" Color="{StaticResource TerminalMagenta}" />
+    <SolidColorBrush x:Key="TerminalGrayBrush" Color="{StaticResource TerminalGray}" />
+    
+    <!-- Default TextBlock -->
+    <Style TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
+        <Setter Property="FontFamily" Value="Segoe UI"/>
+    </Style>
+    
+    <!-- Modern rounded button style -->
+    <Style x:Key="ModernButton" TargetType="Button">
+        <Setter Property="Margin" Value="0,4,0,0"/>
+        <Setter Property="Padding" Value="16,10"/>
+        <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="border" 
+                            Background="{StaticResource ButtonBgBrush}" 
+                            BorderBrush="{StaticResource ButtonHoverBrush}" 
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="border" Property="Background" Value="{StaticResource ButtonHoverBrush}"/>
+                            <Setter TargetName="border" Property="BorderBrush" Value="#3D5A7F"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="border" Property="Background" Value="{StaticResource ButtonPressedBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="border" Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    
+    <!-- Primary action button -->
+    <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource ModernButton}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="border" 
+                            CornerRadius="8"
+                            BorderThickness="0"
+                            Padding="{TemplateBinding Padding}">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Color="#2563EB" Offset="0"/>
+                                <GradientStop Color="#1D4ED8" Offset="1"/>
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="border" Property="Background">
+                                <Setter.Value>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#3B82F6" Offset="0"/>
+                                        <GradientStop Color="#2563EB" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="border" Property="Background">
+                                <Setter.Value>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#1E40AF" Offset="0"/>
+                                        <GradientStop Color="#1E3A8A" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="border" Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    
+    <!-- Nav button for sidebar -->
+    <Style x:Key="NavButton" TargetType="Button">
+        <Setter Property="Padding" Value="12,10"/>
+        <Setter Property="Foreground" Value="{StaticResource SecondaryBrush}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="border" 
+                            Background="Transparent" 
+                            BorderThickness="0"
+                            CornerRadius="6"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" 
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="border" Property="Background" Value="#1E293B"/>
+                            <Setter Property="Foreground" Value="{StaticResource ForegroundBrush}"/>
+                        </Trigger>
+                        <Trigger Property="Tag" Value="Active">
+                            <Setter TargetName="border" Property="Background" Value="#1E3A5F"/>
+                            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    
+</ResourceDictionary>

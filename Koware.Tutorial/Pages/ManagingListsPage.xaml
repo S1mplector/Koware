@@ -1,0 +1,84 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Managing Lists tutorial page. -->
+<Page x:Class="Koware.Tutorial.Pages.ManagingListsPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:controls="clr-namespace:Koware.Tutorial.Controls"
+      Title="Managing Lists"
+      Background="Transparent">
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Koware.Tutorial;component/Styles/SharedStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Page.Resources>
+    
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Text="📋 Managing Lists" 
+                       FontSize="24" 
+                       FontWeight="Bold" 
+                       Foreground="{StaticResource AccentBrush}"
+                       Margin="0,0,0,8"/>
+            <TextBlock Text="Track your anime and manga with built-in lists." 
+                       FontSize="14" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,20"/>
+            
+            <TextBlock Text="Interactive List Manager" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                Simply run 'koware list' to open the interactive list manager:
+            </TextBlock>
+            <controls:FakeTerminal x:Name="Terminal1" Height="260" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="List Actions" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Enter — Open actions menu" Margin="0,4"/>
+                    <TextBlock Text="P — Play selected" Margin="0,4"/>
+                    <TextBlock Text="S — Change status" Margin="0,4"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="E — Edit progress/score" Margin="0,4"/>
+                    <TextBlock Text="D — Delete entry" Margin="0,4"/>
+                    <TextBlock Text="A — Add new entry" Margin="0,4"/>
+                </StackPanel>
+            </Grid>
+            
+            <TextBlock Text="Status Types" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <StackPanel Margin="12,0,0,0">
+                <TextBlock Margin="0,4">
+                    <Run Text="Watching/Reading" Foreground="#4ADE80"/> <Run Text="— Currently watching"/>
+                </TextBlock>
+                <TextBlock Margin="0,4">
+                    <Run Text="Completed" Foreground="#60A5FA"/> <Run Text="— Finished"/>
+                </TextBlock>
+                <TextBlock Margin="0,4">
+                    <Run Text="Plan to Watch" Foreground="#A78BFA"/> <Run Text="— Want to watch later"/>
+                </TextBlock>
+                <TextBlock Margin="0,4">
+                    <Run Text="On Hold" Foreground="#FACC15"/> <Run Text="— Paused"/>
+                </TextBlock>
+                <TextBlock Margin="0,4">
+                    <Run Text="Dropped" Foreground="#F87171"/> <Run Text="— Stopped watching"/>
+                </TextBlock>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

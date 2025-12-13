@@ -135,13 +135,24 @@
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <Image Source="pack://application:,,,/Assets/Logo/logo.ico" Width="56" Height="56" Margin="0,0,12,0"/>
-                <StackPanel>
-                    <TextBlock FontSize="22" FontWeight="Bold" Text="Welcome to Koware" />
-                    <TextBlock FontSize="14" Text="This installer sets up Koware CLI and player with a single click." />
+            <Grid>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Image Source="pack://application:,,,/Assets/Logo/logo.ico" Width="56" Height="56" Margin="0,0,12,0"/>
+                    <StackPanel>
+                        <TextBlock FontSize="22" FontWeight="Bold" Text="Welcome to Koware" />
+                        <TextBlock FontSize="14" Text="This installer sets up Koware CLI and player with a single click." />
+                    </StackPanel>
                 </StackPanel>
-            </StackPanel>
+                <!-- Help/Tutorial button -->
+                <Button Style="{StaticResource ModernButton}" 
+                        HorizontalAlignment="Right" 
+                        VerticalAlignment="Top"
+                        Padding="10,6"
+                        Click="OnShowTutorial"
+                        ToolTip="Open Tutorial">
+                    <TextBlock Text="?" FontSize="16" FontWeight="Bold" Foreground="{StaticResource Accent}"/>
+                </Button>
+            </Grid>
             <Border Grid.Row="1" Background="{StaticResource PanelBackground}" Padding="16" CornerRadius="6" Margin="0,16,0,16">
                 <StackPanel>
                     <TextBlock FontWeight="Bold" Text="What you'll get:"/>

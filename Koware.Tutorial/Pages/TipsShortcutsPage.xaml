@@ -1,0 +1,75 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Tips & Shortcuts tutorial page. -->
+<Page x:Class="Koware.Tutorial.Pages.TipsShortcutsPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:controls="clr-namespace:Koware.Tutorial.Controls"
+      Title="Tips &amp; Shortcuts"
+      Background="Transparent">
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Koware.Tutorial;component/Styles/SharedStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Page.Resources>
+    
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Text="⚡ Tips &amp; Shortcuts" 
+                       FontSize="24" 
+                       FontWeight="Bold" 
+                       Foreground="{StaticResource AccentBrush}"
+                       Margin="0,0,0,8"/>
+            <TextBlock Text="Power user features to speed up your workflow." 
+                       FontSize="14" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,20"/>
+            
+            <TextBlock Text="Quick Resume" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <controls:FakeTerminal x:Name="Terminal1" Height="140" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="Fuzzy Selector Shortcuts" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="1-9 — Quick jump to item" Margin="0,4"/>
+                    <TextBlock Text="Ctrl+J/K — Move down/up" Margin="0,4"/>
+                    <TextBlock Text="PgUp/PgDn — Page scroll" Margin="0,4"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="Home/End — Jump to start/end" Margin="0,4"/>
+                    <TextBlock Text="Type — Fuzzy search" Margin="0,4"/>
+                    <TextBlock Text="Backspace — Clear search" Margin="0,4"/>
+                </StackPanel>
+            </Grid>
+            
+            <TextBlock Text="Useful Commands" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <controls:FakeTerminal x:Name="Terminal2" Height="200" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="CLI Flags Reference" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <StackPanel Margin="12,0,0,0">
+                <TextBlock Text="--quality, -q — Set video quality (480p, 720p, 1080p)" Margin="0,4"/>
+                <TextBlock Text="--episode, -e — Specify episode number" Margin="0,4"/>
+                <TextBlock Text="--chapter, -c — Specify chapter number" Margin="0,4"/>
+                <TextBlock Text="--index, -i — Skip selection (use Nth result)" Margin="0,4"/>
+                <TextBlock Text="--json — Output in JSON format (for scripting)" Margin="0,4"/>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

@@ -1,0 +1,81 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Getting Started tutorial page. -->
+<Page x:Class="Koware.Tutorial.Pages.GettingStartedPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:controls="clr-namespace:Koware.Tutorial.Controls"
+      Title="Getting Started"
+      Background="Transparent">
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Koware.Tutorial;component/Styles/SharedStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Page.Resources>
+    
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <!-- Header -->
+            <TextBlock Text="🚀 Getting Started" 
+                       FontSize="24" 
+                       FontWeight="Bold" 
+                       Foreground="{StaticResource AccentBrush}"
+                       Margin="0,0,0,8"/>
+            <TextBlock Text="Welcome to Koware! Let's get you up and running." 
+                       FontSize="14" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,20"/>
+            
+            <!-- What is Koware -->
+            <TextBlock Text="What is Koware?" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,16">
+                Koware is a command-line tool for discovering and streaming anime and manga. 
+                It features a custom video player, manga reader, and a fuzzy search interface 
+                that makes finding content quick and easy.
+            </TextBlock>
+            
+            <!-- First command -->
+            <TextBlock Text="Your First Command" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                Open PowerShell or Command Prompt and type:
+            </TextBlock>
+            
+            <!-- Terminal preview -->
+            <controls:FakeTerminal x:Name="Terminal" Height="200" Margin="0,0,0,16"/>
+            
+            <!-- Next steps -->
+            <TextBlock Text="Next Steps" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,8,0,8"/>
+            <StackPanel Margin="0,0,0,8">
+                <TextBlock Text="1. Set up a provider (required for streaming)" Margin="0,4"/>
+                <TextBlock Text="2. Try watching anime with 'koware watch'" Margin="0,4"/>
+                <TextBlock Text="3. Explore manga mode with 'koware -m'" Margin="0,4"/>
+                <TextBlock Text="4. Use 'koware help' for all available commands" Margin="0,4"/>
+            </StackPanel>
+            
+            <!-- Tip -->
+            <Border Background="#1E3A5F" CornerRadius="6" Padding="12" Margin="0,12,0,0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="💡" FontSize="16" Margin="0,0,8,0"/>
+                    <TextBlock TextWrapping="Wrap" VerticalAlignment="Center">
+                        <Run Text="Tip:" FontWeight="SemiBold"/>
+                        <Run Text=" Koware uses fuzzy search, so you don't need to type exact titles. Just type a few characters!"/>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

@@ -1,0 +1,13 @@
+<!-- Author: Ilgaz Mehmetoglu 
+ Summary: WPF tutorial/help library for Koware installer. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>0.8.2-beta</Version>
+  </PropertyGroup>
+
+</Project>

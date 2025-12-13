@@ -1,0 +1,92 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Main tutorial window with sidebar navigation and content pages. -->
+<Window x:Class="Koware.Tutorial.TutorialWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Koware Tutorial"
+        Height="600"
+        Width="900"
+        MinHeight="500"
+        MinWidth="750"
+        Background="#0B1222"
+        Foreground="#E2E8F0"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Koware.Tutorial;component/Styles/SharedStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+    
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        
+        <!-- Sidebar -->
+        <Border Background="{StaticResource PanelBrush}" Padding="12">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                
+                <!-- Logo & Title -->
+                <StackPanel Margin="0,8,0,20">
+                    <TextBlock Text="📚 Koware Tutorial" 
+                               FontSize="18" 
+                               FontWeight="Bold" 
+                               Foreground="{StaticResource AccentBrush}"/>
+                    <TextBlock Text="Learn the basics" 
+                               FontSize="12" 
+                               Foreground="{StaticResource SecondaryBrush}"
+                               Margin="0,4,0,0"/>
+                </StackPanel>
+                
+                <!-- Navigation -->
+                <StackPanel Grid.Row="1">
+                    <Button x:Name="NavGettingStarted" 
+                            Content="🚀  Getting Started" 
+                            Style="{StaticResource NavButton}"
+                            Tag="Active"
+                            Click="NavButton_Click"/>
+                    <Button x:Name="NavProviderSetup" 
+                            Content="⚙️  Provider Setup" 
+                            Style="{StaticResource NavButton}"
+                            Click="NavButton_Click"/>
+                    <Button x:Name="NavWatchingAnime" 
+                            Content="▶️  Watching Anime" 
+                            Style="{StaticResource NavButton}"
+                            Click="NavButton_Click"/>
+                    <Button x:Name="NavReadingManga" 
+                            Content="📖  Reading Manga" 
+                            Style="{StaticResource NavButton}"
+                            Click="NavButton_Click"/>
+                    <Button x:Name="NavManagingLists" 
+                            Content="📋  Managing Lists" 
+                            Style="{StaticResource NavButton}"
+                            Click="NavButton_Click"/>
+                    <Button x:Name="NavTipsShortcuts" 
+                            Content="⚡  Tips &amp; Shortcuts" 
+                            Style="{StaticResource NavButton}"
+                            Click="NavButton_Click"/>
+                </StackPanel>
+                
+                <!-- Close button -->
+                <Button Grid.Row="2" 
+                        Content="Close Tutorial" 
+                        Style="{StaticResource ModernButton}"
+                        Click="CloseButton_Click"
+                        Margin="0,12,0,0"/>
+            </Grid>
+        </Border>
+        
+        <!-- Content area -->
+        <Border Grid.Column="1" Padding="24">
+            <Frame x:Name="ContentFrame" NavigationUIVisibility="Hidden"/>
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,80 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Watching Anime tutorial page. -->
+<Page x:Class="Koware.Tutorial.Pages.WatchingAnimePage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:controls="clr-namespace:Koware.Tutorial.Controls"
+      Title="Watching Anime"
+      Background="Transparent">
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Koware.Tutorial;component/Styles/SharedStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Page.Resources>
+    
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Text="▶️ Watching Anime" 
+                       FontSize="24" 
+                       FontWeight="Bold" 
+                       Foreground="{StaticResource AccentBrush}"
+                       Margin="0,0,0,8"/>
+            <TextBlock Text="Search, select, and stream anime with ease." 
+                       FontSize="14" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,20"/>
+            
+            <TextBlock Text="Basic Usage" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <controls:FakeTerminal x:Name="Terminal1" Height="220" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="The Fuzzy Selector" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                When results appear, you'll see an interactive fuzzy selector:
+            </TextBlock>
+            <controls:FakeTerminal x:Name="Terminal2" Height="200" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="Player Controls" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Space — Play/Pause" Margin="0,4"/>
+                    <TextBlock Text="← → — Seek 5 seconds" Margin="0,4"/>
+                    <TextBlock Text="↑ ↓ — Volume up/down" Margin="0,4"/>
+                    <TextBlock Text="F — Toggle fullscreen" Margin="0,4"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="M — Mute/Unmute" Margin="0,4"/>
+                    <TextBlock Text="N — Next episode" Margin="0,4"/>
+                    <TextBlock Text="P — Previous episode" Margin="0,4"/>
+                    <TextBlock Text="Esc — Exit player" Margin="0,4"/>
+                </StackPanel>
+            </Grid>
+            
+            <Border Background="#1E3A5F" CornerRadius="6" Padding="12">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="💡" FontSize="16" Margin="0,0,8,0"/>
+                    <TextBlock TextWrapping="Wrap" VerticalAlignment="Center">
+                        <Run Text="Tip:" FontWeight="SemiBold"/>
+                        <Run Text=" Use 'koware continue' to quickly resume your last watched show!"/>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

@@ -95,6 +95,11 @@ public partial class MainWindow : Window
         InstallerScreen.Visibility = Visibility.Visible;
     }
 
+    private void OnShowTutorial(object sender, RoutedEventArgs e)
+    {
+        Koware.Tutorial.TutorialWindow.ShowTutorial(this);
+    }
+
     private async void OnInstall(object sender, RoutedEventArgs e)
     {
         SetUiState(isBusy: true);

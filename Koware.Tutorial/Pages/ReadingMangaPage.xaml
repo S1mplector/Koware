@@ -1,0 +1,81 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Reading Manga tutorial page. -->
+<Page x:Class="Koware.Tutorial.Pages.ReadingMangaPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:controls="clr-namespace:Koware.Tutorial.Controls"
+      Title="Reading Manga"
+      Background="Transparent">
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Koware.Tutorial;component/Styles/SharedStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Page.Resources>
+    
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Text="📖 Reading Manga" 
+                       FontSize="24" 
+                       FontWeight="Bold" 
+                       Foreground="{StaticResource AccentBrush}"
+                       Margin="0,0,0,8"/>
+            <TextBlock Text="Search and read manga in a custom reader." 
+                       FontSize="14" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,20"/>
+            
+            <TextBlock Text="Manga Mode" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                To use manga commands, add the -m flag or set manga as your default mode:
+            </TextBlock>
+            <controls:FakeTerminal x:Name="Terminal1" Height="160" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="Reading a Manga" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <controls:FakeTerminal x:Name="Terminal2" Height="180" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="Reader Controls" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="← → — Previous/Next page" Margin="0,4"/>
+                    <TextBlock Text="Space — Next page" Margin="0,4"/>
+                    <TextBlock Text="Home/End — First/Last page" Margin="0,4"/>
+                    <TextBlock Text="F — Toggle fullscreen" Margin="0,4"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="+/- — Zoom in/out" Margin="0,4"/>
+                    <TextBlock Text="W — Fit width mode" Margin="0,4"/>
+                    <TextBlock Text="N/P — Next/Prev chapter" Margin="0,4"/>
+                    <TextBlock Text="T — Change theme" Margin="0,4"/>
+                </StackPanel>
+            </Grid>
+            
+            <TextBlock Text="Available Themes" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <StackPanel Margin="12,0,0,0">
+                <TextBlock Text="• Default — Standard white background" Margin="0,4"/>
+                <TextBlock Text="• Dark — Dark background, easier on eyes" Margin="0,4"/>
+                <TextBlock Text="• Sepia — Warm, paper-like tones" Margin="0,4"/>
+                <TextBlock Text="• Monokai — Classic code editor colors" Margin="0,4"/>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Page>
