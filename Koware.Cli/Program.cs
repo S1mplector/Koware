@@ -228,25 +228,28 @@ static async Task<int> RunAsync(IHost host, string[] args)
             case "-h":
                 return HandleHelp(args, defaults.GetMode());
             default:
-                logger.LogWarning("Unknown command: {Command}", command);
-                PrintUsage();
+                Koware.Cli.Console.ErrorDisplay.UnknownCommand(command);
                 return 1;
         }
     }
+    catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+    {
+        Koware.Cli.Console.ErrorDisplay.Timeout("request");
+        return 1;
+    }
     catch (OperationCanceledException)
     {
-        logger.LogWarning("Operation canceled by user.");
+        Koware.Cli.Console.ErrorDisplay.Cancelled();
         return 2;
     }
     catch (HttpRequestException ex)
     {
-        logger.LogError("Network error while reaching the anime provider: {Message}", ex.Message);
-        LogNetworkHint(ex);
+        Koware.Cli.Console.ErrorDisplay.NetworkError(ex.Message);
         return 1;
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "Unhandled exception during command execution.");
+        Koware.Cli.Console.ErrorDisplay.Generic("An unexpected error occurred", ex.Message, "Run 'koware doctor' to check your setup.");
         return 1;
     }
 }
@@ -276,24 +279,7 @@ static bool CheckProvidersConfigured(IServiceProvider services, CliMode mode, IL
 
     if (!hasConfiguredProvider)
     {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine($"{Icons.Warning} No {modeLabel} providers configured.");
-        Console.ResetColor();
-        Console.WriteLine();
-        Console.WriteLine("Quick setup (recommended):");
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine("  koware provider autoconfig");
-        Console.ResetColor();
-        Console.WriteLine();
-        Console.WriteLine("Or configure manually:");
-        Console.WriteLine("  koware provider add <name>    Configure a provider interactively");
-        Console.WriteLine("  koware provider init          Create a template config file");
-        Console.WriteLine("  koware provider edit          Open config file in editor");
-        Console.WriteLine();
-        Console.WriteLine("After configuring, test connectivity with:");
-        Console.WriteLine("  koware provider test");
-        Console.WriteLine();
-        logger.LogWarning("No {Mode} providers configured. Run 'koware provider autoconfig' to set up.", modeLabel);
+        Koware.Cli.Console.ErrorDisplay.ProviderNotConfigured(modeLabel);
         return false;
     }
 
@@ -540,28 +526,6 @@ static async Task<int> HandleLastAsync(string[] args, IServiceProvider services,
     }
 
     return 0;
-}
-
-/// <summary>
-/// Print a short, colored hint when network calls to the anime provider fail.
-/// </summary>
-/// <param name="ex">The caught <see cref="HttpRequestException"/>.</param>
-/// <remarks>
-/// Called from the top-level exception handler in <see cref="RunAsync"/>.
-/// Prints tips for DNS, firewall, and VPN issues.
-/// </remarks>
-static void LogNetworkHint(HttpRequestException ex)
-{
-    Console.WriteLine();
-    Console.ForegroundColor = ConsoleColor.DarkYellow;
-    Console.WriteLine("Network issue: could not reach the anime provider.");
-    Console.ResetColor();
-    var msg = string.IsNullOrWhiteSpace(ex.Message) ? ex.GetType().Name : ex.Message;
-    Console.WriteLine($"Details: {msg}");
-    Console.WriteLine("Tips:");
-    Console.WriteLine("  - Check your internet connection and VPN/proxy settings.");
-    Console.WriteLine("  - Ensure api.allanime.day resolves (DNS) and isn't blocked by a firewall.");
-    Console.WriteLine("  - Retry in a minute; the host may be temporarily down.");
 }
 
 /// <summary>
