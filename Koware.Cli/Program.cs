@@ -1401,9 +1401,20 @@ static async Task<int> HandleUrlAutoconfigAsync(string urlString, string[] args,
     Console.ForegroundColor = ConsoleColor.Red;
     Console.WriteLine($"  {Icons.Warning} EXPERIMENTAL FEATURE");
     Console.ForegroundColor = ConsoleColor.DarkYellow;
-    Console.WriteLine("  URL-based autoconfig is experimental and may produce incomplete or");
-    Console.WriteLine("  non-functional provider configurations. Use at your own risk.");
+    Console.WriteLine("  URL-based autoconfig is experimental. Provider configs will be saved");
+    Console.WriteLine("  but are NOT yet integrated with koware watch/read commands.");
+    Console.WriteLine("  This feature is for testing and development purposes only.");
     Console.ResetColor();
+    Console.WriteLine();
+    
+    Console.Write("  Do you want to continue? [y/N]: ");
+    var input = Console.ReadLine()?.Trim();
+    if (string.IsNullOrEmpty(input) || !input.Equals("y", StringComparison.OrdinalIgnoreCase))
+    {
+        Console.WriteLine("  Cancelled.");
+        return 0;
+    }
+    
     Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Cyan;
     Console.WriteLine($"  Analyzing {url.Host}...");
@@ -1468,8 +1479,12 @@ static async Task<int> HandleUrlAutoconfigAsync(string urlString, string[] args,
             }
             
             Console.WriteLine();
-            Console.WriteLine($"To use:        koware watch \"Naruto\" --provider {result.Config.Slug}");
-            Console.WriteLine($"Set default:   koware provider set-default {result.Config.Slug}");
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("Note: This provider config is saved but NOT yet integrated with");
+            Console.WriteLine("      koware watch/read commands. Full integration coming soon.");
+            Console.ResetColor();
+            Console.WriteLine();
+            Console.WriteLine($"Config saved to: ~/.config/koware/providers/custom/{result.Config.Slug}.json");
             
             return 0;
         }
