@@ -1398,6 +1398,13 @@ static async Task<int> HandleUrlAutoconfigAsync(string urlString, string[] args,
     };
     
     Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine($"  {Icons.Warning} EXPERIMENTAL FEATURE");
+    Console.ForegroundColor = ConsoleColor.DarkYellow;
+    Console.WriteLine("  URL-based autoconfig is experimental and may produce incomplete or");
+    Console.WriteLine("  non-functional provider configurations. Use at your own risk.");
+    Console.ResetColor();
+    Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Cyan;
     Console.WriteLine($"  Analyzing {url.Host}...");
     Console.ResetColor();
@@ -1717,19 +1724,33 @@ static void PrintProviderHelp()
     Console.WriteLine("Usage: koware provider <command> [options]");
     Console.WriteLine();
     Console.WriteLine("Commands:");
-    Console.WriteLine("  list              Show all providers and their status (default)");
-    Console.WriteLine("  autoconfig [name] Auto-configure from remote repository (recommended)");
-    Console.WriteLine("  add [name]        Configure a provider interactively");
-    Console.WriteLine("  edit              Open config file in default editor");
-    Console.WriteLine("  init              Create template configuration file");
-    Console.WriteLine("  test [name]       Test provider connectivity");
-    Console.WriteLine("  --enable <name>   Enable a provider");
-    Console.WriteLine("  --disable <name>  Disable a provider");
+    Console.WriteLine("  list                  Show all providers and their status (default)");
+    Console.WriteLine("  autoconfig <url>      Analyze a website and generate provider config");
+    Console.WriteLine("  autoconfig [name]     Auto-configure from remote repository");
+    Console.WriteLine("  add [name]            Configure a provider interactively");
+    Console.WriteLine("  edit                  Open config file in default editor");
+    Console.WriteLine("  init                  Create template configuration file");
+    Console.WriteLine("  test [name]           Test provider connectivity");
+    Console.WriteLine("  --enable <name>       Enable a provider");
+    Console.WriteLine("  --disable <name>      Disable a provider");
     Console.WriteLine();
-    Console.WriteLine("Examples:");
-    Console.WriteLine("  koware provider autoconfig           # Configure all providers");
-    Console.WriteLine("  koware provider autoconfig allanime  # Configure specific provider");
-    Console.WriteLine("  koware provider autoconfig --list    # List available providers");
+    Console.WriteLine("Autoconfig from URL (intelligent analysis):");
+    Console.WriteLine("  koware provider autoconfig https://example-anime.com");
+    Console.WriteLine("  koware provider autoconfig mangadex.org --name \"MangaDex\"");
+    Console.WriteLine();
+    Console.WriteLine("  Options:");
+    Console.WriteLine("    --name <name>       Custom provider name");
+    Console.WriteLine("    --type <anime|manga> Force content type detection");
+    Console.WriteLine("    --test-query <q>    Custom search query for validation");
+    Console.WriteLine("    --skip-validation   Skip the live testing phase");
+    Console.WriteLine("    --dry-run           Analyze without saving config");
+    Console.WriteLine();
+    Console.WriteLine("Autoconfig from remote manifest:");
+    Console.WriteLine("  koware provider autoconfig              # Configure all providers");
+    Console.WriteLine("  koware provider autoconfig allanime     # Configure specific provider");
+    Console.WriteLine("  koware provider autoconfig --list       # List available providers");
+    Console.WriteLine();
+    Console.WriteLine("Other examples:");
     Console.WriteLine("  koware provider list");
     Console.WriteLine("  koware provider test");
 }
@@ -6778,31 +6799,40 @@ static List<string> GetHelpLines(string command, CliMode mode)
             break;
             
         case "provider":
-            lines.Add("provider - Manage content providers (AllAnime, AllManga)");
+            lines.Add("provider - Manage content providers");
             lines.Add("");
             lines.Add("Usage: koware provider <subcommand> [options]");
             lines.Add("");
             lines.Add("Subcommands:");
             lines.Add("  list                  Show all providers and their status");
+            lines.Add("  autoconfig <url>      Analyze website and generate provider config");
+            lines.Add("  autoconfig [name]     Fetch config from koware-providers repo");
             lines.Add("  add [name]            Interactive wizard to configure a provider");
             lines.Add("  edit                  Open config file in default editor");
             lines.Add("  init                  Create a template configuration file");
             lines.Add("  test [name]           Test provider connectivity (DNS + HTTP)");
-            lines.Add("  autoconfig [name]     Fetch config from koware-providers repo");
-            lines.Add("  autoconfig --list     List available remote provider configs");
             lines.Add("  --enable <name>       Enable a provider");
             lines.Add("  --disable <name>      Disable a provider");
             lines.Add("");
-            lines.Add("Available providers:");
-            lines.Add("  allanime              Anime streaming provider");
-            lines.Add("  allmanga              Manga reading provider");
+            lines.Add("Autoconfig from URL (intelligent analysis):");
+            lines.Add("  koware provider autoconfig https://example.com");
+            lines.Add("  koware provider autoconfig mangadex.org --name \"MangaDex\"");
             lines.Add("");
-            lines.Add("Examples:");
-            lines.Add("  koware provider                    List all providers");
-            lines.Add("  koware provider add allanime       Configure AllAnime");
-            lines.Add("  koware provider test               Test all providers");
-            lines.Add("  koware provider autoconfig         Auto-configure all");
-            lines.Add("  koware provider --disable allanime Disable AllAnime");
+            lines.Add("  Options:");
+            lines.Add("    --name <name>       Custom provider name");
+            lines.Add("    --type <type>       Force type: anime, manga, or both");
+            lines.Add("    --skip-validation   Skip live testing phase");
+            lines.Add("    --dry-run           Analyze without saving");
+            lines.Add("");
+            lines.Add("Autoconfig from remote manifest:");
+            lines.Add("  koware provider autoconfig             Auto-configure all");
+            lines.Add("  koware provider autoconfig allanime    Configure specific");
+            lines.Add("  koware provider autoconfig --list      List available");
+            lines.Add("");
+            lines.Add("Other examples:");
+            lines.Add("  koware provider list");
+            lines.Add("  koware provider test");
+            lines.Add("  koware provider --disable allanime");
             break;
             
         case "doctor":
@@ -6897,7 +6927,7 @@ static int HandleHelp(string[] args, CliMode mode)
             ("offline", "View downloaded content available for offline viewing"),
             ("config", "View or update appsettings.user.json"),
             ("mode", "Switch between anime and manga modes"),
-            ("provider", "Manage content providers (AllAnime, AllManga)"),
+            ("provider", "Manage providers: autoconfig from URL, list, test, enable/disable"),
             ("doctor", "Run a full health check (config, providers, tools)"),
             ("update", "Download and run the latest Koware installer")
         };
@@ -7078,9 +7108,14 @@ static int HandleHelp(string[] args, CliMode mode)
             Console.WriteLine("  koware config path");
             break;
         case "provider":
-            PrintTopicHeader("provider", "List or toggle providers.");
-            Console.WriteLine("Usage: koware provider [--enable <name> | --disable <name>]");
-            Console.WriteLine("Behavior: lists providers; with flags, updates enablement.");
+            PrintTopicHeader("provider", "Manage content providers.");
+            Console.WriteLine("Usage: koware provider <subcommand> [options]");
+            Console.WriteLine();
+            Console.WriteLine("Quick start:");
+            Console.WriteLine("  koware provider autoconfig <url>   Analyze a website and generate config");
+            Console.WriteLine("  koware provider autoconfig         Auto-configure from remote manifest");
+            Console.WriteLine();
+            Console.WriteLine("Run 'koware provider help' for full options.");
             break;
         case "doctor":
             PrintTopicHeader("doctor", "Run a full health check (config, providers, tools).");

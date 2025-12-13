@@ -54,9 +54,10 @@ public sealed class TransformEngine : ITransformEngine
                     results.Add(item);
             }
         }
-        catch (JsonException ex)
+        catch (JsonException)
         {
-            _logger.LogWarning(ex, "Failed to parse JSON for extraction");
+            // Silently ignore non-JSON responses (e.g., HTML error pages)
+            _logger.LogDebug("Response is not valid JSON, skipping extraction");
         }
         
         return results;

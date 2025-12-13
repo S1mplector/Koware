@@ -61,6 +61,17 @@ public sealed class SchemaGenerator : ISchemaGenerator
 
     private static string GenerateProviderName(SiteProfile profile)
     {
+        // Try site title first
+        if (!string.IsNullOrWhiteSpace(profile.SiteTitle))
+        {
+            var titlePart = profile.SiteTitle.Split(['-', '|', '–', ':', '•'])[0].Trim();
+            if (!string.IsNullOrWhiteSpace(titlePart) && titlePart.Length >= 2)
+            {
+                return titlePart;
+            }
+        }
+        
+        // Fall back to hostname
         var host = profile.BaseUrl.Host;
         
         // Remove common prefixes
@@ -76,7 +87,7 @@ public sealed class SchemaGenerator : ISchemaGenerator
         if (host.Length > 0)
             host = char.ToUpperInvariant(host[0]) + host[1..];
 
-        return profile.SiteTitle?.Split(['-', '|', '–'])[0].Trim() ?? host;
+        return host;
     }
 
     private static string? BuildNotes(SiteProfile profile, ContentSchema schema, IProviderTemplate template)
