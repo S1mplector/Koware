@@ -1,6 +1,7 @@
 <!-- Author: Ilgaz Mehmetoğlu | Solution manifest listing all Koware project entries. -->
 <Solution>
   <Project Path="Koware.Application/Koware.Application.csproj" />
+  <Project Path="Koware.Autoconfig/Koware.Autoconfig.csproj" />
   <Project Path="Koware.Cli/Koware.Cli.csproj" />
   <Project Path="Koware.Domain/Koware.Domain.csproj" />
   <Project Path="Koware.Infrastructure/Koware.Infrastructure.csproj" />

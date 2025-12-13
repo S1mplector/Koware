@@ -22,6 +22,10 @@ using Koware.Cli.History;
 using Koware.Cli.Console;
 using Koware.Cli.Health;
 using Koware.Updater;
+using Koware.Autoconfig.DependencyInjection;
+using Koware.Autoconfig.Orchestration;
+using Koware.Autoconfig.Storage;
+using Koware.Autoconfig.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -97,6 +101,8 @@ static IHost BuildHost(string[] args)
     builder.Services.AddSingleton<IAnimeListStore, SqliteAnimeListStore>();
     builder.Services.AddSingleton<IMangaListStore, SqliteMangaListStore>();
     builder.Services.AddSingleton<IDownloadStore, SqliteDownloadStore>();
+    builder.Services.AddAutoconfigServices();
+    builder.Services.AddHttpClient();
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware.cli", LogLevel.Warning);
     builder.Logging.AddFilter("Koware.Infrastructure", LogLevel.Warning);
@@ -936,7 +942,7 @@ static Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
         case "auto":
             var providerToAuto = args.Length > 2 ? args[2] : null;
             var listOnly = args.Skip(2).Any(a => a.Equals("--list", StringComparison.OrdinalIgnoreCase));
-            return HandleProviderAutoConfigAsync(providerToAuto, listOnly, configPath);
+            return HandleProviderAutoConfigAsync(providerToAuto, args.Skip(2).ToArray(), listOnly, configPath, services);
             
         case "--enable":
         case "--disable":
@@ -1333,9 +1339,178 @@ static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOpt
 }
 
 /// <summary>
+/// Auto-configure providers - either from a URL (intelligent analysis) or from remote manifest.
+/// </summary>
+static async Task<int> HandleProviderAutoConfigAsync(string? providerName, string[] subArgs, bool listOnly, string configPath, IServiceProvider services)
+{
+    // Check if this is a URL - use intelligent autoconfig
+    if (!string.IsNullOrWhiteSpace(providerName) && 
+        (providerName.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+         providerName.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+         providerName.Contains(".")))
+    {
+        return await HandleUrlAutoconfigAsync(providerName, subArgs, services);
+    }
+    
+    // Otherwise use remote manifest approach
+    return await HandleRemoteManifestAutoconfigAsync(providerName, listOnly, configPath);
+}
+
+/// <summary>
+/// Intelligent autoconfig - analyze a website URL and generate provider config.
+/// </summary>
+static async Task<int> HandleUrlAutoconfigAsync(string urlString, string[] args, IServiceProvider services)
+{
+    // Normalize URL
+    if (!urlString.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+    {
+        urlString = "https://" + urlString;
+    }
+    
+    if (!Uri.TryCreate(urlString, UriKind.Absolute, out var url))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"{Icons.Error} Invalid URL: {urlString}");
+        Console.ResetColor();
+        return 1;
+    }
+    
+    // Parse options
+    var customName = GetArgValue(args, "--name");
+    var testQuery = GetArgValue(args, "--test-query");
+    var skipValidation = args.Any(a => a.Equals("--skip-validation", StringComparison.OrdinalIgnoreCase));
+    var dryRun = args.Any(a => a.Equals("--dry-run", StringComparison.OrdinalIgnoreCase));
+    var forceType = GetArgValue(args, "--type");
+    
+    var options = new AutoconfigOptions
+    {
+        ProviderName = customName,
+        TestQuery = testQuery,
+        SkipValidation = skipValidation,
+        DryRun = dryRun,
+        ForceType = forceType?.ToLowerInvariant() switch
+        {
+            "anime" => ProviderType.Anime,
+            "manga" => ProviderType.Manga,
+            "both" => ProviderType.Both,
+            _ => null
+        }
+    };
+    
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine($"  Analyzing {url.Host}...");
+    Console.ResetColor();
+    Console.WriteLine();
+    
+    var orchestrator = services.GetRequiredService<IAutoconfigOrchestrator>();
+    
+    // Progress display
+    var currentPhase = "";
+    var progress = new Progress<AutoconfigProgress>(p =>
+    {
+        if (p.Phase != currentPhase)
+        {
+            currentPhase = p.Phase;
+            Console.Write($"  [{p.Phase}] ");
+        }
+        
+        if (p.Succeeded.HasValue)
+        {
+            if (p.Succeeded.Value)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"{Icons.Success} {p.Step}");
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"{Icons.Error} {p.Step}");
+            }
+            Console.ResetColor();
+        }
+    });
+    
+    try
+    {
+        var result = await orchestrator.AnalyzeAndConfigureAsync(url, options, progress);
+        
+        Console.WriteLine();
+        
+        if (result.IsSuccess && result.Config != null)
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"{Icons.Success} Provider '{result.Config.Name}' created successfully!");
+            Console.ResetColor();
+            Console.WriteLine();
+            Console.WriteLine($"  Slug:      {result.Config.Slug}");
+            Console.WriteLine($"  Type:      {result.Config.Type}");
+            Console.WriteLine($"  Base Host: {result.Config.Hosts.BaseHost}");
+            Console.WriteLine($"  Duration:  {result.Duration.TotalSeconds:F1}s");
+            
+            if (result.Warnings.Count > 0)
+            {
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("Warnings:");
+                Console.ResetColor();
+                foreach (var warning in result.Warnings)
+                {
+                    Console.WriteLine($"  {Icons.Warning} {warning}");
+                }
+            }
+            
+            Console.WriteLine();
+            Console.WriteLine($"To use:        koware watch \"Naruto\" --provider {result.Config.Slug}");
+            Console.WriteLine($"Set default:   koware provider set-default {result.Config.Slug}");
+            
+            return 0;
+        }
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"{Icons.Error} Autoconfig failed: {result.ErrorMessage}");
+            Console.ResetColor();
+            
+            if (result.Phases.Count > 0)
+            {
+                Console.WriteLine();
+                Console.WriteLine("Phases completed:");
+                foreach (var phase in result.Phases)
+                {
+                    var icon = phase.Succeeded ? Icons.Success : Icons.Error;
+                    Console.WriteLine($"  {icon} {phase.Name}: {phase.Message}");
+                }
+            }
+            
+            return 1;
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"{Icons.Error} Error: {ex.Message}");
+        Console.ResetColor();
+        return 1;
+    }
+}
+
+static string? GetArgValue(string[] args, string flag)
+{
+    for (var i = 0; i < args.Length - 1; i++)
+    {
+        if (args[i].Equals(flag, StringComparison.OrdinalIgnoreCase))
+        {
+            return args[i + 1];
+        }
+    }
+    return null;
+}
+
+/// <summary>
 /// Auto-configure providers from the remote koware-providers repository.
 /// </summary>
-static async Task<int> HandleProviderAutoConfigAsync(string? providerName, bool listOnly, string configPath)
+static async Task<int> HandleRemoteManifestAutoconfigAsync(string? providerName, bool listOnly, string configPath)
 {
     const string repoBase = "https://raw.githubusercontent.com/S1mplector/koware-providers/main";
     const string manifestUrl = $"{repoBase}/providers.json";
@@ -1387,7 +1562,9 @@ static async Task<int> HandleProviderAutoConfigAsync(string? providerName, bool 
             Console.WriteLine($"  {name,-12} [{type,-6}] {desc}");
         }
         Console.WriteLine();
-        Console.WriteLine("Usage: koware provider autoconfig <name>  or  koware provider autoconfig (all)");
+        Console.WriteLine("Usage:");
+        Console.WriteLine("  koware provider autoconfig <name>           Configure from remote manifest");
+        Console.WriteLine("  koware provider autoconfig <url>            Analyze website and generate config");
         return 0;
     }
     

@@ -3,6 +3,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Koware.Application\Koware.Application.csproj" />
+    <ProjectReference Include="..\Koware.Autoconfig\Koware.Autoconfig.csproj" />
     <ProjectReference Include="..\Koware.Infrastructure\Koware.Infrastructure.csproj" />
     <ProjectReference Include="..\Koware.Updater\Koware.Updater.csproj" />
   </ItemGroup>
@@ -23,6 +24,7 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+    <PackageReference Include="Spectre.Console" Version="0.49.1" />
   </ItemGroup>
 
   <ItemGroup>

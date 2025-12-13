@@ -312,11 +312,19 @@ internal static class ReaderHtmlBuilder
             display: flex;
         }
 
-        /* Zoom */
-        #reader[data-zoom="125"] .page-img { transform: scale(1.25); transform-origin: top center; }
-        #reader[data-zoom="150"] .page-img { transform: scale(1.5); transform-origin: top center; }
-        #reader[data-zoom="175"] .page-img { transform: scale(1.75); transform-origin: top center; }
-        #reader[data-zoom="200"] .page-img { transform: scale(2); transform-origin: top center; }
+        /* Zoom - use width scaling instead of transform to allow proper scrolling */
+        #reader[data-zoom="125"] .page-img { width: 125%; max-width: none; }
+        #reader[data-zoom="150"] .page-img { width: 150%; max-width: none; }
+        #reader[data-zoom="175"] .page-img { width: 175%; max-width: none; }
+        #reader[data-zoom="200"] .page-img { width: 200%; max-width: none; }
+        
+        #reader[data-zoom="125"] .page-wrapper,
+        #reader[data-zoom="150"] .page-wrapper,
+        #reader[data-zoom="175"] .page-wrapper,
+        #reader[data-zoom="200"] .page-wrapper {
+            max-width: none;
+            width: auto;
+        }
 
         #footer {
             display: flex;
