@@ -57,6 +57,10 @@
                             Content="⚙️  Provider Setup" 
                             Style="{StaticResource NavButton}"
                             Click="NavButton_Click"/>
+                    <Button x:Name="NavMode" 
+                            Content="🔄  Mode Switching" 
+                            Style="{StaticResource NavButton}"
+                            Click="NavButton_Click"/>
                     <Button x:Name="NavWatchingAnime" 
                             Content="▶️  Watching Anime" 
                             Style="{StaticResource NavButton}"

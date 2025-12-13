@@ -14,17 +14,23 @@ public partial class ProviderSetupPage : Page
 
     private void PopulateTerminal()
     {
+        // Terminal 1: Autoconfig command
         Terminal.Clear();
-        Terminal.AddPrompt("koware config");
+        Terminal.AddPrompt("koware provider autoconfig https://example-site.com");
         Terminal.AddEmptyLine();
-        Terminal.AddHeader("❯ Koware Configuration");
-        Terminal.AddSeparator(40);
-        Terminal.AddColoredLine("{cyan}Config file:{/} %APPDATA%\\koware\\appsettings.user.json");
+        Terminal.AddColoredLine("{cyan}Analyzing site...{/}");
+        Terminal.AddColoredLine("{green}✓{/} Detected site type: anime");
+        Terminal.AddColoredLine("{green}✓{/} Found search endpoint");
+        Terminal.AddColoredLine("{green}✓{/} Found episode selectors");
+        Terminal.AddColoredLine("{green}✓{/} Found video source pattern");
         Terminal.AddEmptyLine();
-        Terminal.AddColoredLine("{green}✓{/} Default quality: 1080p");
-        Terminal.AddColoredLine("{green}✓{/} Default mode: anime");
-        Terminal.AddColoredLine("{yellow}!{/} Providers: 0 configured");
-        Terminal.AddEmptyLine();
-        Terminal.AddColoredLine("{gray}Run 'koware config --open' to edit{/}");
+        Terminal.AddColoredLine("{green}✓{/} Provider added: example-site");
+        Terminal.AddColoredLine("{gray}Config saved to appsettings.user.json{/}");
+
+        // Terminal 2: Manual config open
+        Terminal2.Clear();
+        Terminal2.AddPrompt("koware config --open");
+        Terminal2.AddEmptyLine();
+        Terminal2.AddColoredLine("{green}✓{/} Opening config in default editor...");
     }
 }

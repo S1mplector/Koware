@@ -1,0 +1,113 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Mode switching tutorial page. -->
+<Page x:Class="Koware.Tutorial.Pages.ModePage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:controls="clr-namespace:Koware.Tutorial.Controls"
+      Title="Mode Switching"
+      Background="Transparent">
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Koware.Tutorial;component/Styles/SharedStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Page.Resources>
+    
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Text="🔄 Mode Switching" 
+                       FontSize="24" 
+                       FontWeight="Bold" 
+                       Foreground="{StaticResource AccentBrush}"
+                       Margin="0,0,0,8"/>
+            <TextBlock Text="Switch between anime and manga modes." 
+                       FontSize="14" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,20"/>
+            
+            <TextBlock Text="What are Modes?" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,16">
+                Koware operates in two modes: Anime mode and Manga mode. Each mode uses 
+                different providers and commands optimized for that content type. By default, 
+                Koware starts in Anime mode.
+            </TextBlock>
+            
+            <TextBlock Text="Checking Current Mode" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <controls:FakeTerminal x:Name="Terminal1" Height="140" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="Switching Modes" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                There are two ways to switch modes:
+            </TextBlock>
+            
+            <TextBlock Text="1. Temporary Switch (per command)" 
+                       FontSize="14" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,8">
+                Use the -m flag to run a single command in manga mode:
+            </TextBlock>
+            <controls:FakeTerminal x:Name="Terminal2" Height="120" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="2. Permanent Switch (default mode)" 
+                       FontSize="14" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,8">
+                Use the mode command to change your default mode:
+            </TextBlock>
+            <controls:FakeTerminal x:Name="Terminal3" Height="180" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="Mode-Specific Commands" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Anime Mode" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="• watch — Stream anime" Margin="0,2"/>
+                    <TextBlock Text="• stream — Direct stream" Margin="0,2"/>
+                    <TextBlock Text="• download — Save episodes" Margin="0,2"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="Manga Mode" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="• read — Read manga" Margin="0,2"/>
+                    <TextBlock Text="• download — Save chapters" Margin="0,2"/>
+                    <TextBlock Text="• browse — Browse sources" Margin="0,2"/>
+                </StackPanel>
+            </Grid>
+            
+            <Border Background="#1E3A5F" CornerRadius="6" Padding="12" Margin="0,12,0,0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="💡" FontSize="16" Margin="0,0,8,0"/>
+                    <TextBlock TextWrapping="Wrap" VerticalAlignment="Center">
+                        <Run Text="Tip:" FontWeight="SemiBold"/>
+                        <Run Text=" Commands like 'list', 'history', and 'continue' automatically use entries from the current mode."/>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

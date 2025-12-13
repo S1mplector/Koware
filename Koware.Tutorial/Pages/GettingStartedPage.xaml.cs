@@ -17,18 +17,19 @@ public partial class GettingStartedPage : Page
         Terminal.Clear();
         Terminal.AddPrompt("koware help");
         Terminal.AddEmptyLine();
-        Terminal.AddHeader("❯ Koware - Anime & Manga CLI");
-        Terminal.AddSeparator(40);
-        Terminal.AddEmptyLine();
-        Terminal.AddColoredLine("{cyan}Usage:{/} koware <command> [options]");
-        Terminal.AddEmptyLine();
-        Terminal.AddColoredLine("{cyan}Commands:{/}");
-        Terminal.AddColoredLine("  {green}watch{/}      Search and stream anime");
-        Terminal.AddColoredLine("  {green}read{/}       Search and read manga");
-        Terminal.AddColoredLine("  {green}list{/}       Manage your watchlist");
-        Terminal.AddColoredLine("  {green}history{/}    Browse watch/read history");
-        Terminal.AddColoredLine("  {green}continue{/}   Resume last watched");
-        Terminal.AddEmptyLine();
-        Terminal.AddColoredLine("{gray}Run 'koware help <command>' for details{/}");
+        Terminal.AddHeader("> Help [16/16] ^v0%");
+        Terminal.AddColoredLine("  {gray}[?]{/} {cyan}▌{/}");
+        Terminal.AddSeparator(55);
+        Terminal.AddColoredLine(" {cyan}>{/} {green}[1]{/} search");
+        Terminal.AddColoredLine("   {green}[2]{/} recommend");
+        Terminal.AddColoredLine("   {green}[3]{/} stream");
+        Terminal.AddColoredLine("   {green}[4]{/} watch");
+        Terminal.AddColoredLine("   {green}[5]{/} download");
+        Terminal.AddColoredLine("   {green}[6]{/} read");
+        Terminal.AddColoredLine("   {green}[7]{/} last");
+        Terminal.AddColoredLine("   {green}[8]{/} continue");
+        Terminal.AddColoredLine("   {green}[9]{/} history");
+        Terminal.AddSeparator(55);
+        Terminal.AddColoredLine("  {gray}[#] Find anime or manga with optional filters{/}");
     }
 }

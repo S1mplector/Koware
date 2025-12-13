@@ -45,28 +45,36 @@
                 <TextBlock FontFamily="Consolas" Text="%APPDATA%\koware\appsettings.user.json"/>
             </Border>
             
-            <TextBlock Text="Opening the Config" 
-                       FontSize="16" 
-                       FontWeight="SemiBold"
-                       Margin="0,0,0,8"/>
-            
-            <controls:FakeTerminal x:Name="Terminal" Height="180" Margin="0,0,0,16"/>
-            
-            <TextBlock Text="Provider Structure" 
+            <TextBlock Text="Quick Setup with Autoconfig" 
                        FontSize="16" 
                        FontWeight="SemiBold"
                        Margin="0,0,0,8"/>
             <TextBlock TextWrapping="Wrap" 
                        Foreground="{StaticResource SecondaryBrush}"
                        Margin="0,0,0,12">
-                Each provider needs these fields configured:
+                The easiest way to add a provider is using the autoconfig command. 
+                Point it at a supported site and Koware will attempt to auto-detect the configuration:
             </TextBlock>
-            <StackPanel Margin="12,0,0,16">
+            
+            <controls:FakeTerminal x:Name="Terminal" Height="200" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="Manual Configuration" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                You can also manually edit the config file. Each provider needs these fields:
+            </TextBlock>
+            <StackPanel Margin="12,0,0,8">
                 <TextBlock Text="• BaseUrl - The provider's base URL" Margin="0,4"/>
                 <TextBlock Text="• SearchPath - Path for search queries" Margin="0,4"/>
                 <TextBlock Text="• Type - 'anime' or 'manga'" Margin="0,4"/>
                 <TextBlock Text="• Selectors - CSS selectors for scraping" Margin="0,4"/>
             </StackPanel>
+            
+            <controls:FakeTerminal x:Name="Terminal2" Height="120" Margin="0,0,0,16"/>
             
             <Border Background="#7C2D12" CornerRadius="6" Padding="12" Margin="0,8,0,0">
                 <StackPanel Orientation="Horizontal">

@@ -48,11 +48,12 @@
             <TextBlock TextWrapping="Wrap" 
                        Foreground="{StaticResource SecondaryBrush}"
                        Margin="0,0,0,12">
-                Open PowerShell or Command Prompt and type:
+                Open PowerShell or Command Prompt and type 'koware help'. This opens an interactive 
+                command browser where you can navigate with arrow keys and select with Enter:
             </TextBlock>
             
             <!-- Terminal preview -->
-            <controls:FakeTerminal x:Name="Terminal" Height="200" Margin="0,0,0,16"/>
+            <controls:FakeTerminal x:Name="Terminal" Height="280" Margin="0,0,0,16"/>
             
             <!-- Next steps -->
             <TextBlock Text="Next Steps" 

@@ -39,6 +39,7 @@ public partial class TutorialWindow : Window
         {
             "NavGettingStarted" => new GettingStartedPage(),
             "NavProviderSetup" => new ProviderSetupPage(),
+            "NavMode" => new ModePage(),
             "NavWatchingAnime" => new WatchingAnimePage(),
             "NavReadingManga" => new ReadingMangaPage(),
             "NavManagingLists" => new ManagingListsPage(),
