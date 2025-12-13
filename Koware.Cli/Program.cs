@@ -1827,7 +1827,13 @@ static async Task<int> HandleHistoryAsync(string[] args, IServiceProvider servic
     var hasFilters = search != null || after != null || before != null || fromEpisode != null || toEpisode != null || json || stats || playIndex.HasValue || playNext;
     if (!hasFilters && !browse)
     {
-        var historyManager = new Koware.Cli.Console.InteractiveHistoryManager(history, cancellationToken: cancellationToken);
+        var historyManager = new Koware.Cli.Console.InteractiveHistoryManager(
+            history,
+            onPlayAnime: async (entry, episode) =>
+            {
+                await LaunchFromHistory(entry, orchestrator, services, history, logger, defaults, episode, cancellationToken);
+            },
+            cancellationToken: cancellationToken);
         return await historyManager.RunAsync();
     }
 
@@ -2046,7 +2052,20 @@ static async Task<int> HandleMangaHistoryAsync(string[] args, IServiceProvider s
     var hasFilters = search != null || after != null || before != null || fromChapter != null || toChapter != null || json || stats;
     if (!hasFilters)
     {
-        var historyManager = new Koware.Cli.Console.InteractiveMangaHistoryManager(readHistory, cancellationToken: cancellationToken);
+        var historyManager = new Koware.Cli.Console.InteractiveMangaHistoryManager(
+            readHistory,
+            onReadManga: async (entry, chapter) =>
+            {
+                var readArgs = new List<string> { 
+                    "read", entry.MangaTitle, 
+                    "--chapter", chapter.ToString(System.Globalization.CultureInfo.InvariantCulture), 
+                    "--index", "1", 
+                    "--non-interactive"
+                };
+                var cliDefaults = services.GetRequiredService<IOptions<DefaultCliOptions>>().Value;
+                await HandleReadAsync(readArgs.ToArray(), services, logger, cliDefaults, cancellationToken);
+            },
+            cancellationToken: cancellationToken);
         return await historyManager.RunAsync();
     }
 
