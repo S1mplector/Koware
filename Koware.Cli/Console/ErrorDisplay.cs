@@ -1,4 +1,4 @@
-﻿// Author: Ilgaz Mehmetoglu
+// Author: Ilgaz Mehmetoğlu
 using Con = System.Console;
 
 namespace Koware.Cli.Console;
@@ -10,6 +10,7 @@ public static class ErrorDisplay
         Con.WriteLine();
         WriteError($"Unknown command: '{command}'");
         Con.WriteLine();
+        
         var suggestions = GetCommandSuggestions(command);
         if (suggestions.Length > 0)
         {
@@ -20,6 +21,7 @@ public static class ErrorDisplay
                 Con.WriteLine($"  koware {s}");
             Con.WriteLine();
         }
+        
         Con.WriteLine("Run 'koware help' to see available commands.");
     }
 
@@ -28,6 +30,7 @@ public static class ErrorDisplay
         Con.WriteLine();
         WriteError("Network error");
         Con.WriteLine();
+        
         if (!string.IsNullOrWhiteSpace(message))
         {
             Con.ForegroundColor = ConsoleColor.DarkGray;
@@ -35,6 +38,7 @@ public static class ErrorDisplay
             Con.ResetColor();
             Con.WriteLine();
         }
+        
         Con.WriteLine("Possible causes:");
         WriteBullet("No internet connection");
         WriteBullet("The provider may be temporarily down");
@@ -42,6 +46,7 @@ public static class ErrorDisplay
         if (!string.IsNullOrWhiteSpace(provider))
             WriteBullet($"The {provider} API endpoint may have changed");
         Con.WriteLine();
+        
         Con.WriteLine("Try:");
         WriteHint("koware doctor", "Check provider connectivity");
         WriteHint("koware provider test", "Test provider endpoints");
@@ -52,9 +57,11 @@ public static class ErrorDisplay
         Con.WriteLine();
         WriteError($"No {mode} provider configured");
         Con.WriteLine();
+        
         Con.WriteLine("Quick setup:");
         WriteHint("koware provider autoconfig", "Auto-configure from remote repository");
         Con.WriteLine();
+        
         Con.WriteLine("Manual setup:");
         WriteHint("koware provider add", "Configure a provider interactively");
         WriteHint("koware provider init", "Create a template config file");
@@ -65,11 +72,13 @@ public static class ErrorDisplay
         Con.WriteLine();
         WriteWarning($"No {contentType} found for: '{query}'");
         Con.WriteLine();
+        
         Con.WriteLine("Suggestions:");
         WriteBullet("Check your spelling");
         WriteBullet("Try a shorter or more general search term");
         WriteBullet("Use the original Japanese/English title");
         Con.WriteLine();
+        
         WriteHint("koware search --help", "See search options and filters");
     }
 
@@ -77,6 +86,7 @@ public static class ErrorDisplay
     {
         Con.WriteLine();
         WriteError(message);
+        
         if (!string.IsNullOrWhiteSpace(details))
         {
             Con.WriteLine();
@@ -84,6 +94,7 @@ public static class ErrorDisplay
             Con.WriteLine($"  {details}");
             Con.ResetColor();
         }
+        
         if (!string.IsNullOrWhiteSpace(hint))
         {
             Con.WriteLine();
@@ -96,6 +107,7 @@ public static class ErrorDisplay
         Con.WriteLine();
         WriteError($"The {operation} timed out");
         Con.WriteLine();
+        
         Con.WriteLine("Suggestions:");
         WriteBullet("Check your internet connection");
         WriteBullet("The server may be slow - try again later");
@@ -129,7 +141,7 @@ public static class ErrorDisplay
     private static void WriteBullet(string text)
     {
         Con.ForegroundColor = ConsoleColor.DarkGray;
-        Con.Write("  * ");
+        Con.Write("  • ");
         Con.ResetColor();
         Con.WriteLine(text);
     }
