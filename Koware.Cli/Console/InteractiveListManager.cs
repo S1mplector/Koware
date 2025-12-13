@@ -693,14 +693,17 @@ public sealed class InteractiveListManager
 public sealed class InteractiveMangaListManager
 {
     private readonly IMangaListStore _store;
+    private readonly Func<MangaListEntry, Task>? _onRead;
     private List<MangaListEntry> _entries = new();
     private readonly CancellationToken _cancellationToken;
 
     public InteractiveMangaListManager(
         IMangaListStore store,
+        Func<MangaListEntry, Task>? onRead = null,
         CancellationToken cancellationToken = default)
     {
         _store = store;
+        _onRead = onRead;
         _cancellationToken = cancellationToken;
     }
 
@@ -749,6 +752,12 @@ public sealed class InteractiveMangaListManager
 
             switch (result.Action)
             {
+                case ListAction.Play:
+                    if (_onRead is not null)
+                    {
+                        await _onRead(entry);
+                    }
+                    break;
                 case ListAction.UpdateStatus:
                     await HandleStatusChangeAsync(entry);
                     break;

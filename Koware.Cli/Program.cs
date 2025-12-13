@@ -2753,8 +2753,27 @@ static async Task<int> HandleMangaListAsync(string[] args, IServiceProvider serv
 
     if (args.Length < 2)
     {
-        // Default: interactive list manager
-        var listManager = new Koware.Cli.Console.InteractiveMangaListManager(mangaList, cancellationToken: cancellationToken);
+        // Default: interactive list manager with read callback
+        var svc = services;
+        var log = logger;
+        var ct = cancellationToken;
+        var defaults = svc.GetRequiredService<DefaultCliOptions>();
+        
+        Func<MangaListEntry, Task> onRead = async entry =>
+        {
+            var nextChapter = entry.ChaptersRead + 1;
+            await HandleReadAsync(
+                new[] { "read", entry.MangaTitle, "--chapter", nextChapter.ToString() },
+                svc,
+                log,
+                defaults,
+                ct);
+        };
+
+        var listManager = new Koware.Cli.Console.InteractiveMangaListManager(
+            mangaList,
+            onRead: onRead,
+            cancellationToken: cancellationToken);
         return await listManager.RunAsync();
     }
 
