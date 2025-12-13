@@ -1823,6 +1823,14 @@ static async Task<int> HandleHistoryAsync(string[] args, IServiceProvider servic
         idx++;
     }
 
+    // Interactive mode when no flags (default)
+    var hasFilters = search != null || after != null || before != null || fromEpisode != null || toEpisode != null || json || stats || playIndex.HasValue || playNext;
+    if (!hasFilters && !browse)
+    {
+        var historyManager = new Koware.Cli.Console.InteractiveHistoryManager(history, cancellationToken: cancellationToken);
+        return await historyManager.RunAsync();
+    }
+
     // Interactive browse mode
     if (browse)
     {
@@ -2032,6 +2040,14 @@ static async Task<int> HandleMangaHistoryAsync(string[] args, IServiceProvider s
                 break;
         }
         idx++;
+    }
+
+    // Interactive mode when no flags (default)
+    var hasFilters = search != null || after != null || before != null || fromChapter != null || toChapter != null || json || stats;
+    if (!hasFilters)
+    {
+        var historyManager = new Koware.Cli.Console.InteractiveMangaHistoryManager(readHistory, cancellationToken: cancellationToken);
+        return await historyManager.RunAsync();
     }
 
     if (stats)
