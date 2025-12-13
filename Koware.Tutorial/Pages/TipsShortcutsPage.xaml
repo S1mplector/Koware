@@ -53,11 +53,22 @@
                 </StackPanel>
             </Grid>
             
+            <TextBlock Text="Watch History" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                Browse your watch history interactively and resume any entry:
+            </TextBlock>
+            <controls:FakeTerminal x:Name="Terminal2" Height="280" Margin="0,0,0,16"/>
+            
             <TextBlock Text="Useful Commands" 
                        FontSize="16" 
                        FontWeight="SemiBold"
                        Margin="0,0,0,8"/>
-            <controls:FakeTerminal x:Name="Terminal2" Height="200" Margin="0,0,0,16"/>
+            <controls:FakeTerminal x:Name="Terminal3" Height="200" Margin="0,0,0,16"/>
             
             <TextBlock Text="CLI Flags Reference" 
                        FontSize="16" 

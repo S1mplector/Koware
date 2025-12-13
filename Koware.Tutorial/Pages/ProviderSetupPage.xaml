@@ -53,10 +53,10 @@
                        Foreground="{StaticResource SecondaryBrush}"
                        Margin="0,0,0,12">
                 The easiest way to add a provider is using the autoconfig command. 
-                Point it at a supported site and Koware will attempt to auto-detect the configuration:
+                It fetches pre-made configurations from the koware-providers repository:
             </TextBlock>
             
-            <controls:FakeTerminal x:Name="Terminal" Height="200" Margin="0,0,0,16"/>
+            <controls:FakeTerminal x:Name="Terminal" Height="140" Margin="0,0,0,16"/>
             
             <TextBlock Text="Manual Configuration" 
                        FontSize="16" 

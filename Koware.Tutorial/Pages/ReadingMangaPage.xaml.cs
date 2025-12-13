@@ -19,12 +19,10 @@ public partial class ReadingMangaPage : Page
         try
         {
             Terminal1.Clear();
-            await Terminal1.AddColoredLineAsync("{gray}# Use -m flag for manga commands:{/}", 100);
-            await Terminal1.TypePromptAsync("koware -m read \"one punch man\"");
+            await Terminal1.AddColoredLineAsync("{gray}# Switch to manga mode:{/}", 100);
+            await Terminal1.TypePromptAsync("koware mode manga");
             Terminal1.AddEmptyLine();
-            await Terminal1.AddColoredLineAsync("{gray}# Or set default mode to manga:{/}", 100);
-            await Terminal1.TypePromptAsync("koware config --mode manga");
-            await Terminal1.AddColoredLineAsync("{green}✓{/} Default mode set to manga", 0);
+            await Terminal1.AddColoredLineAsync("{green}✓{/} Default mode set to: manga", 0);
         }
         catch (TaskCanceledException) { }
     }
@@ -34,7 +32,8 @@ public partial class ReadingMangaPage : Page
         try
         {
             Terminal2.Clear();
-            await Terminal2.TypePromptAsync("koware -m read \"tokyo ghoul\" --chapter 50");
+            await Terminal2.AddColoredLineAsync("{gray}# Now read manga:{/}", 100);
+            await Terminal2.TypePromptAsync("koware read \"tokyo ghoul\" --chapter 50");
             Terminal2.AddEmptyLine();
             await Terminal2.AddColoredLineAsync("{cyan}Searching...{/}", 300);
             await Terminal2.AddColoredLineAsync("{green}✓{/} Found: Tokyo Ghoul", 150);

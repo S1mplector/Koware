@@ -51,30 +51,9 @@
             <TextBlock TextWrapping="Wrap" 
                        Foreground="{StaticResource SecondaryBrush}"
                        Margin="0,0,0,12">
-                There are two ways to switch modes:
-            </TextBlock>
-            
-            <TextBlock Text="1. Temporary Switch (per command)" 
-                       FontSize="14" 
-                       FontWeight="SemiBold"
-                       Margin="0,0,0,8"/>
-            <TextBlock TextWrapping="Wrap" 
-                       Foreground="{StaticResource SecondaryBrush}"
-                       Margin="0,0,0,8">
-                Use the -m flag to run a single command in manga mode:
-            </TextBlock>
-            <controls:FakeTerminal x:Name="Terminal2" Height="120" Margin="0,0,0,16"/>
-            
-            <TextBlock Text="2. Permanent Switch (default mode)" 
-                       FontSize="14" 
-                       FontWeight="SemiBold"
-                       Margin="0,0,0,8"/>
-            <TextBlock TextWrapping="Wrap" 
-                       Foreground="{StaticResource SecondaryBrush}"
-                       Margin="0,0,0,8">
                 Use the mode command to change your default mode:
             </TextBlock>
-            <controls:FakeTerminal x:Name="Terminal3" Height="180" Margin="0,0,0,16"/>
+            <controls:FakeTerminal x:Name="Terminal2" Height="180" Margin="0,0,0,16"/>
             
             <TextBlock Text="Mode-Specific Commands" 
                        FontSize="16" 

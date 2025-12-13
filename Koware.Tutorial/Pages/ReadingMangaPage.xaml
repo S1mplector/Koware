@@ -26,16 +26,16 @@
                        Foreground="{StaticResource SecondaryBrush}"
                        Margin="0,0,0,20"/>
             
-            <TextBlock Text="Manga Mode" 
+            <TextBlock Text="Switching to Manga Mode" 
                        FontSize="16" 
                        FontWeight="SemiBold"
                        Margin="0,0,0,8"/>
             <TextBlock TextWrapping="Wrap" 
                        Foreground="{StaticResource SecondaryBrush}"
                        Margin="0,0,0,12">
-                To use manga commands, add the -m flag or set manga as your default mode:
+                The read command only works in manga mode. Switch modes first:
             </TextBlock>
-            <controls:FakeTerminal x:Name="Terminal1" Height="160" Margin="0,0,0,16"/>
+            <controls:FakeTerminal x:Name="Terminal1" Height="100" Margin="0,0,0,16"/>
             
             <TextBlock Text="Reading a Manga" 
                        FontSize="16" 
