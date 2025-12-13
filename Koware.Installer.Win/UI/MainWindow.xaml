@@ -143,14 +143,39 @@
                         <TextBlock FontSize="14" Text="This installer sets up Koware CLI and player with a single click." />
                     </StackPanel>
                 </StackPanel>
-                <!-- Help/Tutorial button -->
-                <Button Style="{StaticResource ModernButton}" 
-                        HorizontalAlignment="Right" 
+                <!-- Help/Tutorial button (circular) -->
+                <Button HorizontalAlignment="Right" 
                         VerticalAlignment="Top"
-                        Padding="10,6"
+                        Width="36" Height="36"
                         Click="OnShowTutorial"
-                        ToolTip="Open Tutorial">
-                    <TextBlock Text="?" FontSize="16" FontWeight="Bold" Foreground="{StaticResource Accent}"/>
+                        ToolTip="Open Tutorial"
+                        Cursor="Hand">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="border" 
+                                    Background="{StaticResource ButtonBg}" 
+                                    BorderBrush="#2D4A6F" 
+                                    BorderThickness="1"
+                                    CornerRadius="18"
+                                    Width="36" Height="36">
+                                <TextBlock Text="?" 
+                                           FontSize="18" 
+                                           FontWeight="Bold" 
+                                           Foreground="{StaticResource Accent}"
+                                           HorizontalAlignment="Center" 
+                                           VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="border" Property="Background" Value="{StaticResource ButtonHover}"/>
+                                    <Setter TargetName="border" Property="BorderBrush" Value="#3D5A7F"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="border" Property="Background" Value="{StaticResource ButtonPressed}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
                 </Button>
             </Grid>
             <Border Grid.Row="1" Background="{StaticResource PanelBackground}" Padding="16" CornerRadius="6" Margin="0,16,0,16">
