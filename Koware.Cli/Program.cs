@@ -3315,6 +3315,14 @@ static async Task<int> HandleOfflineAsync(string[] args, IServiceProvider servic
     // List downloads
     var mode = defaults.GetMode();
     var typeFilter = mode == CliMode.Manga ? DownloadType.Chapter : DownloadType.Episode;
+    
+    // Interactive mode when no flags
+    if (!jsonOutput && !showStats && !cleanup)
+    {
+        var offlineManager = new Koware.Cli.Console.InteractiveOfflineManager(downloadStore, typeFilter, cancellationToken: cancellationToken);
+        return await offlineManager.RunAsync();
+    }
+    
     var downloads = await downloadStore.GetAllAsync(typeFilter, cancellationToken);
     
     if (downloads.Count == 0)

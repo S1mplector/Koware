@@ -624,14 +624,14 @@ public sealed class InteractiveListManager
 
                     // Status with color
                     _buffer.SetColor(item.Entry.Status.ToColor());
-                    _buffer.Write($"[{item.Entry.Status.ToDisplayString(),-13}] ");
+                    _buffer.Write($"[{item.Entry.Status.ToDisplayString()}] ");
 
                     // Progress
                     _buffer.SetColor(ConsoleColor.DarkGray);
                     var progress = item.Entry.TotalEpisodes.HasValue
                         ? $"{item.Entry.EpisodesWatched}/{item.Entry.TotalEpisodes}"
                         : $"{item.Entry.EpisodesWatched}/?";
-                    _buffer.Write($"{progress,-10} ");
+                    _buffer.Write($"{progress,-8} ");
 
                     // Title
                     if (isSelected)
@@ -643,7 +643,7 @@ public sealed class InteractiveListManager
                         _buffer.SetColor(ConsoleColor.Gray);
                     }
 
-                    var maxTitleLen = width - 32;
+                    var maxTitleLen = width - 26;
                     var title = item.Entry.AnimeTitle;
                     if (title.Length > maxTitleLen && maxTitleLen > 3)
                     {
@@ -1190,14 +1190,14 @@ public sealed class InteractiveMangaListManager
 
                     // Status with color
                     _buffer.SetColor(item.Entry.Status.ToColor());
-                    _buffer.Write($"[{item.Entry.Status.ToDisplayString(),-13}] ");
+                    _buffer.Write($"[{item.Entry.Status.ToDisplayString()}] ");
 
                     // Progress
                     _buffer.SetColor(ConsoleColor.DarkGray);
                     var progress = item.Entry.TotalChapters.HasValue
                         ? $"{item.Entry.ChaptersRead}/{item.Entry.TotalChapters}"
                         : $"{item.Entry.ChaptersRead}/?";
-                    _buffer.Write($"{progress,-10} ");
+                    _buffer.Write($"{progress,-8} ");
 
                     // Title
                     if (isSelected)
@@ -1209,7 +1209,7 @@ public sealed class InteractiveMangaListManager
                         _buffer.SetColor(ConsoleColor.Gray);
                     }
 
-                    var maxTitleLen = width - 32;
+                    var maxTitleLen = width - 26;
                     var title = item.Entry.MangaTitle;
                     if (title.Length > maxTitleLen && maxTitleLen > 3)
                     {
