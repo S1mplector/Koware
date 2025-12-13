@@ -1,5 +1,6 @@
 // Author: Ilgaz Mehmetoğlu
 // Tips & Shortcuts tutorial page.
+using System.Threading.Tasks;
 using System.Windows.Controls;
 
 namespace Koware.Tutorial.Pages;
@@ -9,31 +10,41 @@ public partial class TipsShortcutsPage : Page
     public TipsShortcutsPage()
     {
         InitializeComponent();
-        PopulateTerminals();
+        Terminal1.Loaded += async (s, e) => await AnimateTerminal1Async();
+        Terminal2.Loaded += async (s, e) => await AnimateTerminal2Async();
     }
 
-    private void PopulateTerminals()
+    private async Task AnimateTerminal1Async()
     {
-        // Terminal 1: Quick resume
-        Terminal1.Clear();
-        Terminal1.AddColoredLine("{gray}# Resume your last watched anime:{/}");
-        Terminal1.AddPrompt("koware continue");
-        Terminal1.AddEmptyLine();
-        Terminal1.AddColoredLine("{cyan}Resuming:{/} Frieren: Beyond Journey's End");
-        Terminal1.AddColoredLine("{green}▶{/} Episode 13");
+        try
+        {
+            Terminal1.Clear();
+            await Terminal1.AddColoredLineAsync("{gray}# Resume your last watched anime:{/}", 100);
+            await Terminal1.TypePromptAsync("koware continue");
+            Terminal1.AddEmptyLine();
+            await Terminal1.AddColoredLineAsync("{cyan}Resuming:{/} Frieren: Beyond Journey's End", 150);
+            await Terminal1.AddColoredLineAsync("{green}▶{/} Episode 13", 0);
+        }
+        catch (TaskCanceledException) { }
+    }
 
-        // Terminal 2: Useful commands
-        Terminal2.Clear();
-        Terminal2.AddColoredLine("{gray}# Browse watch history interactively:{/}");
-        Terminal2.AddPrompt("koware history");
-        Terminal2.AddEmptyLine();
-        Terminal2.AddColoredLine("{gray}# View downloaded content:{/}");
-        Terminal2.AddPrompt("koware offline");
-        Terminal2.AddEmptyLine();
-        Terminal2.AddColoredLine("{gray}# Get recommendations based on history:{/}");
-        Terminal2.AddPrompt("koware recommend");
-        Terminal2.AddEmptyLine();
-        Terminal2.AddColoredLine("{gray}# Check for updates:{/}");
-        Terminal2.AddPrompt("koware --update");
+    private async Task AnimateTerminal2Async()
+    {
+        try
+        {
+            Terminal2.Clear();
+            await Terminal2.AddColoredLineAsync("{gray}# Browse watch history interactively:{/}", 80);
+            await Terminal2.TypePromptAsync("koware history");
+            Terminal2.AddEmptyLine();
+            await Terminal2.AddColoredLineAsync("{gray}# View downloaded content:{/}", 80);
+            await Terminal2.TypePromptAsync("koware offline");
+            Terminal2.AddEmptyLine();
+            await Terminal2.AddColoredLineAsync("{gray}# Get recommendations based on history:{/}", 80);
+            await Terminal2.TypePromptAsync("koware recommend");
+            Terminal2.AddEmptyLine();
+            await Terminal2.AddColoredLineAsync("{gray}# Check for updates:{/}", 80);
+            await Terminal2.TypePromptAsync("koware --update");
+        }
+        catch (TaskCanceledException) { }
     }
 }

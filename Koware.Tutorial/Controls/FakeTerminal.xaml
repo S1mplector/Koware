@@ -33,6 +33,37 @@
                                HorizontalAlignment="Center" 
                                Foreground="{StaticResource SecondaryBrush}"
                                FontSize="12"/>
+                    <!-- Copy button -->
+                    <Button x:Name="CopyButton"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Click="CopyButton_Click"
+                            ToolTip="Copy commands"
+                            Cursor="Hand"
+                            Opacity="0.7">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="border" 
+                                        Background="Transparent" 
+                                        Padding="6,4"
+                                        CornerRadius="4">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock x:Name="icon" Text="📋" FontSize="12" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="label" Text=" Copy" FontSize="11" 
+                                                   Foreground="{StaticResource SecondaryBrush}" 
+                                                   VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="border" Property="Background" Value="#2D333B"/>
+                                        <Setter TargetName="label" Property="Foreground" Value="#E2E8F0"/>
+                                        <Setter Property="Opacity" Value="1"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
                 </Grid>
             </Border>
             

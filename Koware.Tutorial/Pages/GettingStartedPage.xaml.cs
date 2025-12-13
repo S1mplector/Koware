@@ -1,5 +1,8 @@
 // Author: Ilgaz Mehmetoğlu
 // Getting Started tutorial page.
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Controls;
 
 namespace Koware.Tutorial.Pages;
@@ -9,27 +12,42 @@ public partial class GettingStartedPage : Page
     public GettingStartedPage()
     {
         InitializeComponent();
-        PopulateTerminal();
+        Terminal.AutoAnimate = true;
+        Terminal.Loaded += async (s, e) => await AnimateTerminalAsync();
     }
 
-    private void PopulateTerminal()
+    private async Task AnimateTerminalAsync()
     {
-        Terminal.Clear();
-        Terminal.AddPrompt("koware help");
-        Terminal.AddEmptyLine();
-        Terminal.AddHeader("> Help [16/16] ^v0%");
-        Terminal.AddColoredLine("  {gray}[?]{/} {cyan}▌{/}");
-        Terminal.AddSeparator(55);
-        Terminal.AddColoredLine(" {cyan}>{/} {green}[1]{/} search");
-        Terminal.AddColoredLine("   {green}[2]{/} recommend");
-        Terminal.AddColoredLine("   {green}[3]{/} stream");
-        Terminal.AddColoredLine("   {green}[4]{/} watch");
-        Terminal.AddColoredLine("   {green}[5]{/} download");
-        Terminal.AddColoredLine("   {green}[6]{/} read");
-        Terminal.AddColoredLine("   {green}[7]{/} last");
-        Terminal.AddColoredLine("   {green}[8]{/} continue");
-        Terminal.AddColoredLine("   {green}[9]{/} history");
-        Terminal.AddSeparator(55);
-        Terminal.AddColoredLine("  {gray}[#] Find anime or manga with optional filters{/}");
+        try
+        {
+            Terminal.Clear();
+            
+            // Type the command with animation
+            await Terminal.TypePromptAsync("koware help");
+            
+            // Show output appearing line by line
+            Terminal.AddEmptyLine();
+            await Terminal.AddColoredLineAsync("{cyan}> Help [16/16] ^v0%{/}", 100);
+            await Terminal.AddColoredLineAsync("  {gray}[?]{/} {cyan}▌{/}", 80);
+            Terminal.AddSeparator(55);
+            await Task.Delay(100);
+            
+            await Terminal.AddColoredLineAsync(" {cyan}>{/} {green}[1]{/} search", 60);
+            await Terminal.AddColoredLineAsync("   {green}[2]{/} recommend", 60);
+            await Terminal.AddColoredLineAsync("   {green}[3]{/} stream", 60);
+            await Terminal.AddColoredLineAsync("   {green}[4]{/} watch", 60);
+            await Terminal.AddColoredLineAsync("   {green}[5]{/} download", 60);
+            await Terminal.AddColoredLineAsync("   {green}[6]{/} read", 60);
+            await Terminal.AddColoredLineAsync("   {green}[7]{/} last", 60);
+            await Terminal.AddColoredLineAsync("   {green}[8]{/} continue", 60);
+            await Terminal.AddColoredLineAsync("   {green}[9]{/} history", 60);
+            
+            Terminal.AddSeparator(55);
+            await Terminal.AddColoredLineAsync("  {gray}[#] Find anime or manga with optional filters{/}", 0);
+        }
+        catch (TaskCanceledException)
+        {
+            // Page was navigated away, that's fine
+        }
     }
 }

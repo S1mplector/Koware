@@ -1,7 +1,7 @@
 // Author: Ilgaz Mehmetoğlu
 // Managing Lists tutorial page.
+using System.Threading.Tasks;
 using System.Windows.Controls;
-using Koware.Tutorial.Controls;
 
 namespace Koware.Tutorial.Pages;
 
@@ -10,21 +10,28 @@ public partial class ManagingListsPage : Page
     public ManagingListsPage()
     {
         InitializeComponent();
-        PopulateTerminal();
+        Terminal1.Loaded += async (s, e) => await AnimateTerminalAsync();
     }
 
-    private void PopulateTerminal()
+    private async Task AnimateTerminalAsync()
     {
-        Terminal1.Clear();
-        Terminal1.AddHeader("> Anime List [12/12] ^v0%");
-        Terminal1.AddColoredLine("  {gray}[?]{/} {cyan}▌{/}");
-        Terminal1.AddSeparator(55);
-        Terminal1.AddColoredLine(" {cyan}>{/} {green}[1]{/} {green}[Watching]{/}  12/28  Frieren: Beyond Journey's End");
-        Terminal1.AddColoredLine("   {green}[2]{/} {green}[Watching]{/}  5/24   Solo Leveling");
-        Terminal1.AddColoredLine("   {green}[3]{/} {cyan}[Completed]{/} 13/13  Bocchi the Rock!");
-        Terminal1.AddColoredLine("   {green}[4]{/} {magenta}[Plan]{/}      0/24   Spy x Family");
-        Terminal1.AddColoredLine("   {green}[5]{/} {yellow}[On Hold]{/}   8/25   Vinland Saga");
-        Terminal1.AddSeparator(55);
-        Terminal1.AddColoredLine("  {gray}[#] Score: 9/10 | Started: 2024-01-15{/}");
+        try
+        {
+            Terminal1.Clear();
+            await Terminal1.TypePromptAsync("koware list");
+            Terminal1.AddEmptyLine();
+            await Terminal1.AddColoredLineAsync("{cyan}> Anime List [12/12] ^v0%{/}", 100);
+            await Terminal1.AddColoredLineAsync("  {gray}[?]{/} {cyan}▌{/}", 80);
+            Terminal1.AddSeparator(55);
+            await Task.Delay(100);
+            await Terminal1.AddColoredLineAsync(" {cyan}>{/} {green}[1]{/} {green}[Watching]{/}  12/28  Frieren: Beyond Journey's End", 80);
+            await Terminal1.AddColoredLineAsync("   {green}[2]{/} {green}[Watching]{/}  5/24   Solo Leveling", 80);
+            await Terminal1.AddColoredLineAsync("   {green}[3]{/} {cyan}[Completed]{/} 13/13  Bocchi the Rock!", 80);
+            await Terminal1.AddColoredLineAsync("   {green}[4]{/} {magenta}[Plan]{/}      0/24   Spy x Family", 80);
+            await Terminal1.AddColoredLineAsync("   {green}[5]{/} {yellow}[On Hold]{/}   8/25   Vinland Saga", 80);
+            Terminal1.AddSeparator(55);
+            await Terminal1.AddColoredLineAsync("  {gray}[#] Score: 9/10 | Started: 2024-01-15{/}", 0);
+        }
+        catch (TaskCanceledException) { }
     }
 }
