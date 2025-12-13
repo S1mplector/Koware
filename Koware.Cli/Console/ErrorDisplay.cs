@@ -82,6 +82,18 @@ public static class ErrorDisplay
         WriteHint("koware search --help", "See search options and filters");
     }
 
+    public static void MissingArgument(string argument, string usage)
+    {
+        Con.WriteLine();
+        WriteError($"Missing required argument: {argument}");
+        Con.WriteLine();
+        
+        Con.ForegroundColor = ConsoleColor.Cyan;
+        Con.WriteLine("Usage:");
+        Con.ResetColor();
+        Con.WriteLine($"  {usage}");
+    }
+
     public static void Generic(string message, string? details = null, string? hint = null)
     {
         Con.WriteLine();

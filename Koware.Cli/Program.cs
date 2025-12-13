@@ -3200,8 +3200,7 @@ static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string
     // Allow empty query when filters are applied (browse mode)
     if (string.IsNullOrWhiteSpace(query) && !filters.HasFilters)
     {
-        logger.LogWarning("search command is missing a query.");
-        PrintFriendlyCommandHint("search");
+        Koware.Cli.Console.ErrorDisplay.MissingArgument("query", "koware search <query> [--json]");
         return 1;
     }
 
@@ -4070,9 +4069,7 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
 
     if (queryParts.Count == 0)
     {
-        logger.LogWarning("read command is missing a search query.");
-        WriteColoredLine("Usage: koware read <query> [--chapter <n>] [--index <n>] [--non-interactive]", ConsoleColor.Cyan);
-        WriteColoredLine("Example: koware read \"one piece\" --chapter 1", ConsoleColor.Green);
+        Koware.Cli.Console.ErrorDisplay.MissingArgument("query", "koware read <query> [--chapter <n>] [--index <n>]");
         return 1;
     }
 
