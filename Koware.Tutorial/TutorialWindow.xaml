@@ -77,6 +77,26 @@
                             Content="⚡  Tips &amp; Shortcuts" 
                             Style="{StaticResource NavButton}"
                             Click="NavButton_Click"/>
+                    <Button x:Name="NavDownloads" 
+                            Content="⬇️  Downloads" 
+                            Style="{StaticResource NavButton}"
+                            Click="NavButton_Click"/>
+                    <Button x:Name="NavThemes" 
+                            Content="🎨  Themes" 
+                            Style="{StaticResource NavButton}"
+                            Click="NavButton_Click"/>
+                    <Button x:Name="NavUpdates" 
+                            Content="🔄  Updates" 
+                            Style="{StaticResource NavButton}"
+                            Click="NavButton_Click"/>
+                    <Button x:Name="NavConfig" 
+                            Content="⚙️  Configuration" 
+                            Style="{StaticResource NavButton}"
+                            Click="NavButton_Click"/>
+                    <Button x:Name="NavDoctor" 
+                            Content="🏥  Troubleshooting" 
+                            Style="{StaticResource NavButton}"
+                            Click="NavButton_Click"/>
                 </StackPanel>
                 
                 <!-- Close button -->

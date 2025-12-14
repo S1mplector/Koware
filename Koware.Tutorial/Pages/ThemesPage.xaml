@@ -1,0 +1,109 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Themes & Customization tutorial page. -->
+<Page x:Class="Koware.Tutorial.Pages.ThemesPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:controls="clr-namespace:Koware.Tutorial.Controls"
+      Title="Themes &amp; Customization"
+      Background="Transparent">
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Koware.Tutorial;component/Styles/SharedStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Page.Resources>
+    
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Text="🎨 Themes &amp; Customization" 
+                       FontSize="24" 
+                       FontWeight="Bold" 
+                       Foreground="{StaticResource AccentBrush}"
+                       Margin="0,0,0,8"/>
+            <TextBlock Text="Personalize your reading and viewing experience." 
+                       FontSize="14" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,20"/>
+            
+            <TextBlock Text="Reader Themes" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                The manga reader supports multiple themes. Press T while reading to cycle through them:
+            </TextBlock>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,4">
+                        <Border Background="#0f172a" Width="20" Height="20" CornerRadius="4" Margin="0,0,8,0"/>
+                        <TextBlock Text="Dark — Default dark theme" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,4">
+                        <Border Background="#e8dfc9" Width="20" Height="20" CornerRadius="4" Margin="0,0,8,0"/>
+                        <TextBlock Text="Sepia — Warm, easy on eyes" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <StackPanel Orientation="Horizontal" Margin="0,4">
+                        <Border Background="#e2e8f0" Width="20" Height="20" CornerRadius="4" Margin="0,0,8,0"/>
+                        <TextBlock Text="Light — Bright background" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,4">
+                        <Border Background="#1a1a1a" Width="20" Height="20" CornerRadius="4" Margin="0,0,8,0"/>
+                        <TextBlock Text="Contrast — High contrast" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+            
+            <TextBlock Text="Reader Keyboard Shortcuts" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="T — Cycle themes" Margin="0,4"/>
+                    <TextBlock Text="W/H/O — Fit width/height/original" Margin="0,4"/>
+                    <TextBlock Text="+/- — Zoom in/out" Margin="0,4"/>
+                    <TextBlock Text="D — Toggle double-page mode" Margin="0,4"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="←/→ — Previous/next chapter" Margin="0,4"/>
+                    <TextBlock Text="↑/↓ — Scroll up/down" Margin="0,4"/>
+                    <TextBlock Text="C — Open chapter selector" Margin="0,4"/>
+                    <TextBlock Text="? — Show help overlay" Margin="0,4"/>
+                </StackPanel>
+            </Grid>
+            
+            <TextBlock Text="Comfort Overlay" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                Reduce eye strain during long reading sessions with the comfort overlay. Use the slider in the reader to adjust brightness dimming.
+            </TextBlock>
+            
+            <Border Background="#1E3A5F" CornerRadius="6" Padding="12" Margin="0,12,0,0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="💡" FontSize="16" Margin="0,0,8,0"/>
+                    <TextBlock TextWrapping="Wrap" VerticalAlignment="Center">
+                        <Run Text="Tip:" FontWeight="SemiBold"/>
+                        <Run Text=" Your theme preference is saved automatically and persists across sessions."/>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

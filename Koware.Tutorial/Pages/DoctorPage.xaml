@@ -1,0 +1,87 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Doctor & Troubleshooting tutorial page. -->
+<Page x:Class="Koware.Tutorial.Pages.DoctorPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:controls="clr-namespace:Koware.Tutorial.Controls"
+      Title="Doctor &amp; Troubleshooting"
+      Background="Transparent">
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Koware.Tutorial;component/Styles/SharedStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Page.Resources>
+    
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Text="🏥 Doctor &amp; Troubleshooting" 
+                       FontSize="24" 
+                       FontWeight="Bold" 
+                       Foreground="{StaticResource AccentBrush}"
+                       Margin="0,0,0,8"/>
+            <TextBlock Text="Diagnose and fix common issues with Koware." 
+                       FontSize="14" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,20"/>
+            
+            <TextBlock Text="Running Diagnostics" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                The 'koware doctor' command runs comprehensive system diagnostics to identify issues:
+            </TextBlock>
+            <controls:FakeTerminal x:Name="Terminal1" Height="220" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="Diagnostic Categories" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="env — OS, runtime, disk space" Margin="0,4"/>
+                    <TextBlock Text="terminal — Color, unicode support" Margin="0,4"/>
+                    <TextBlock Text="config — Configuration validation" Margin="0,4"/>
+                    <TextBlock Text="storage — Database health" Margin="0,4"/>
+                    <TextBlock Text="network — Connectivity tests" Margin="0,4"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="providers — API accessibility" Margin="0,4"/>
+                    <TextBlock Text="tools — ffmpeg, yt-dlp, aria2c" Margin="0,4"/>
+                    <TextBlock Text="security — SSL, permissions" Margin="0,4"/>
+                    <TextBlock Text="data — History integrity" Margin="0,4"/>
+                    <TextBlock Text="updates — Version check" Margin="0,4"/>
+                </StackPanel>
+            </Grid>
+            
+            <TextBlock Text="Targeted Diagnostics" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                Run specific category checks for faster troubleshooting:
+            </TextBlock>
+            <controls:FakeTerminal x:Name="Terminal2" Height="140" Margin="0,0,0,16"/>
+            
+            <Border Background="#1E3A5F" CornerRadius="6" Padding="12" Margin="0,12,0,0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="💡" FontSize="16" Margin="0,0,8,0"/>
+                    <TextBlock TextWrapping="Wrap" VerticalAlignment="Center">
+                        <Run Text="Tip:" FontWeight="SemiBold"/>
+                        <Run Text=" Use --verbose for detailed output with timing info, or --json for scripting and automation."/>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

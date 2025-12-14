@@ -44,6 +44,11 @@ public partial class TutorialWindow : Window
             "NavReadingManga" => new ReadingMangaPage(),
             "NavManagingLists" => new ManagingListsPage(),
             "NavTipsShortcuts" => new TipsShortcutsPage(),
+            "NavDownloads" => new DownloadsPage(),
+            "NavThemes" => new ThemesPage(),
+            "NavUpdates" => new UpdatesPage(),
+            "NavConfig" => new ConfigPage(),
+            "NavDoctor" => new DoctorPage(),
             _ => null
         };
 

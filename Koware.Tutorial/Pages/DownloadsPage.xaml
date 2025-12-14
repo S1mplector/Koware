@@ -1,0 +1,91 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Downloads & Offline tutorial page. -->
+<Page x:Class="Koware.Tutorial.Pages.DownloadsPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:controls="clr-namespace:Koware.Tutorial.Controls"
+      Title="Downloads &amp; Offline"
+      Background="Transparent">
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Koware.Tutorial;component/Styles/SharedStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Page.Resources>
+    
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Text="⬇️ Downloads &amp; Offline" 
+                       FontSize="24" 
+                       FontWeight="Bold" 
+                       Foreground="{StaticResource AccentBrush}"
+                       Margin="0,0,0,8"/>
+            <TextBlock Text="Save content for offline viewing." 
+                       FontSize="14" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,20"/>
+            
+            <TextBlock Text="Downloading Episodes" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                Use the download command to save anime episodes locally:
+            </TextBlock>
+            <controls:FakeTerminal x:Name="Terminal1" Height="180" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="Downloading Manga Chapters" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                In manga mode, download chapters as image folders or CBZ archives:
+            </TextBlock>
+            <controls:FakeTerminal x:Name="Terminal2" Height="160" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="Download Options" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Anime Downloads" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="• -q 1080p — Set quality" Margin="0,2"/>
+                    <TextBlock Text="• -e 1-12 — Episode range" Margin="0,2"/>
+                    <TextBlock Text="• --sub/--dub — Audio track" Margin="0,2"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="Manga Downloads" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="• -c 1-10 — Chapter range" Margin="0,2"/>
+                    <TextBlock Text="• --cbz — Create CBZ archive" Margin="0,2"/>
+                    <TextBlock Text="• --pdf — Create PDF file" Margin="0,2"/>
+                </StackPanel>
+            </Grid>
+            
+            <TextBlock Text="Download Location" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <controls:FakeTerminal x:Name="Terminal3" Height="100" Margin="0,0,0,16"/>
+            
+            <Border Background="#1E3A5F" CornerRadius="6" Padding="12" Margin="0,12,0,0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="💡" FontSize="16" Margin="0,0,8,0"/>
+                    <TextBlock TextWrapping="Wrap" VerticalAlignment="Center">
+                        <Run Text="Tip:" FontWeight="SemiBold"/>
+                        <Run Text=" Downloads are saved to ~/Downloads/Koware by default. Use 'koware config set downloads.path' to change the location."/>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

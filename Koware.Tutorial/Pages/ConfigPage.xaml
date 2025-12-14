@@ -1,0 +1,91 @@
+<!-- Author: Ilgaz Mehmetoğlu 
+ Configuration tutorial page. -->
+<Page x:Class="Koware.Tutorial.Pages.ConfigPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:controls="clr-namespace:Koware.Tutorial.Controls"
+      Title="Configuration"
+      Background="Transparent">
+    <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Koware.Tutorial;component/Styles/SharedStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Page.Resources>
+    
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <TextBlock Text="⚙️ Configuration" 
+                       FontSize="24" 
+                       FontWeight="Bold" 
+                       Foreground="{StaticResource AccentBrush}"
+                       Margin="0,0,0,8"/>
+            <TextBlock Text="Fine-tune Koware to your preferences." 
+                       FontSize="14" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,20"/>
+            
+            <TextBlock Text="Viewing Configuration" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                Use 'koware config' to view and modify settings:
+            </TextBlock>
+            <controls:FakeTerminal x:Name="Terminal1" Height="160" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="Setting Values" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                Set configuration values using 'koware config set':
+            </TextBlock>
+            <controls:FakeTerminal x:Name="Terminal2" Height="140" Margin="0,0,0,16"/>
+            
+            <TextBlock Text="Common Settings" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Player Settings" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="• player.command — Video player" Margin="0,2"/>
+                    <TextBlock Text="• player.args — Player arguments" Margin="0,2"/>
+                    <TextBlock Text="• defaults.quality — Video quality" Margin="0,2"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="Reader Settings" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="• reader.command — Manga reader" Margin="0,2"/>
+                    <TextBlock Text="• defaults.mode — anime/manga" Margin="0,2"/>
+                    <TextBlock Text="• downloads.path — Save location" Margin="0,2"/>
+                </StackPanel>
+            </Grid>
+            
+            <TextBlock Text="Custom Player Example" 
+                       FontSize="16" 
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <controls:FakeTerminal x:Name="Terminal3" Height="120" Margin="0,0,0,16"/>
+            
+            <Border Background="#1E3A5F" CornerRadius="6" Padding="12" Margin="0,12,0,0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="💡" FontSize="16" Margin="0,0,8,0"/>
+                    <TextBlock TextWrapping="Wrap" VerticalAlignment="Center">
+                        <Run Text="Tip:" FontWeight="SemiBold"/>
+                        <Run Text=" Configuration is stored in appsettings.user.json. Use 'koware config unset' to remove a setting and revert to defaults."/>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>
