@@ -2757,7 +2757,7 @@ static async Task<int> HandleMangaListAsync(string[] args, IServiceProvider serv
         var svc = services;
         var log = logger;
         var ct = cancellationToken;
-        var defaults = svc.GetRequiredService<DefaultCliOptions>();
+        var defaults = svc.GetRequiredService<IOptions<DefaultCliOptions>>().Value;
         
         Func<MangaListEntry, Task> onRead = async entry =>
         {
