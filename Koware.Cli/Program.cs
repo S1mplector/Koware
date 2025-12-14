@@ -769,24 +769,28 @@ static void PrintDoctorHelp()
     Console.WriteLine();
     Console.WriteLine("Options:");
     Console.WriteLine("  --category, -c <name>  Run only a specific category");
-    Console.WriteLine("  --verbose, -v          Show detailed output including metadata");
-    Console.WriteLine("  --json                 Output results as JSON");
+    Console.WriteLine("  --verbose, -v          Show detailed output including metadata and timing");
+    Console.WriteLine("  --json                 Output results as JSON for scripting");
     Console.WriteLine("  --help, -h             Show this help message");
     Console.WriteLine();
     Console.WriteLine("Categories:");
-    Console.WriteLine("  env        Environment (OS, runtime, disk space, memory)");
-    Console.WriteLine("  config     Configuration (config file, provider settings)");
-    Console.WriteLine("  storage    Storage (database health, permissions, size)");
-    Console.WriteLine("  network    Network (connectivity, DNS, HTTPS)");
-    Console.WriteLine("  providers  Providers (DNS, HTTP, API validation)");
+    Console.WriteLine("  env        Environment (OS, runtime, disk space, memory, processor)");
+    Console.WriteLine("  terminal   Terminal (color support, unicode, shell, encoding)");
+    Console.WriteLine("  config     Configuration (config file validation, provider settings)");
+    Console.WriteLine("  storage    Storage (database health, permissions, size, tables)");
+    Console.WriteLine("  data       Data Integrity (history validation, orphaned downloads, duplicates)");
+    Console.WriteLine("  network    Network (connectivity, DNS resolution, HTTPS)");
+    Console.WriteLine("  security   Security (SSL/TLS, proxy, permissions, provider security)");
+    Console.WriteLine("  providers  Providers (DNS, HTTP, API validation for anime/manga)");
     Console.WriteLine("  tools      Toolchain (ffmpeg, yt-dlp, aria2c)");
-    Console.WriteLine("  updates    Updates (check for new versions)");
+    Console.WriteLine("  updates    Updates (check for newer versions)");
     Console.WriteLine();
     Console.WriteLine("Examples:");
     Console.WriteLine("  koware doctor                     Run all diagnostics");
     Console.WriteLine("  koware doctor -c network          Check network only");
-    Console.WriteLine("  koware doctor --verbose           Show detailed results");
-    Console.WriteLine("  koware doctor --json              Output as JSON");
+    Console.WriteLine("  koware doctor -c security         Check security settings");
+    Console.WriteLine("  koware doctor --verbose           Show detailed results with timing");
+    Console.WriteLine("  koware doctor --json              Output as JSON for automation");
 }
 
 /// <summary>
@@ -795,9 +799,12 @@ static void PrintDoctorHelp()
 static DiagnosticCategory? ParseDiagnosticCategory(string name) => name.ToLowerInvariant() switch
 {
     "env" or "environment" => DiagnosticCategory.Environment,
+    "terminal" or "term" => DiagnosticCategory.Terminal,
     "config" or "configuration" => DiagnosticCategory.Configuration,
-    "storage" or "data" => DiagnosticCategory.Storage,
+    "storage" => DiagnosticCategory.Storage,
+    "data" or "integrity" => DiagnosticCategory.Data,
     "network" or "net" => DiagnosticCategory.Network,
+    "security" or "sec" => DiagnosticCategory.Security,
     "providers" or "provider" => DiagnosticCategory.Providers,
     "tools" or "toolchain" => DiagnosticCategory.Toolchain,
     "updates" or "update" => DiagnosticCategory.Updates,
@@ -812,9 +819,12 @@ static void WriteDiagnosticCategoryHeader(DiagnosticCategory category)
     var name = category switch
     {
         DiagnosticCategory.Environment => "Environment",
+        DiagnosticCategory.Terminal => "Terminal",
         DiagnosticCategory.Configuration => "Configuration",
         DiagnosticCategory.Storage => "Storage",
+        DiagnosticCategory.Data => "Data Integrity",
         DiagnosticCategory.Network => "Network",
+        DiagnosticCategory.Security => "Security",
         DiagnosticCategory.Providers => "Providers",
         DiagnosticCategory.Toolchain => "Toolchain",
         DiagnosticCategory.Updates => "Updates",

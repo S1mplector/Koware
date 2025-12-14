@@ -47,6 +47,9 @@ public enum DiagnosticCategory
     Network,
     Providers,
     Toolchain,
+    Data,
+    Security,
+    Terminal,
     Updates
 }
 
@@ -110,14 +113,23 @@ public sealed class DiagnosticsEngine
         // Environment checks
         results.AddRange(RunEnvironmentChecks());
 
+        // Terminal checks
+        results.AddRange(RunTerminalChecks());
+
         // Configuration checks
         results.AddRange(RunConfigurationChecks());
 
         // Storage checks
         results.AddRange(await RunStorageChecksAsync(cancellationToken));
 
+        // Data integrity checks
+        results.AddRange(await RunDataIntegrityChecksAsync(cancellationToken));
+
         // Network checks
         results.AddRange(await RunNetworkChecksAsync(cancellationToken));
+
+        // Security checks
+        results.AddRange(await RunSecurityChecksAsync(cancellationToken));
 
         // Provider checks
         results.AddRange(await RunProviderChecksAsync(cancellationToken));
@@ -139,9 +151,12 @@ public sealed class DiagnosticsEngine
         return category switch
         {
             DiagnosticCategory.Environment => RunEnvironmentChecks(),
+            DiagnosticCategory.Terminal => RunTerminalChecks(),
             DiagnosticCategory.Configuration => RunConfigurationChecks(),
             DiagnosticCategory.Storage => await RunStorageChecksAsync(cancellationToken),
+            DiagnosticCategory.Data => await RunDataIntegrityChecksAsync(cancellationToken),
             DiagnosticCategory.Network => await RunNetworkChecksAsync(cancellationToken),
+            DiagnosticCategory.Security => await RunSecurityChecksAsync(cancellationToken),
             DiagnosticCategory.Providers => await RunProviderChecksAsync(cancellationToken),
             DiagnosticCategory.Toolchain => RunToolchainChecks(),
             DiagnosticCategory.Updates => await RunUpdateChecksAsync(cancellationToken),
@@ -248,7 +263,196 @@ public sealed class DiagnosticsEngine
             // Ignore memory check failures
         }
 
+        // Terminal capabilities
+        results.AddRange(RunTerminalCapabilityChecks());
+
+        // Processor info
+        results.Add(new DiagnosticResult
+        {
+            Name = "Processor",
+            Category = DiagnosticCategory.Environment,
+            Severity = DiagnosticSeverity.Info,
+            Message = $"{Environment.ProcessorCount} cores",
+            Detail = RuntimeInformation.ProcessArchitecture.ToString()
+        });
+
+        // 64-bit check
+        results.Add(new DiagnosticResult
+        {
+            Name = "64-bit Process",
+            Category = DiagnosticCategory.Environment,
+            Severity = Environment.Is64BitProcess ? DiagnosticSeverity.Ok : DiagnosticSeverity.Info,
+            Message = Environment.Is64BitProcess ? "Yes" : "No (32-bit)"
+        });
+
         return results;
+    }
+
+    private static List<DiagnosticResult> RunTerminalCapabilityChecks()
+    {
+        var results = new List<DiagnosticResult>();
+
+        // Check if running in interactive terminal
+        var isInteractive = !Console.IsInputRedirected && !Console.IsOutputRedirected;
+        results.Add(new DiagnosticResult
+        {
+            Name = "Interactive Terminal",
+            Category = DiagnosticCategory.Environment,
+            Severity = isInteractive ? DiagnosticSeverity.Ok : DiagnosticSeverity.Info,
+            Message = isInteractive ? "Yes" : "Redirected I/O"
+        });
+
+        // Terminal size
+        try
+        {
+            if (isInteractive)
+            {
+                var width = Console.WindowWidth;
+                var height = Console.WindowHeight;
+                results.Add(new DiagnosticResult
+                {
+                    Name = "Terminal Size",
+                    Category = DiagnosticCategory.Environment,
+                    Severity = width >= 80 ? DiagnosticSeverity.Ok : DiagnosticSeverity.Warning,
+                    Message = $"{width}x{height}",
+                    Detail = width < 80 ? "Narrow terminal may affect display" : null
+                });
+            }
+        }
+        catch
+        {
+            // Terminal size not available
+        }
+
+        return results;
+    }
+
+    #endregion
+
+    #region Terminal Checks
+
+    private List<DiagnosticResult> RunTerminalChecks()
+    {
+        var results = new List<DiagnosticResult>();
+
+        // Color support detection
+        var colorTerm = Environment.GetEnvironmentVariable("COLORTERM");
+        var term = Environment.GetEnvironmentVariable("TERM");
+        var supportsColor = !string.IsNullOrEmpty(colorTerm) || 
+                           (term?.Contains("color", StringComparison.OrdinalIgnoreCase) ?? false) ||
+                           (term?.Contains("xterm", StringComparison.OrdinalIgnoreCase) ?? false) ||
+                           RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+
+        results.Add(new DiagnosticResult
+        {
+            Name = "Color Support",
+            Category = DiagnosticCategory.Terminal,
+            Severity = supportsColor ? DiagnosticSeverity.Ok : DiagnosticSeverity.Info,
+            Message = supportsColor ? "Supported" : "Limited",
+            Detail = !string.IsNullOrEmpty(colorTerm) ? colorTerm : term
+        });
+
+        // Unicode support detection
+        var unicodeSupport = CheckUnicodeSupport();
+        results.Add(new DiagnosticResult
+        {
+            Name = "Unicode Support",
+            Category = DiagnosticCategory.Terminal,
+            Severity = unicodeSupport ? DiagnosticSeverity.Ok : DiagnosticSeverity.Warning,
+            Message = unicodeSupport ? "Supported" : "Limited",
+            Detail = unicodeSupport ? null : "Some characters may not display correctly"
+        });
+
+        // Shell detection
+        var shell = DetectShell();
+        results.Add(new DiagnosticResult
+        {
+            Name = "Shell",
+            Category = DiagnosticCategory.Terminal,
+            Severity = DiagnosticSeverity.Info,
+            Message = shell
+        });
+
+        // Terminal emulator
+        var termProgram = Environment.GetEnvironmentVariable("TERM_PROGRAM") ?? 
+                         Environment.GetEnvironmentVariable("TERMINAL_EMULATOR");
+        if (!string.IsNullOrEmpty(termProgram))
+        {
+            results.Add(new DiagnosticResult
+            {
+                Name = "Terminal Emulator",
+                Category = DiagnosticCategory.Terminal,
+                Severity = DiagnosticSeverity.Info,
+                Message = termProgram
+            });
+        }
+
+        // Check encoding
+        try
+        {
+            var outputEncoding = Console.OutputEncoding.WebName;
+            var isUtf8 = outputEncoding.Contains("utf-8", StringComparison.OrdinalIgnoreCase) ||
+                        outputEncoding.Contains("utf8", StringComparison.OrdinalIgnoreCase);
+            results.Add(new DiagnosticResult
+            {
+                Name = "Output Encoding",
+                Category = DiagnosticCategory.Terminal,
+                Severity = isUtf8 ? DiagnosticSeverity.Ok : DiagnosticSeverity.Info,
+                Message = outputEncoding,
+                Detail = isUtf8 ? null : "Non-UTF8 encoding may affect character display"
+            });
+        }
+        catch
+        {
+            // Encoding detection not available
+        }
+
+        return results;
+    }
+
+    private static bool CheckUnicodeSupport()
+    {
+        // Check various indicators of Unicode support
+        var lang = Environment.GetEnvironmentVariable("LANG") ?? string.Empty;
+        var lcAll = Environment.GetEnvironmentVariable("LC_ALL") ?? string.Empty;
+        
+        if (lang.Contains("UTF-8", StringComparison.OrdinalIgnoreCase) ||
+            lang.Contains("UTF8", StringComparison.OrdinalIgnoreCase) ||
+            lcAll.Contains("UTF-8", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Windows Terminal and modern Windows consoles support Unicode
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            var wtSession = Environment.GetEnvironmentVariable("WT_SESSION");
+            return !string.IsNullOrEmpty(wtSession);
+        }
+
+        return false;
+    }
+
+    private static string DetectShell()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            var psVersion = Environment.GetEnvironmentVariable("PSVersionTable");
+            if (!string.IsNullOrEmpty(psVersion) || 
+                Environment.GetEnvironmentVariable("PSModulePath") != null)
+            {
+                return "PowerShell";
+            }
+            return Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe";
+        }
+
+        var shell = Environment.GetEnvironmentVariable("SHELL");
+        if (!string.IsNullOrEmpty(shell))
+        {
+            return Path.GetFileName(shell);
+        }
+
+        return "Unknown";
     }
 
     #endregion
@@ -550,6 +754,642 @@ public sealed class DiagnosticsEngine
         }
 
         return stats;
+    }
+
+    #endregion
+
+    #region Data Integrity Checks
+
+    private async Task<List<DiagnosticResult>> RunDataIntegrityChecksAsync(CancellationToken cancellationToken)
+    {
+        var results = new List<DiagnosticResult>();
+
+        if (!File.Exists(_dbPath))
+        {
+            results.Add(new DiagnosticResult
+            {
+                Name = "Data Integrity",
+                Category = DiagnosticCategory.Data,
+                Severity = DiagnosticSeverity.Skipped,
+                Message = "No database yet"
+            });
+            return results;
+        }
+
+        try
+        {
+            var connectionString = $"Data Source={_dbPath};Cache=Shared";
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            // Check watch history integrity
+            var watchHistoryResult = await CheckTableIntegrityAsync(connection, "watch_history", cancellationToken);
+            if (watchHistoryResult != null) results.Add(watchHistoryResult);
+
+            // Check anime list integrity
+            var animeListResult = await CheckTableIntegrityAsync(connection, "anime_list", cancellationToken);
+            if (animeListResult != null) results.Add(animeListResult);
+
+            // Check downloads integrity and orphaned entries
+            var downloadsResult = await CheckDownloadsIntegrityAsync(connection, cancellationToken);
+            if (downloadsResult != null) results.Add(downloadsResult);
+
+            // Check read history integrity
+            var readHistoryResult = await CheckTableIntegrityAsync(connection, "read_history", cancellationToken);
+            if (readHistoryResult != null) results.Add(readHistoryResult);
+
+            // Check manga list integrity
+            var mangaListResult = await CheckTableIntegrityAsync(connection, "manga_list", cancellationToken);
+            if (mangaListResult != null) results.Add(mangaListResult);
+
+            // Check for duplicate entries
+            var duplicatesResult = await CheckDuplicateEntriesAsync(connection, cancellationToken);
+            results.Add(duplicatesResult);
+
+            // Check for old/stale data
+            var staleDataResult = await CheckStaleDataAsync(connection, cancellationToken);
+            results.Add(staleDataResult);
+        }
+        catch (Exception ex)
+        {
+            results.Add(new DiagnosticResult
+            {
+                Name = "Data Integrity",
+                Category = DiagnosticCategory.Data,
+                Severity = DiagnosticSeverity.Error,
+                Message = "Check failed",
+                Detail = ex.Message
+            });
+        }
+
+        return results;
+    }
+
+    private async Task<DiagnosticResult?> CheckTableIntegrityAsync(SqliteConnection connection, string tableName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Check if table exists
+            await using var existsCmd = new SqliteCommand(
+                $"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{tableName}';",
+                connection);
+            var exists = Convert.ToInt64(await existsCmd.ExecuteScalarAsync(cancellationToken)) > 0;
+
+            if (!exists)
+            {
+                return null; // Table doesn't exist yet, skip
+            }
+
+            // Get row count
+            await using var countCmd = new SqliteCommand($"SELECT COUNT(*) FROM [{tableName}];", connection);
+            var count = Convert.ToInt64(await countCmd.ExecuteScalarAsync(cancellationToken));
+
+            // Check for NULL values in required columns
+            var nullCheckSql = tableName switch
+            {
+                "watch_history" => "SELECT COUNT(*) FROM watch_history WHERE anime_title IS NULL OR anime_title = ''",
+                "anime_list" => "SELECT COUNT(*) FROM anime_list WHERE anime_title IS NULL OR anime_title = ''",
+                "downloads" => "SELECT COUNT(*) FROM downloads WHERE file_path IS NULL OR file_path = ''",
+                "read_history" => "SELECT COUNT(*) FROM read_history WHERE manga_title IS NULL OR manga_title = ''",
+                "manga_list" => "SELECT COUNT(*) FROM manga_list WHERE manga_title IS NULL OR manga_title = ''",
+                _ => null
+            };
+
+            var nullCount = 0L;
+            if (nullCheckSql != null)
+            {
+                try
+                {
+                    await using var nullCmd = new SqliteCommand(nullCheckSql, connection);
+                    nullCount = Convert.ToInt64(await nullCmd.ExecuteScalarAsync(cancellationToken));
+                }
+                catch
+                {
+                    // Column might not exist in this schema version
+                }
+            }
+
+            var displayName = tableName.Replace("_", " ");
+            displayName = char.ToUpper(displayName[0]) + displayName[1..];
+
+            return new DiagnosticResult
+            {
+                Name = displayName,
+                Category = DiagnosticCategory.Data,
+                Severity = nullCount > 0 ? DiagnosticSeverity.Warning : DiagnosticSeverity.Ok,
+                Message = $"{count} entries",
+                Detail = nullCount > 0 ? $"{nullCount} entries with missing data" : null
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<DiagnosticResult?> CheckDownloadsIntegrityAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Check if downloads table exists
+            await using var existsCmd = new SqliteCommand(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='downloads';",
+                connection);
+            var exists = Convert.ToInt64(await existsCmd.ExecuteScalarAsync(cancellationToken)) > 0;
+
+            if (!exists)
+            {
+                return null;
+            }
+
+            // Get total downloads and check for missing files
+            await using var cmd = new SqliteCommand(
+                "SELECT file_path FROM downloads;",
+                connection);
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+
+            var total = 0;
+            var missing = 0;
+            var totalSize = 0L;
+
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                total++;
+                var filePath = reader.GetString(0);
+                if (!File.Exists(filePath))
+                {
+                    missing++;
+                }
+                else
+                {
+                    try
+                    {
+                        totalSize += new FileInfo(filePath).Length;
+                    }
+                    catch
+                    {
+                        // Ignore file access errors
+                    }
+                }
+            }
+
+            var sizeMb = totalSize / (1024.0 * 1024);
+            var sizeGb = sizeMb / 1024.0;
+            var sizeStr = sizeGb >= 1 ? $"{sizeGb:F2} GB" : $"{sizeMb:F1} MB";
+
+            if (missing > 0)
+            {
+                return new DiagnosticResult
+                {
+                    Name = "Downloads",
+                    Category = DiagnosticCategory.Data,
+                    Severity = DiagnosticSeverity.Warning,
+                    Message = $"{total} entries, {missing} missing files",
+                    Detail = $"Run 'koware offline cleanup' to remove orphaned entries. Total size: {sizeStr}"
+                };
+            }
+
+            return new DiagnosticResult
+            {
+                Name = "Downloads",
+                Category = DiagnosticCategory.Data,
+                Severity = DiagnosticSeverity.Ok,
+                Message = $"{total} entries ({sizeStr})"
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<DiagnosticResult> CheckDuplicateEntriesAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var duplicates = new Dictionary<string, int>();
+
+        try
+        {
+            // Check for duplicate anime titles in list
+            await using var animeCmd = new SqliteCommand(
+                @"SELECT anime_title, COUNT(*) as cnt FROM anime_list 
+                  GROUP BY anime_title COLLATE NOCASE HAVING cnt > 1;",
+                connection);
+            try
+            {
+                await using var reader = await animeCmd.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    duplicates["anime_list"] = (duplicates.GetValueOrDefault("anime_list") + reader.GetInt32(1));
+                }
+            }
+            catch
+            {
+                // Table might not exist
+            }
+
+            // Check for duplicate manga titles in list
+            await using var mangaCmd = new SqliteCommand(
+                @"SELECT manga_title, COUNT(*) as cnt FROM manga_list 
+                  GROUP BY manga_title COLLATE NOCASE HAVING cnt > 1;",
+                connection);
+            try
+            {
+                await using var reader = await mangaCmd.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    duplicates["manga_list"] = (duplicates.GetValueOrDefault("manga_list") + reader.GetInt32(1));
+                }
+            }
+            catch
+            {
+                // Table might not exist
+            }
+        }
+        catch
+        {
+            // Ignore errors
+        }
+
+        var totalDuplicates = duplicates.Values.Sum();
+        return new DiagnosticResult
+        {
+            Name = "Duplicate Entries",
+            Category = DiagnosticCategory.Data,
+            Severity = totalDuplicates > 0 ? DiagnosticSeverity.Warning : DiagnosticSeverity.Ok,
+            Message = totalDuplicates > 0 ? $"{totalDuplicates} duplicates found" : "None"
+        };
+    }
+
+    private async Task<DiagnosticResult> CheckStaleDataAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var staleCount = 0;
+        var oldestDate = DateTimeOffset.MaxValue;
+
+        try
+        {
+            // Check for very old watch history entries (older than 2 years)
+            var twoYearsAgo = DateTimeOffset.UtcNow.AddYears(-2).ToString("O");
+            await using var cmd = new SqliteCommand(
+                $"SELECT COUNT(*), MIN(watched_at_utc) FROM watch_history WHERE watched_at_utc < '{twoYearsAgo}';",
+                connection);
+            try
+            {
+                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                if (await reader.ReadAsync(cancellationToken) && !reader.IsDBNull(0))
+                {
+                    staleCount = reader.GetInt32(0);
+                    if (!reader.IsDBNull(1))
+                    {
+                        var dateStr = reader.GetString(1);
+                        if (DateTimeOffset.TryParse(dateStr, out var parsed))
+                        {
+                            oldestDate = parsed;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Table might not exist or have different schema
+            }
+        }
+        catch
+        {
+            // Ignore errors
+        }
+
+        if (staleCount > 0 && oldestDate != DateTimeOffset.MaxValue)
+        {
+            return new DiagnosticResult
+            {
+                Name = "Data Age",
+                Category = DiagnosticCategory.Data,
+                Severity = DiagnosticSeverity.Info,
+                Message = $"{staleCount} entries older than 2 years",
+                Detail = $"Oldest: {oldestDate:yyyy-MM-dd}"
+            };
+        }
+
+        return new DiagnosticResult
+        {
+            Name = "Data Age",
+            Category = DiagnosticCategory.Data,
+            Severity = DiagnosticSeverity.Ok,
+            Message = "All data is recent"
+        };
+    }
+
+    #endregion
+
+    #region Security Checks
+
+    private async Task<List<DiagnosticResult>> RunSecurityChecksAsync(CancellationToken cancellationToken)
+    {
+        var results = new List<DiagnosticResult>();
+
+        // SSL/TLS verification
+        var sslResult = await CheckSslConnectivityAsync(cancellationToken);
+        results.Add(sslResult);
+
+        // Proxy detection
+        var proxyResult = CheckProxyConfiguration();
+        results.Add(proxyResult);
+
+        // Config file permissions (sensitive data protection)
+        var configPermResult = CheckConfigFilePermissions();
+        if (configPermResult != null) results.Add(configPermResult);
+
+        // Check for insecure HTTP in provider configs
+        var httpSecurityResult = CheckProviderSecurity();
+        results.Add(httpSecurityResult);
+
+        // Environment variable security
+        var envSecurityResult = CheckEnvironmentSecurity();
+        results.Add(envSecurityResult);
+
+        return results;
+    }
+
+    private async Task<DiagnosticResult> CheckSslConnectivityAsync(CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            // Test SSL/TLS with a known secure endpoint
+            using var handler = new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback = (message, cert, chain, errors) =>
+                {
+                    // Log certificate info but still validate
+                    return errors == System.Net.Security.SslPolicyErrors.None;
+                }
+            };
+
+            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(10000);
+
+            var response = await client.GetAsync("https://www.cloudflare.com/cdn-cgi/trace", cts.Token);
+            sw.Stop();
+
+            return new DiagnosticResult
+            {
+                Name = "SSL/TLS",
+                Category = DiagnosticCategory.Security,
+                Severity = response.IsSuccessStatusCode ? DiagnosticSeverity.Ok : DiagnosticSeverity.Warning,
+                Message = response.IsSuccessStatusCode ? "Working" : $"HTTP {(int)response.StatusCode}",
+                Duration = sw.Elapsed
+            };
+        }
+        catch (HttpRequestException ex) when (ex.Message.Contains("SSL") || ex.Message.Contains("certificate"))
+        {
+            sw.Stop();
+            return new DiagnosticResult
+            {
+                Name = "SSL/TLS",
+                Category = DiagnosticCategory.Security,
+                Severity = DiagnosticSeverity.Error,
+                Message = "Certificate error",
+                Detail = ex.Message,
+                Duration = sw.Elapsed
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return new DiagnosticResult
+            {
+                Name = "SSL/TLS",
+                Category = DiagnosticCategory.Security,
+                Severity = DiagnosticSeverity.Warning,
+                Message = "Check failed",
+                Detail = ex.Message,
+                Duration = sw.Elapsed
+            };
+        }
+    }
+
+    private DiagnosticResult CheckProxyConfiguration()
+    {
+        var httpProxy = Environment.GetEnvironmentVariable("HTTP_PROXY") ?? 
+                       Environment.GetEnvironmentVariable("http_proxy");
+        var httpsProxy = Environment.GetEnvironmentVariable("HTTPS_PROXY") ?? 
+                        Environment.GetEnvironmentVariable("https_proxy");
+        var noProxy = Environment.GetEnvironmentVariable("NO_PROXY") ?? 
+                     Environment.GetEnvironmentVariable("no_proxy");
+
+        var hasProxy = !string.IsNullOrEmpty(httpProxy) || !string.IsNullOrEmpty(httpsProxy);
+
+        if (hasProxy)
+        {
+            var proxyInfo = new List<string>();
+            if (!string.IsNullOrEmpty(httpProxy)) proxyInfo.Add($"HTTP: {httpProxy}");
+            if (!string.IsNullOrEmpty(httpsProxy)) proxyInfo.Add($"HTTPS: {httpsProxy}");
+
+            return new DiagnosticResult
+            {
+                Name = "Proxy",
+                Category = DiagnosticCategory.Security,
+                Severity = DiagnosticSeverity.Info,
+                Message = "Configured",
+                Detail = string.Join(", ", proxyInfo)
+            };
+        }
+
+        // Check system proxy on Windows
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            try
+            {
+                var webProxy = WebRequest.GetSystemWebProxy();
+                var testUri = new Uri("https://api.github.com");
+                var proxyUri = webProxy.GetProxy(testUri);
+                if (proxyUri != null && proxyUri != testUri)
+                {
+                    return new DiagnosticResult
+                    {
+                        Name = "Proxy",
+                        Category = DiagnosticCategory.Security,
+                        Severity = DiagnosticSeverity.Info,
+                        Message = "System proxy detected",
+                        Detail = proxyUri.ToString()
+                    };
+                }
+            }
+            catch
+            {
+                // Ignore proxy detection errors
+            }
+        }
+
+        return new DiagnosticResult
+        {
+            Name = "Proxy",
+            Category = DiagnosticCategory.Security,
+            Severity = DiagnosticSeverity.Ok,
+            Message = "No proxy configured"
+        };
+    }
+
+    private DiagnosticResult? CheckConfigFilePermissions()
+    {
+        if (!File.Exists(_configPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var fileInfo = new FileInfo(_configPath);
+            
+            // On Unix-like systems, check if file is world-readable
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                // Check using Unix file mode if available (.NET 7+)
+                try
+                {
+                    var unixMode = File.GetUnixFileMode(_configPath);
+                    var isWorldReadable = (unixMode & UnixFileMode.OtherRead) != 0;
+                    var isWorldWritable = (unixMode & UnixFileMode.OtherWrite) != 0;
+
+                    if (isWorldWritable)
+                    {
+                        return new DiagnosticResult
+                        {
+                            Name = "Config Permissions",
+                            Category = DiagnosticCategory.Security,
+                            Severity = DiagnosticSeverity.Warning,
+                            Message = "World-writable",
+                            Detail = $"chmod 600 {_configPath}"
+                        };
+                    }
+
+                    if (isWorldReadable)
+                    {
+                        return new DiagnosticResult
+                        {
+                            Name = "Config Permissions",
+                            Category = DiagnosticCategory.Security,
+                            Severity = DiagnosticSeverity.Info,
+                            Message = "World-readable",
+                            Detail = "Consider restricting permissions if config contains sensitive data"
+                        };
+                    }
+                }
+                catch
+                {
+                    // Unix file mode not available
+                }
+            }
+
+            return new DiagnosticResult
+            {
+                Name = "Config Permissions",
+                Category = DiagnosticCategory.Security,
+                Severity = DiagnosticSeverity.Ok,
+                Message = "Secure"
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private DiagnosticResult CheckProviderSecurity()
+    {
+        var issues = new List<string>();
+
+        var animeApi = _animeOptions.Value.ApiBase;
+        var mangaApi = _mangaOptions.Value.ApiBase;
+
+        if (!string.IsNullOrEmpty(animeApi) && animeApi.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            issues.Add("Anime provider uses HTTP");
+        }
+
+        if (!string.IsNullOrEmpty(mangaApi) && mangaApi.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            issues.Add("Manga provider uses HTTP");
+        }
+
+        if (issues.Count > 0)
+        {
+            return new DiagnosticResult
+            {
+                Name = "Provider Security",
+                Category = DiagnosticCategory.Security,
+                Severity = DiagnosticSeverity.Warning,
+                Message = "Insecure HTTP detected",
+                Detail = string.Join("; ", issues)
+            };
+        }
+
+        return new DiagnosticResult
+        {
+            Name = "Provider Security",
+            Category = DiagnosticCategory.Security,
+            Severity = DiagnosticSeverity.Ok,
+            Message = "All providers use HTTPS"
+        };
+    }
+
+    private DiagnosticResult CheckEnvironmentSecurity()
+    {
+        var concerns = new List<string>();
+
+        // Check if running as root/admin (potentially risky)
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            try
+            {
+                using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+                var principal = new System.Security.Principal.WindowsPrincipal(identity);
+                if (principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator))
+                {
+                    concerns.Add("Running as Administrator");
+                }
+            }
+            catch
+            {
+                // Ignore
+            }
+        }
+        else
+        {
+            var uid = Environment.GetEnvironmentVariable("UID") ?? 
+                     Environment.GetEnvironmentVariable("EUID");
+            if (uid == "0")
+            {
+                concerns.Add("Running as root");
+            }
+        }
+
+        // Check for debug mode or verbose logging that might expose data
+        var aspnetEnv = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        if (aspnetEnv?.Equals("Development", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            concerns.Add("Development mode enabled");
+        }
+
+        if (concerns.Count > 0)
+        {
+            return new DiagnosticResult
+            {
+                Name = "Environment",
+                Category = DiagnosticCategory.Security,
+                Severity = DiagnosticSeverity.Info,
+                Message = string.Join(", ", concerns)
+            };
+        }
+
+        return new DiagnosticResult
+        {
+            Name = "Environment",
+            Category = DiagnosticCategory.Security,
+            Severity = DiagnosticSeverity.Ok,
+            Message = "Standard user context"
+        };
     }
 
     #endregion
