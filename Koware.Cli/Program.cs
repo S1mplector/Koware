@@ -7701,25 +7701,6 @@ static Task<int> HandleModeAsync(string[] args, ILogger logger)
     Console.WriteLine($"Switched to {newMode.ToUpperInvariant()} mode.");
     Console.ResetColor();
 
-    // Show mode-specific tips
-    Console.WriteLine();
-    if (newMode == "manga")
-    {
-        Console.WriteLine("Commands now work with manga:");
-        Console.WriteLine("  koware search \"one piece\"    → Search manga");
-        Console.WriteLine("  koware read \"one piece\" 1    → Read chapter 1");
-        Console.WriteLine("  koware continue              → Continue reading");
-        Console.WriteLine("  koware history               → Reading history");
-    }
-    else
-    {
-        Console.WriteLine("Commands now work with anime:");
-        Console.WriteLine("  koware search \"one piece\"    → Search anime");
-        Console.WriteLine("  koware watch \"one piece\" 1   → Watch episode 1");
-        Console.WriteLine("  koware continue              → Continue watching");
-        Console.WriteLine("  koware history               → Watch history");
-    }
-
     return Task.FromResult(0);
 }
 

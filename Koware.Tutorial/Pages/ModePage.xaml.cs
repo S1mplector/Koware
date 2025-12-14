@@ -21,8 +21,11 @@ public partial class ModePage : Page
             Terminal1.Clear();
             await Terminal1.TypePromptAsync("koware mode");
             Terminal1.AddEmptyLine();
-            await Terminal1.AddColoredLineAsync("{cyan}Current mode:{/} anime", 100);
-            await Terminal1.AddColoredLineAsync("{gray}Use 'koware mode manga' to switch{/}", 0);
+            await Terminal1.AddColoredLineAsync("{cyan}Select Mode (current: anime){/}", 100);
+            await Terminal1.AddColoredLineAsync("{cyan}>{/} 📺 Anime Mode", 80);
+            await Terminal1.AddColoredLineAsync("  📖 Manga Mode", 80);
+            Terminal1.AddEmptyLine();
+            await Terminal1.AddColoredLineAsync("{gray}Search, watch, and track anime series{/}", 0);
         }
         catch (TaskCanceledException) { }
     }
@@ -32,14 +35,14 @@ public partial class ModePage : Page
         try
         {
             Terminal2.Clear();
-            await Terminal2.TypePromptAsync("koware mode manga");
+            await Terminal2.TypePromptAsync("koware mode");
             Terminal2.AddEmptyLine();
-            await Terminal2.AddColoredLineAsync("{green}✓{/} Default mode set to: manga", 200);
+            await Terminal2.AddColoredLineAsync("{cyan}Select Mode (current: anime){/}", 100);
+            await Terminal2.AddColoredLineAsync("  📺 Anime Mode", 80);
+            await Terminal2.AddColoredLineAsync("{cyan}>{/} 📖 Manga Mode", 80);
             Terminal2.AddEmptyLine();
-            await Terminal2.AddColoredLineAsync("{gray}# Now all commands default to manga mode:{/}", 150);
-            await Terminal2.TypePromptAsync("koware read \"solo leveling\"");
-            await Terminal2.AddColoredLineAsync("{cyan}Searching...{/}", 200);
-            await Terminal2.AddColoredLineAsync("{green}✓{/} Found: Solo Leveling", 0);
+            await Task.Delay(300);
+            await Terminal2.AddColoredLineAsync("{magenta}Switched to MANGA mode.{/}", 0);
         }
         catch (TaskCanceledException) { }
     }

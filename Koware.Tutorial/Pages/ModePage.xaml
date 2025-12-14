@@ -38,11 +38,16 @@
                 Koware starts in Anime mode.
             </TextBlock>
             
-            <TextBlock Text="Checking Current Mode" 
+            <TextBlock Text="Interactive Mode Selector" 
                        FontSize="16" 
                        FontWeight="SemiBold"
                        Margin="0,0,0,8"/>
-            <controls:FakeTerminal x:Name="Terminal1" Height="140" Margin="0,0,0,16"/>
+            <TextBlock TextWrapping="Wrap" 
+                       Foreground="{StaticResource SecondaryBrush}"
+                       Margin="0,0,0,12">
+                Just type 'koware mode' to open the interactive mode selector. Use arrow keys to navigate and Enter to select:
+            </TextBlock>
+            <controls:FakeTerminal x:Name="Terminal1" Height="160" Margin="0,0,0,16"/>
             
             <TextBlock Text="Switching Modes" 
                        FontSize="16" 
@@ -51,7 +56,7 @@
             <TextBlock TextWrapping="Wrap" 
                        Foreground="{StaticResource SecondaryBrush}"
                        Margin="0,0,0,12">
-                Use the mode command to change your default mode:
+                Select a different mode to switch. You can also use 'koware mode anime' or 'koware mode manga' directly:
             </TextBlock>
             <controls:FakeTerminal x:Name="Terminal2" Height="180" Margin="0,0,0,16"/>
             
