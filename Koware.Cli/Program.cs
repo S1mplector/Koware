@@ -212,7 +212,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
             case "stats":
                 return await HandleStatsAsync(args, services, logger, defaults, cts.Token);
             case "doctor":
-                return await HandleDoctorAsync(services, logger, cts.Token);
+                return await HandleDoctorAsync(args, services, logger, cts.Token);
             case "provider":
                 return await HandleProviderAsync(args, services);
             case "mode":
@@ -553,118 +553,331 @@ static void WriteStatus(string label, bool success, string? detail = null)
 /// <summary>
 /// Implement the <c>koware doctor</c> command.
 /// </summary>
+/// <param name="args">Command-line arguments for filtering categories.</param>
 /// <param name="services">Service provider for provider options.</param>
 /// <param name="logger">Logger instance for errors.</param>
 /// <param name="cancellationToken">Cancellation token.</param>
 /// <returns>Exit code: 0 if all critical checks pass, 1 otherwise.</returns>
 /// <remarks>
-/// Runs a full health check: version, install/config paths, provider reachability (anime + manga),
-/// player/reader discovery, and external tool availability (ffmpeg/yt-dlp/aria2c).
+/// Runs comprehensive diagnostics including:
+/// - Environment: OS, .NET runtime, disk space, memory
+/// - Configuration: Config file validation, provider settings
+/// - Storage: SQLite database health, permissions, storage usage
+/// - Network: Internet connectivity, DNS resolution, HTTPS
+/// - Providers: DNS, HTTP, and API validation for configured providers
+/// - Toolchain: External tools (ffmpeg, yt-dlp, aria2c)
+/// - Updates: Check for newer versions
+/// 
+/// Flags:
+///   --category, -c  Run only a specific category (env, config, storage, network, providers, tools, updates)
+///   --verbose, -v   Show detailed output including metadata
+///   --json          Output results as JSON
+///   --help, -h      Show help message
 /// </remarks>
-static async Task<int> HandleDoctorAsync(IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+static async Task<int> HandleDoctorAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
 {
-    var overallOk = true;
-    var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
-    var results = new List<(string name, ProviderCheckResult result)>();
-    var diagnostics = new ProviderDiagnostics(new HttpClient());
+    // Parse arguments
+    var verbose = args.Any(a => a is "--verbose" or "-v");
+    var jsonOutput = args.Any(a => a == "--json");
+    var showHelp = args.Any(a => a is "--help" or "-h");
+    DiagnosticCategory? categoryFilter = null;
 
-    Console.WriteLine("Koware Doctor");
-    Console.WriteLine(new string('─', 40));
+    if (showHelp)
+    {
+        PrintDoctorHelp();
+        return 0;
+    }
 
-    var cliPath = Environment.ProcessPath ?? Assembly.GetEntryAssembly()?.Location;
-    WriteStatus("Version", true, GetVersionLabel());
-    WriteStatus("CLI Path", !string.IsNullOrWhiteSpace(cliPath) && File.Exists(cliPath!), cliPath ?? "(unknown)");
+    // Parse category filter
+    for (var i = 0; i < args.Length; i++)
+    {
+        if (args[i] is "--category" or "-c" && i + 1 < args.Length)
+        {
+            categoryFilter = ParseDiagnosticCategory(args[i + 1]);
+            if (categoryFilter is null)
+            {
+                Console.WriteLine($"Unknown category: {args[i + 1]}");
+                Console.WriteLine("Valid categories: env, config, storage, network, providers, tools, updates");
+                return 1;
+            }
+        }
+    }
 
+    var animeOptions = services.GetRequiredService<IOptions<AllAnimeOptions>>();
+    var mangaOptions = services.GetRequiredService<IOptions<AllMangaOptions>>();
     var configPath = GetUserConfigFilePath();
-    var configDir = Path.GetDirectoryName(configPath);
-    var configDirExists = !string.IsNullOrWhiteSpace(configDir) && Directory.Exists(configDir);
-    var configExists = File.Exists(configPath);
-    WriteStatus("Config dir", configDirExists, configDirExists ? configDir! : "Missing (create with any config command)");
-    WriteStatus("Config", configExists, configExists ? configPath : "Not created yet (will be written on first config change)");
-    Console.WriteLine();
 
-    Console.WriteLine("Providers");
-    var providerTargets = new List<(string name, bool configured, AllAnimeOptions opt)>();
-    var mangaOptions = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
-    providerTargets.Add(("allanime", allAnime.IsConfigured, allAnime));
-    providerTargets.Add(("allmanga", mangaOptions.IsConfigured, new AllAnimeOptions
+    var engine = new DiagnosticsEngine(
+        new HttpClient(),
+        animeOptions,
+        mangaOptions,
+        configPath);
+
+    if (!jsonOutput)
     {
-        ApiBase = mangaOptions.ApiBase,
-        Referer = mangaOptions.Referer,
-        UserAgent = mangaOptions.UserAgent,
-        Enabled = mangaOptions.Enabled,
-        BaseHost = mangaOptions.BaseHost
-    }));
-
-    foreach (var (name, isConfigured, opt) in providerTargets)
-    {
-        if (!isConfigured || string.IsNullOrWhiteSpace(opt.ApiBase))
-        {
-            WriteStatus(name, false, "Not configured");
-            overallOk = false;
-            continue;
-        }
-
-        try
-        {
-            var step = ConsoleStep.Start($"Checking {name}");
-            var result = await diagnostics.CheckAsync(opt, cancellationToken);
-            step.Succeed("done");
-            results.Add((name, result));
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "{Provider} doctor check failed.", name);
-            results.Add((name, new ProviderCheckResult { Target = opt.ApiBase ?? "not configured", HttpError = ex.Message }));
-        }
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
+        Console.WriteLine("║                     Koware Diagnostics                       ║");
+        Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
+        Console.ResetColor();
+        Console.WriteLine();
     }
 
-    foreach (var (name, result) in results)
+    IReadOnlyList<DiagnosticResult> results;
+    
+    try
     {
-        var httpDetail = result.HttpError ?? (result.HttpStatus.HasValue ? $"HTTP {result.HttpStatus}" : "No response");
-        WriteStatus($"{name} DNS", result.DnsResolved, result.DnsError);
-        WriteStatus($"{name} HTTP", result.HttpSuccess, httpDetail);
-        overallOk &= result.Success;
+        if (categoryFilter.HasValue)
+        {
+            if (!jsonOutput)
+            {
+                var step = ConsoleStep.Start($"Running {categoryFilter.Value} diagnostics");
+                results = await engine.RunCategoryAsync(categoryFilter.Value, cancellationToken);
+                step.Succeed($"{results.Count} checks completed");
+            }
+            else
+            {
+                results = await engine.RunCategoryAsync(categoryFilter.Value, cancellationToken);
+            }
+        }
+        else
+        {
+            if (!jsonOutput)
+            {
+                var step = ConsoleStep.Start("Running full diagnostics");
+                results = await engine.RunAllAsync(cancellationToken);
+                step.Succeed($"{results.Count} checks completed");
+            }
+            else
+            {
+                results = await engine.RunAllAsync(cancellationToken);
+            }
+        }
     }
-
-    Console.WriteLine();
-    Console.WriteLine("Toolchain");
-    var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
-    var readerOptions = services.GetRequiredService<IOptions<ReaderOptions>>().Value;
-
-    var playerResolution = ResolvePlayerExecutable(playerOptions);
-    var playerVersion = TryGetFileVersion(playerResolution.Path);
-    WriteStatus("Player", playerResolution.Path is not null, playerResolution.Path is null
-        ? $"Not found (tried: {string.Join(", ", playerResolution.Candidates)})"
-        : $"{playerResolution.Path}{(playerVersion is null ? string.Empty : $" [{playerVersion}]")}");
-    overallOk &= playerResolution.Path is not null;
-
-    var readerPath = ResolveExecutablePath(readerOptions.Command);
-    var readerVersion = TryGetFileVersion(readerPath);
-    WriteStatus("Reader", !string.IsNullOrWhiteSpace(readerPath), readerPath is null ? "Not found" : $"{readerPath}{(readerVersion is null ? string.Empty : $" [{readerVersion}]")}");
-    overallOk &= !string.IsNullOrWhiteSpace(readerPath);
-
-    foreach (var tool in new[] { "ffmpeg", "yt-dlp", "aria2c" })
+    catch (Exception ex)
     {
-        var resolved = ResolveExecutablePath(tool);
-        var version = resolved is null ? null : TryGetCommandVersion(resolved);
-        WriteStatus(tool, !string.IsNullOrWhiteSpace(resolved), resolved is null ? "Not found" : $"{resolved}{(version is null ? string.Empty : $" [{version}]")}");
-        overallOk &= !string.IsNullOrWhiteSpace(resolved);
-    }
-    Console.WriteLine();
-
-    if (!overallOk)
-    {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("Some checks failed. Address the FAIL entries above, then rerun 'koware doctor'.");
+        logger.LogError(ex, "Diagnostics engine failed.");
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"Diagnostics failed: {ex.Message}");
         Console.ResetColor();
         return 1;
     }
 
+    if (jsonOutput)
+    {
+        var jsonResults = results.Select(r => new
+        {
+            name = r.Name,
+            category = r.Category.ToString(),
+            severity = r.Severity.ToString(),
+            message = r.Message,
+            detail = r.Detail,
+            durationMs = r.Duration?.TotalMilliseconds,
+            metadata = r.Metadata
+        });
+        Console.WriteLine(JsonSerializer.Serialize(jsonResults, new JsonSerializerOptions { WriteIndented = true }));
+        return results.Any(r => r.IsCritical) ? 1 : 0;
+    }
+
+    Console.WriteLine();
+
+    // Group results by category
+    var grouped = results.GroupBy(r => r.Category).OrderBy(g => (int)g.Key);
+    
+    foreach (var group in grouped)
+    {
+        WriteDiagnosticCategoryHeader(group.Key);
+        
+        foreach (var result in group)
+        {
+            WriteDiagnosticResult(result, verbose);
+        }
+        
+        Console.WriteLine();
+    }
+
+    // Summary
+    var errorCount = results.Count(r => r.Severity == DiagnosticSeverity.Error);
+    var warningCount = results.Count(r => r.Severity == DiagnosticSeverity.Warning);
+    var okCount = results.Count(r => r.Severity == DiagnosticSeverity.Ok);
+    var infoCount = results.Count(r => r.Severity == DiagnosticSeverity.Info);
+    var skippedCount = results.Count(r => r.Severity == DiagnosticSeverity.Skipped);
+
+    Console.WriteLine(new string('─', 64));
+    Console.Write("Summary: ");
+    
+    if (okCount > 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($"{okCount} OK  ");
+    }
+    if (infoCount > 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Blue;
+        Console.Write($"{infoCount} Info  ");
+    }
+    if (warningCount > 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.Write($"{warningCount} Warning  ");
+    }
+    if (errorCount > 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.Write($"{errorCount} Error  ");
+    }
+    if (skippedCount > 0)
+    {
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write($"{skippedCount} Skipped");
+    }
+    Console.ResetColor();
+    Console.WriteLine();
+    Console.WriteLine();
+
+    if (errorCount > 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("✗ Some critical checks failed. Address the errors above, then rerun 'koware doctor'.");
+        Console.ResetColor();
+        return 1;
+    }
+
+    if (warningCount > 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("⚠ Some checks have warnings. Review the items above for potential issues.");
+        Console.ResetColor();
+        return 0;
+    }
+
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine("All systems look good.");
+    Console.WriteLine("✓ All systems look good!");
     Console.ResetColor();
     return 0;
+}
+
+/// <summary>
+/// Print help for the doctor command.
+/// </summary>
+static void PrintDoctorHelp()
+{
+    Console.WriteLine("Koware Doctor - Comprehensive System Diagnostics");
+    Console.WriteLine();
+    Console.WriteLine("Usage: koware doctor [options]");
+    Console.WriteLine();
+    Console.WriteLine("Options:");
+    Console.WriteLine("  --category, -c <name>  Run only a specific category");
+    Console.WriteLine("  --verbose, -v          Show detailed output including metadata");
+    Console.WriteLine("  --json                 Output results as JSON");
+    Console.WriteLine("  --help, -h             Show this help message");
+    Console.WriteLine();
+    Console.WriteLine("Categories:");
+    Console.WriteLine("  env        Environment (OS, runtime, disk space, memory)");
+    Console.WriteLine("  config     Configuration (config file, provider settings)");
+    Console.WriteLine("  storage    Storage (database health, permissions, size)");
+    Console.WriteLine("  network    Network (connectivity, DNS, HTTPS)");
+    Console.WriteLine("  providers  Providers (DNS, HTTP, API validation)");
+    Console.WriteLine("  tools      Toolchain (ffmpeg, yt-dlp, aria2c)");
+    Console.WriteLine("  updates    Updates (check for new versions)");
+    Console.WriteLine();
+    Console.WriteLine("Examples:");
+    Console.WriteLine("  koware doctor                     Run all diagnostics");
+    Console.WriteLine("  koware doctor -c network          Check network only");
+    Console.WriteLine("  koware doctor --verbose           Show detailed results");
+    Console.WriteLine("  koware doctor --json              Output as JSON");
+}
+
+/// <summary>
+/// Parse a category name string to DiagnosticCategory enum.
+/// </summary>
+static DiagnosticCategory? ParseDiagnosticCategory(string name) => name.ToLowerInvariant() switch
+{
+    "env" or "environment" => DiagnosticCategory.Environment,
+    "config" or "configuration" => DiagnosticCategory.Configuration,
+    "storage" or "data" => DiagnosticCategory.Storage,
+    "network" or "net" => DiagnosticCategory.Network,
+    "providers" or "provider" => DiagnosticCategory.Providers,
+    "tools" or "toolchain" => DiagnosticCategory.Toolchain,
+    "updates" or "update" => DiagnosticCategory.Updates,
+    _ => null
+};
+
+/// <summary>
+/// Write a category header for diagnostic output.
+/// </summary>
+static void WriteDiagnosticCategoryHeader(DiagnosticCategory category)
+{
+    var name = category switch
+    {
+        DiagnosticCategory.Environment => "Environment",
+        DiagnosticCategory.Configuration => "Configuration",
+        DiagnosticCategory.Storage => "Storage",
+        DiagnosticCategory.Network => "Network",
+        DiagnosticCategory.Providers => "Providers",
+        DiagnosticCategory.Toolchain => "Toolchain",
+        DiagnosticCategory.Updates => "Updates",
+        _ => category.ToString()
+    };
+
+    Console.ForegroundColor = ConsoleColor.White;
+    Console.WriteLine($"┌─ {name} ─────────────────────────────────────────────────");
+    Console.ResetColor();
+}
+
+/// <summary>
+/// Write a single diagnostic result line.
+/// </summary>
+static void WriteDiagnosticResult(DiagnosticResult result, bool verbose)
+{
+    var (icon, color) = result.Severity switch
+    {
+        DiagnosticSeverity.Ok => ("✓", ConsoleColor.Green),
+        DiagnosticSeverity.Warning => ("⚠", ConsoleColor.Yellow),
+        DiagnosticSeverity.Error => ("✗", ConsoleColor.Red),
+        DiagnosticSeverity.Skipped => ("○", ConsoleColor.DarkGray),
+        DiagnosticSeverity.Info => ("ℹ", ConsoleColor.Blue),
+        _ => ("?", ConsoleColor.Gray)
+    };
+
+    Console.Write("│ ");
+    Console.ForegroundColor = color;
+    Console.Write($"{icon} ");
+    Console.ResetColor();
+    
+    Console.Write($"{result.Name,-24}");
+    
+    Console.ForegroundColor = color;
+    Console.Write(result.Message ?? "-");
+    Console.ResetColor();
+
+    if (!string.IsNullOrWhiteSpace(result.Detail))
+    {
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write($"  ({result.Detail})");
+        Console.ResetColor();
+    }
+
+    if (result.Duration.HasValue && verbose)
+    {
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write($"  [{result.Duration.Value.TotalMilliseconds:F0}ms]");
+        Console.ResetColor();
+    }
+
+    Console.WriteLine();
+
+    // Show metadata if verbose
+    if (verbose && result.Metadata?.Count > 0)
+    {
+        foreach (var (key, value) in result.Metadata)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine($"│     {key}: {value}");
+            Console.ResetColor();
+        }
+    }
 }
 
 /// <summary>
