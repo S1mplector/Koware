@@ -7638,40 +7638,59 @@ static Task<int> HandleModeAsync(string[] args, ILogger logger)
     var defaults = root["Defaults"] as JsonObject ?? new JsonObject();
     var currentMode = defaults["Mode"]?.ToString() ?? "anime";
 
+    string newMode;
+    
     if (args.Length == 1)
     {
-        // Show current mode
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine("Current Mode");
-        Console.ResetColor();
-        Console.WriteLine(new string('─', 30));
-
-        Console.ForegroundColor = currentMode.Equals("manga", StringComparison.OrdinalIgnoreCase)
-            ? ConsoleColor.Magenta
-            : ConsoleColor.Green;
-        Console.WriteLine($"  {currentMode.ToUpperInvariant()}");
-        Console.ResetColor();
-
-        Console.WriteLine();
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine("Switch with: koware mode anime | koware mode manga");
-        Console.ResetColor();
-        return Task.FromResult(0);
+        // Show interactive mode selector
+        var modes = new[]
+        {
+            ("anime", "📺 Anime Mode", "Search, watch, and track anime series"),
+            ("manga", "📖 Manga Mode", "Search, read, and track manga chapters")
+        };
+        
+        var selector = new Console.InteractiveSelector<(string Id, string Name, string Description)>(
+            modes,
+            m => m.Name,
+            new Console.SelectorOptions<(string Id, string Name, string Description)>
+            {
+                Prompt = $"Select Mode (current: {currentMode})",
+                MaxVisibleItems = 5,
+                ShowSearch = false,
+                ShowPreview = true,
+                PreviewFunc = m => m.Description
+            });
+        
+        var result = selector.Run();
+        
+        if (result.Cancelled)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine("Mode selection cancelled.");
+            Console.ResetColor();
+            return Task.FromResult(0);
+        }
+        
+        newMode = result.Selected!.Value.Id;
     }
-
-    var newMode = args[1].ToLowerInvariant();
-    if (newMode != "anime" && newMode != "manga")
+    else
     {
-        logger.LogWarning("Invalid mode '{Mode}'. Use 'anime' or 'manga'.", args[1]);
-        return Task.FromResult(1);
+        newMode = args[1].ToLowerInvariant();
+        if (newMode != "anime" && newMode != "manga")
+        {
+            logger.LogWarning("Invalid mode '{Mode}'. Use 'anime' or 'manga'.", args[1]);
+            return Task.FromResult(1);
+        }
     }
 
+    // Check if already in this mode
     if (newMode == currentMode.ToLowerInvariant())
     {
         Console.WriteLine($"Already in {newMode} mode.");
         return Task.FromResult(0);
     }
 
+    // Save the new mode
     defaults["Mode"] = newMode;
     root["Defaults"] = defaults;
 

@@ -377,7 +377,6 @@ public partial class MainWindow : Window
                             if (bitmap is not null)
                             {
                                 _pageImages[index].Source = bitmap;
-                                ClearPlaceholder(page.PageNumber);
                                 ApplyFitMode(_pageImages[index]);
                             }
                             else
