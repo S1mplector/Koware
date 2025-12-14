@@ -328,16 +328,25 @@ public partial class MainWindow : Window
                 var image = new Image
                 {
                     Stretch = Stretch.Uniform,
-                    Tag = page.PageNumber
+                    Tag = page.PageNumber,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
                 };
                 
-                // Sepia overlay - semi-transparent yellowish tint
+                // Sepia overlay - semi-transparent warm tint that covers only the image
+                // Uses a Rectangle with binding to match the image's actual rendered size
                 var sepiaOverlay = new Border
                 {
-                    Background = new SolidColorBrush(Color.Parse("#d4a574")),
+                    Background = new SolidColorBrush(Color.Parse("#c4956a")),
                     Opacity = 0,
-                    IsHitTestVisible = false
+                    IsHitTestVisible = false,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
                 };
+                
+                // Bind overlay size to image size
+                sepiaOverlay.Bind(WidthProperty, new Avalonia.Data.Binding("Bounds.Width") { Source = image });
+                sepiaOverlay.Bind(HeightProperty, new Avalonia.Data.Binding("Bounds.Height") { Source = image });
                 
                 grid.Children.Add(image);
                 grid.Children.Add(sepiaOverlay);
@@ -1171,13 +1180,14 @@ public partial class MainWindow : Window
         TitleText.Foreground = new SolidColorBrush(Color.Parse(text));
         PageIndicator.Foreground = new SolidColorBrush(Color.Parse(muted));
         
-        // Apply sepia filter overlay to images
+        // Apply sepia filter overlay to images (simulates CSS sepia(30%) brightness(0.95))
         if (theme == "sepia")
         {
-            // Show sepia overlay with warm yellowish tint
+            // Show sepia overlay with warm brownish tint to simulate sepia filter
             foreach (var overlay in _sepiaOverlays)
             {
-                overlay.Opacity = 0.15; // Subtle sepia tint
+                overlay.Background = new SolidColorBrush(Color.Parse("#c4956a")); // Warm sepia brown
+                overlay.Opacity = 0.25; // Matches approximately sepia(30%)
             }
         }
         else
