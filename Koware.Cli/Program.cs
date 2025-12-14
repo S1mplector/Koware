@@ -7649,10 +7649,10 @@ static Task<int> HandleModeAsync(string[] args, ILogger logger)
             ("manga", "📖 Manga Mode", "Search, read, and track manga chapters")
         };
         
-        var selector = new Console.InteractiveSelector<(string Id, string Name, string Description)>(
+        var selector = new Koware.Cli.Console.InteractiveSelector<(string Id, string Name, string Description)>(
             modes,
             m => m.Name,
-            new Console.SelectorOptions<(string Id, string Name, string Description)>
+            new Koware.Cli.Console.SelectorOptions<(string Id, string Name, string Description)>
             {
                 Prompt = $"Select Mode (current: {currentMode})",
                 MaxVisibleItems = 5,
@@ -7671,7 +7671,7 @@ static Task<int> HandleModeAsync(string[] args, ILogger logger)
             return Task.FromResult(0);
         }
         
-        newMode = result.Selected!.Value.Id;
+        newMode = result.Selected!.Id;
     }
     else
     {

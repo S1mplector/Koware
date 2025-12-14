@@ -467,7 +467,6 @@ public partial class MainWindow : Window
                     var image = _pageImages[pageNumber - 1];
                     _loadedBitmaps[pageNumber] = bitmap;
                     image.Source = bitmap;
-                    ClearPlaceholder(pageNumber);
                     ApplyFitMode(image);
                 }
                 else
@@ -495,29 +494,6 @@ public partial class MainWindow : Window
         };
     }
 
-    private void ClearPlaceholder(int pageNumber)
-    {
-        if (!_pagePlaceholders.TryGetValue(pageNumber, out var container)) return;
-        if (pageNumber <= 0 || pageNumber > _pageImages.Count) return;
-        
-        var image = _pageImages[pageNumber - 1];
-        
-        // Only set as child if not already the child
-        if (container.Child != image)
-        {
-            // First detach from any existing parent
-            if (image.Parent is Border parentBorder)
-            {
-                parentBorder.Child = null;
-            }
-            else if (image.Parent is Panel parentPanel)
-            {
-                parentPanel.Children.Remove(image);
-            }
-            
-            container.Child = image;
-        }
-    }
 
     private void ApplyFitMode(Image image)
     {
