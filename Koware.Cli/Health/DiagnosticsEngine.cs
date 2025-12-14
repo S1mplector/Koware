@@ -293,7 +293,7 @@ public sealed class DiagnosticsEngine
         var results = new List<DiagnosticResult>();
 
         // Check if running in interactive terminal
-        var isInteractive = !Console.IsInputRedirected && !Console.IsOutputRedirected;
+        var isInteractive = !System.Console.IsInputRedirected && !System.Console.IsOutputRedirected;
         results.Add(new DiagnosticResult
         {
             Name = "Interactive Terminal",
@@ -307,8 +307,8 @@ public sealed class DiagnosticsEngine
         {
             if (isInteractive)
             {
-                var width = Console.WindowWidth;
-                var height = Console.WindowHeight;
+                var width = System.Console.WindowWidth;
+                var height = System.Console.WindowHeight;
                 results.Add(new DiagnosticResult
                 {
                     Name = "Terminal Size",
@@ -390,7 +390,7 @@ public sealed class DiagnosticsEngine
         // Check encoding
         try
         {
-            var outputEncoding = Console.OutputEncoding.WebName;
+            var outputEncoding = System.Console.OutputEncoding.WebName;
             var isUtf8 = outputEncoding.Contains("utf-8", StringComparison.OrdinalIgnoreCase) ||
                         outputEncoding.Contains("utf8", StringComparison.OrdinalIgnoreCase);
             results.Add(new DiagnosticResult
