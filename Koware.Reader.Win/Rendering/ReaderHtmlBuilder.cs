@@ -826,7 +826,10 @@ internal static class ReaderHtmlBuilder
         
         function navigateToChapter(targetIdx) {
             if (targetIdx === getCurrentChapterIndex()) { toggleChaptersPanel(false); return; }
-            writeNavAndClose(targetIdx > getCurrentChapterIndex() ? "next" : "prev");
+            const targetChapter = chapters[targetIdx];
+            if (targetChapter) {
+                writeNavAndClose("goto:" + targetChapter.number);
+            }
         }
         
         function writeNavAndClose(direction) {

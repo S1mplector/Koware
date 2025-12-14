@@ -4416,24 +4416,48 @@ static async Task<ReadResult> ReadWithNavigationAsync(
 
             var nav = ReadNavigation(navPath);
             lastNav = nav;
-            if (nav.Action is not ("next" or "prev"))
+            
+            // Handle direct chapter jump (goto:chapterNumber)
+            if (nav.Action.StartsWith("goto:", StringComparison.OrdinalIgnoreCase))
             {
-                break;
+                var targetChapterStr = nav.Action.Substring(5);
+                if (float.TryParse(targetChapterStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var targetChapterNum))
+                {
+                    var targetChapter = orderedChapters.FirstOrDefault(c => Math.Abs(c.Number - targetChapterNum) < 0.001f);
+                    if (targetChapter is not null)
+                    {
+                        currentChapter = targetChapter;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                else
+                {
+                    break;
+                }
             }
+            else if (nav.Action is "next" or "prev")
+            {
+                var currentIndex = Array.FindIndex(orderedChapters, c => Math.Abs(c.Number - currentChapter.Number) < 0.001f);
+                if (currentIndex < 0)
+                {
+                    break;
+                }
 
-            var currentIndex = Array.FindIndex(orderedChapters, c => Math.Abs(c.Number - currentChapter.Number) < 0.001f);
-            if (currentIndex < 0)
-            {
-                break;
-            }
-
-            if (nav.Action == "next" && currentIndex + 1 < orderedChapters.Length)
-            {
-                currentChapter = orderedChapters[currentIndex + 1];
-            }
-            else if (nav.Action == "prev" && currentIndex - 1 >= 0)
-            {
-                currentChapter = orderedChapters[currentIndex - 1];
+                if (nav.Action == "next" && currentIndex + 1 < orderedChapters.Length)
+                {
+                    currentChapter = orderedChapters[currentIndex + 1];
+                }
+                else if (nav.Action == "prev" && currentIndex - 1 >= 0)
+                {
+                    currentChapter = orderedChapters[currentIndex - 1];
+                }
+                else
+                {
+                    break;
+                }
             }
             else
             {

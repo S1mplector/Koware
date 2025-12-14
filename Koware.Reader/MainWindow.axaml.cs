@@ -58,6 +58,7 @@ public partial class MainWindow : Window
     public string? HttpReferer { get; set; }
     public string? HttpUserAgent { get; set; }
     public ChapterNavigationRequest ChapterNavigation { get; private set; } = ChapterNavigationRequest.None;
+    public float? TargetChapterNumber { get; private set; }
     public string? NavResultPath { get; set; }
     public int StartPage { get; set; } = 1;
 
@@ -293,7 +294,12 @@ public partial class MainWindow : Window
             return;
         }
         
-        ChapterNavigation = targetIdx > currentIdx ? ChapterNavigationRequest.Next : ChapterNavigationRequest.Previous;
+        // Store the target chapter number for direct jump
+        var orderedChapters = Chapters.OrderBy(c => c.Number).ToList();
+        if (targetIdx >= 0 && targetIdx < orderedChapters.Count)
+        {
+            TargetChapterNumber = orderedChapters[targetIdx].Number;
+        }
         WriteNavigationResult();
         Close();
     }
@@ -1349,12 +1355,20 @@ public partial class MainWindow : Window
             return;
         }
 
-        var nav = ChapterNavigation switch
+        string nav;
+        if (TargetChapterNumber.HasValue)
         {
-            ChapterNavigationRequest.Next => "next",
-            ChapterNavigationRequest.Previous => "prev",
-            _ => "none"
-        };
+            nav = $"goto:{TargetChapterNumber.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        }
+        else
+        {
+            nav = ChapterNavigation switch
+            {
+                ChapterNavigationRequest.Next => "next",
+                ChapterNavigationRequest.Previous => "prev",
+                _ => "none"
+            };
+        }
 
         // Include current page and chapter for resume functionality
         // Format: nav:page:chapter (e.g., "none:15:1.5")
