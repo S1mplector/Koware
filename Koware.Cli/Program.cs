@@ -4321,11 +4321,19 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
 
     var total = targets.Count;
     var index = 0;
+    var failedCount = 0;
 
     foreach (var episode in targets)
     {
         cancellationToken.ThrowIfCancellationRequested();
         index++;
+
+        // Show progress bar
+        var percent = (int)(index * 100.0 / total);
+        var filled = (int)(index * 30.0 / total);
+        var empty = 30 - filled;
+        var bar = new string('█', filled) + new string('░', empty);
+        System.Console.Write($"\r  [{bar}] {percent,3}% - Episode {episode.Number,-10}");
 
         try
         {
@@ -4336,22 +4344,13 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
             }
             else
             {
-                var epStep = ConsoleStep.Start($"Resolving streams for episode {episode.Number} ({index}/{total})");
-                try
-                {
-                    var epPlan = plan with { EpisodeNumber = episode.Number };
-                    epResult = await orchestrator.ExecuteAsync(epPlan, cancellationToken);
-                    epStep.Succeed($"Episode {episode.Number} streams ready");
-                }
-                catch
-                {
-                    epStep.Fail($"Failed to resolve streams for episode {episode.Number}");
-                    throw;
-                }
+                var epPlan = plan with { EpisodeNumber = episode.Number };
+                epResult = await orchestrator.ExecuteAsync(epPlan, cancellationToken);
             }
 
             if (epResult.Streams is null || epResult.Streams.Count == 0)
             {
+                failedCount++;
                 logger.LogWarning("No streams found for episode {Episode}. Skipping.", episode.Number);
                 continue;
             }
@@ -4360,6 +4359,7 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
             var stream = PickBestStream(normalizedStreams);
             if (stream is null)
             {
+                failedCount++;
                 logger.LogWarning("No suitable stream found for episode {Episode}. Skipping.", episode.Number);
                 continue;
             }
@@ -4371,13 +4371,12 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
             var httpReferrer = stream.Referrer ?? allAnimeOptions?.Referer;
             var httpUserAgent = allAnimeOptions?.UserAgent;
 
-            DownloadConsole.PrintEpisodeHeader(title, episode, stream.Quality, index, total, outputPath);
-
             var isPlaylist = IsPlaylist(stream);
             var ffmpegPath = ResolveExecutablePath("ffmpeg");
 
             if (isPlaylist && string.IsNullOrWhiteSpace(ffmpegPath))
             {
+                failedCount++;
                 logger.LogError("ffmpeg is required to download streaming playlist URLs. Episode {Episode} will be skipped.", episode.Number);
                 continue;
             }
@@ -4406,9 +4405,6 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
                     fileInfo.Length,
                     cancellationToken);
             }
-
-            var episodesLeft = total - index;
-            DownloadConsole.PrintEpisodeResult(outputPath, episodesLeft);
         }
         catch (OperationCanceledException)
         {
@@ -4416,9 +4412,17 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
         }
         catch (Exception ex)
         {
+            failedCount++;
             logger.LogError(ex, "Failed to download episode {Episode}. Skipping.", episode.Number);
         }
     }
+
+    // Clear progress bar and show completion
+    System.Console.Write("\r" + new string(' ', 70) + "\r");
+    System.Console.ForegroundColor = ConsoleColor.Green;
+    var successCount = total - failedCount;
+    System.Console.WriteLine($"  ✔ {successCount} episode(s) downloaded" + (failedCount > 0 ? $" ({failedCount} failed)" : ""));
+    System.Console.ResetColor();
 
     Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Green;
@@ -5364,17 +5368,23 @@ static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider 
 
     var total = targetChapters.Count;
     var index = 0;
+    var failedCount = 0;
 
     foreach (var chapter in targetChapters)
     {
         cancellationToken.ThrowIfCancellationRequested();
         index++;
 
+        // Show progress bar
+        var percent = (int)(index * 100.0 / total);
+        var filled = (int)(index * 30.0 / total);
+        var empty = 30 - filled;
+        var bar = new string('█', filled) + new string('░', empty);
+        var chapterLabel = chapter.Number % 1 == 0 ? $"{(int)chapter.Number}" : $"{chapter.Number:0.#}";
+        System.Console.Write($"\r  [{bar}] {percent,3}% - Chapter {chapterLabel,-10}");
+
         var chapterDir = Path.Combine(targetDir, $"Chapter_{chapter.Number:000}");
         Directory.CreateDirectory(chapterDir);
-
-        var stepLabel = $"[{index}/{total}] Chapter {chapter.Number}";
-        var step = ConsoleStep.Start(stepLabel);
 
         try
         {
@@ -5409,15 +5419,20 @@ static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider 
                 chapterDir,
                 chapterSize,
                 cancellationToken);
-
-            step.Succeed($"Chapter {chapter.Number} ({pages.Count} pages)");
         }
         catch (Exception ex)
         {
-            step.Fail($"Failed: {ex.Message}");
+            failedCount++;
             logger.LogWarning("Failed to download chapter {Chapter}: {Error}", chapter.Number, ex.Message);
         }
     }
+
+    // Clear progress bar and show completion
+    System.Console.Write("\r" + new string(' ', 70) + "\r");
+    System.Console.ForegroundColor = ConsoleColor.Green;
+    var successCount = total - failedCount;
+    System.Console.WriteLine($"  ✔ {successCount} chapter(s) downloaded" + (failedCount > 0 ? $" ({failedCount} failed)" : ""));
+    System.Console.ResetColor();
 
     Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Green;
