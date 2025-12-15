@@ -9,7 +9,7 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
-    <Version>0.8.2-beta</Version>
+    <Version>0.9.0-beta</Version>
     <ApplicationIcon>../Assets/Logo/logo.ico</ApplicationIcon>
   </PropertyGroup>
 
