@@ -25,8 +25,22 @@ public sealed class DefaultCliOptions
     /// <summary>Current CLI mode: "anime" or "manga".</summary>
     public string Mode { get; set; } = "anime";
 
+    /// <summary>Default download directory for anime episodes.</summary>
+    public string? AnimeDownloadPath { get; set; }
+
+    /// <summary>Default download directory for manga chapters.</summary>
+    public string? MangaDownloadPath { get; set; }
+
     /// <summary>Parse the Mode string into a CliMode enum.</summary>
     public CliMode GetMode() => Mode?.Equals("manga", StringComparison.OrdinalIgnoreCase) == true
         ? CliMode.Manga
         : CliMode.Anime;
+
+    /// <summary>Get the effective anime download path, defaulting to current directory.</summary>
+    public string GetAnimeDownloadPath() => 
+        string.IsNullOrWhiteSpace(AnimeDownloadPath) ? Environment.CurrentDirectory : AnimeDownloadPath;
+
+    /// <summary>Get the effective manga download path, defaulting to current directory.</summary>
+    public string GetMangaDownloadPath() => 
+        string.IsNullOrWhiteSpace(MangaDownloadPath) ? Environment.CurrentDirectory : MangaDownloadPath;
 }

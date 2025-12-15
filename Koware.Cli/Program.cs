@@ -4246,7 +4246,7 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
 
     if (mode == CliMode.Manga)
     {
-        return await HandleMangaDownloadAsync(args, services, logger, cancellationToken);
+        return await HandleMangaDownloadAsync(args, services, logger, defaults, cancellationToken);
     }
 
     // Anime mode (default)
@@ -4311,7 +4311,7 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
         return 1;
     }
 
-    var targetDir = string.IsNullOrWhiteSpace(outputDir) ? Environment.CurrentDirectory : outputDir;
+    var targetDir = string.IsNullOrWhiteSpace(outputDir) ? defaults.GetAnimeDownloadPath() : outputDir;
     Directory.CreateDirectory(targetDir);
 
     var allAnimeOptions = services.GetService<IOptions<AllAnimeOptions>>()?.Value;
@@ -5137,7 +5137,7 @@ static string? ResolveReaderExecutable(ReaderOptions options)
 /// <summary>
 /// Handle download command in manga mode: download chapter pages to disk.
 /// </summary>
-static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
     var queryParts = new List<string>();
     string? chaptersArg = null;
@@ -5349,7 +5349,7 @@ static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider 
     // Prepare output directory
     var sanitizedTitle = SanitizeFileName(selectedManga.Title);
     var targetDir = string.IsNullOrWhiteSpace(outputDir)
-        ? Path.Combine(Environment.CurrentDirectory, sanitizedTitle)
+        ? Path.Combine(defaults.GetMangaDownloadPath(), sanitizedTitle)
         : Path.Combine(outputDir, sanitizedTitle);
     Directory.CreateDirectory(targetDir);
 
@@ -5389,36 +5389,63 @@ static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider 
         try
         {
             var pages = await mangaCatalog.GetPagesAsync(chapter, cancellationToken);
-            var pageIndex = 0;
+            var pagesFailed = 0;
+            var pagesDownloaded = 0;
+
             foreach (var page in pages.OrderBy(p => p.PageNumber))
             {
-                pageIndex++;
                 var ext = GetImageExtension(page.ImageUrl.ToString());
                 var fileName = $"{page.PageNumber:000}{ext}";
                 var filePath = Path.Combine(chapterDir, fileName);
 
                 if (File.Exists(filePath))
                 {
+                    pagesDownloaded++;
                     continue; // Skip if already downloaded
                 }
 
-                var imageBytes = await httpClient.GetByteArrayAsync(page.ImageUrl, cancellationToken);
-                await File.WriteAllBytesAsync(filePath, imageBytes, cancellationToken);
+                // Use resilient download with retry logic
+                var success = await httpClient.DownloadImageWithRetryAsync(
+                    page.ImageUrl,
+                    filePath,
+                    referer: allMangaOptions?.Referer,
+                    userAgent: allMangaOptions?.UserAgent,
+                    maxRetries: 3,
+                    logger: logger,
+                    cancellationToken: cancellationToken);
+
+                if (success)
+                {
+                    pagesDownloaded++;
+                }
+                else
+                {
+                    pagesFailed++;
+                    logger.LogWarning("Failed to download page {Page} of chapter {Chapter} after retries", page.PageNumber, chapter.Number);
+                }
             }
 
-            // Record download in store
-            var chapterDirInfo = new DirectoryInfo(chapterDir);
-            var chapterSize = chapterDirInfo.EnumerateFiles().Sum(f => f.Length);
-            var downloadStore = services.GetRequiredService<IDownloadStore>();
-            await downloadStore.AddAsync(
-                DownloadType.Chapter,
-                selectedManga.Id.Value,
-                selectedManga.Title,
-                (int)chapter.Number,
-                null,
-                chapterDir,
-                chapterSize,
-                cancellationToken);
+            // Only record if we got at least some pages
+            if (pagesDownloaded > 0)
+            {
+                var chapterDirInfo = new DirectoryInfo(chapterDir);
+                var chapterSize = chapterDirInfo.EnumerateFiles().Sum(f => f.Length);
+                var downloadStore = services.GetRequiredService<IDownloadStore>();
+                await downloadStore.AddAsync(
+                    DownloadType.Chapter,
+                    selectedManga.Id.Value,
+                    selectedManga.Title,
+                    (int)chapter.Number,
+                    null,
+                    chapterDir,
+                    chapterSize,
+                    cancellationToken);
+            }
+
+            if (pagesFailed > 0)
+            {
+                logger.LogWarning("Chapter {Chapter}: {Failed}/{Total} pages failed", chapter.Number, pagesFailed, pages.Count);
+            }
         }
         catch (Exception ex)
         {
@@ -6022,53 +6049,23 @@ static string BuildPlayerTitle(ScrapeResult result, StreamLink stream)
 /// <param name="cancellationToken">Cancellation token.</param>
 static async Task DownloadWithHttpAsync(HttpClient httpClient, StreamLink stream, string outputPath, string? httpReferrer, string? httpUserAgent, ILogger logger, CancellationToken cancellationToken)
 {
-    var request = new HttpRequestMessage(HttpMethod.Get, stream.Url);
-
-    if (!string.IsNullOrWhiteSpace(httpReferrer) && Uri.TryCreate(httpReferrer, UriKind.Absolute, out var refUri))
+    var downloader = new Koware.Cli.Console.ResilientDownloader(httpClient, logger);
+    var options = new Koware.Cli.Console.DownloadOptions
     {
-        request.Headers.Referrer = refUri;
-    }
+        Referer = httpReferrer,
+        UserAgent = httpUserAgent,
+        MaxRetries = 3,
+        EnableResume = true,
+        ShowProgress = true,
+        AttemptTimeout = TimeSpan.FromMinutes(10)
+    };
 
-    if (!string.IsNullOrWhiteSpace(httpUserAgent))
+    var result = await downloader.DownloadFileAsync(stream.Url, outputPath, options, cancellationToken);
+
+    if (!result.Success)
     {
-        request.Headers.TryAddWithoutValidation("User-Agent", httpUserAgent);
+        throw new HttpRequestException($"Download failed after {result.AttemptsUsed} attempts: {result.ErrorMessage}");
     }
-
-    using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-    response.EnsureSuccessStatusCode();
-
-    var totalBytes = response.Content.Headers.ContentLength;
-
-    await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-    await using var fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
-
-    var buffer = new byte[81920];
-    long readTotal = 0;
-    int read;
-
-    // Create progress bar if we know the total size
-    using var progressBar = totalBytes.HasValue && totalBytes.Value > 0
-        ? new Koware.Cli.Console.ConsoleProgressBar("Downloading", totalBytes.Value)
-        : null;
-
-    var lastReportTime = DateTime.UtcNow;
-
-    while ((read = await responseStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
-    {
-        await fileStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-        readTotal += read;
-
-        // Report progress at most every 100ms to avoid console flicker
-        var now = DateTime.UtcNow;
-        if (progressBar is not null && (now - lastReportTime).TotalMilliseconds >= 100)
-        {
-            progressBar.Report(readTotal);
-            lastReportTime = now;
-        }
-    }
-
-    // Complete the progress bar
-    progressBar?.Complete("Download complete");
 }
 
 /// <summary>
@@ -7202,10 +7199,10 @@ static List<string> GetHelpLines(string command, CliMode mode)
             break;
             
         case "config":
-            lines.Add("config - View or update appsettings.user.json");
+            lines.Add("config - Interactive configuration editor");
             lines.Add("");
             lines.Add("Subcommands:");
-            lines.Add("  koware config                    Show config summary");
+            lines.Add("  koware config                    Interactive editor (fuzzy search)");
             lines.Add("  koware config show [--json]      Show all config values");
             lines.Add("  koware config path               Print config file path");
             lines.Add("  koware config get <path>         Read a specific value");
@@ -7220,16 +7217,19 @@ static List<string> GetHelpLines(string command, CliMode mode)
             lines.Add("  --show             Show current config");
             lines.Add("");
             lines.Add("Config paths (use with get/set/unset):");
-            lines.Add("  Player:Command     Player executable (vlc, mpv, etc.)");
-            lines.Add("  Player:Arguments   Arguments to pass to player");
-            lines.Add("  Reader:Command     Reader executable");
-            lines.Add("  Defaults:Quality   Default quality preference");
-            lines.Add("  Defaults:Index     Default search result index");
-            lines.Add("  Defaults:Mode      Default mode (anime/manga)");
+            lines.Add("  Player:Command              Player executable (vlc, mpv, etc.)");
+            lines.Add("  Player:Arguments            Arguments to pass to player");
+            lines.Add("  Reader:Command              Reader executable");
+            lines.Add("  Defaults:Quality            Default quality preference");
+            lines.Add("  Defaults:Index              Default search result index");
+            lines.Add("  Defaults:Mode               Default mode (anime/manga)");
+            lines.Add("  Defaults:AnimeDownloadPath  Default anime download directory");
+            lines.Add("  Defaults:MangaDownloadPath  Default manga download directory");
             lines.Add("");
             lines.Add("Examples:");
             lines.Add("  koware config set Player:Command \"vlc\"");
             lines.Add("  koware config set Defaults:Quality \"1080p\"");
+            lines.Add("  koware config set Defaults:MangaDownloadPath \"~/Downloads/Manga\"");
             lines.Add("  koware config get Player:Command");
             lines.Add("  koware config --quality 1080p --player mpv");
             break;
@@ -7393,7 +7393,7 @@ static int HandleHelp(string[] args, CliMode mode)
             ("history", "Browse and filter watch/read history"),
             ("list", "Track your anime/manga watch/read status"),
             ("offline", "View downloaded content available for offline viewing"),
-            ("config", "View or update appsettings.user.json"),
+            ("config", "Interactive configuration editor with fuzzy search"),
             ("mode", "Switch between anime and manga modes"),
             ("provider", "Manage providers: autoconfig from URL, list, test, enable/disable"),
             ("doctor", "Run a full health check (config, providers, tools)"),
@@ -7558,9 +7558,9 @@ static int HandleHelp(string[] args, CliMode mode)
             Console.WriteLine("  • --stats shows counts per anime/manga.");
             break;
         case "config":
-            PrintTopicHeader("config", "View or update appsettings.user.json.");
+            PrintTopicHeader("config", "Interactive configuration editor.");
             Console.WriteLine("Usage:");
-            Console.WriteLine("  koware config                         Show summary");
+            Console.WriteLine("  koware config                         Interactive editor (fuzzy search)");
             Console.WriteLine("  koware config show [--json]           Show config (raw JSON with --json)");
             Console.WriteLine("  koware config path                    Print config file path");
             Console.WriteLine("  koware config get <path> [--json]     Read a value (e.g., Player:Command)");
@@ -7954,8 +7954,7 @@ static int HandleConfig(string[] args)
 
     if (args.Length == 1)
     {
-        PrintConfigSummary(root, configPath, rawJson: false);
-        return 0;
+        return HandleConfigInteractive(root, configPath);
     }
 
     var verb = args[1].ToLowerInvariant();
@@ -8059,12 +8058,193 @@ static int HandleConfig(string[] args)
 }
 
 /// <summary>
+/// Interactive configuration editor using fuzzy selector.
+/// </summary>
+static int HandleConfigInteractive(JsonObject root, string configPath)
+{
+    var configOptions = new List<(string Path, string Description, string? CurrentValue)>
+    {
+        ("Defaults:Mode", "CLI mode (anime/manga)", GetConfigValueString(root, "Defaults:Mode")),
+        ("Defaults:Quality", "Default quality preference", GetConfigValueString(root, "Defaults:Quality")),
+        ("Defaults:PreferredMatchIndex", "Default search result index", GetConfigValueString(root, "Defaults:PreferredMatchIndex")),
+        ("Defaults:AnimeDownloadPath", "Anime download directory", GetConfigValueString(root, "Defaults:AnimeDownloadPath")),
+        ("Defaults:MangaDownloadPath", "Manga download directory", GetConfigValueString(root, "Defaults:MangaDownloadPath")),
+        ("Player:Command", "Video player executable", GetConfigValueString(root, "Player:Command")),
+        ("Player:Arguments", "Video player arguments", GetConfigValueString(root, "Player:Arguments")),
+        ("Reader:Command", "Manga reader executable", GetConfigValueString(root, "Reader:Command")),
+        ("Reader:Arguments", "Manga reader arguments", GetConfigValueString(root, "Reader:Arguments")),
+    };
+
+    while (true)
+    {
+        var result = InteractiveSelect.Show(
+            configOptions,
+            opt => $"{opt.Path,-32} {(string.IsNullOrEmpty(opt.CurrentValue) ? "(not set)" : opt.CurrentValue)}",
+            new SelectorOptions<(string Path, string Description, string? CurrentValue)>
+            {
+                Prompt = "⚙ Configuration",
+                MaxVisibleItems = 12,
+                ShowSearch = true,
+                ShowPreview = true,
+                PreviewFunc = opt => opt.Description,
+                EmptyMessage = "No configuration options available"
+            });
+
+        if (result.Cancelled)
+        {
+            return 0;
+        }
+
+        var selected = result.Selected;
+        var currentDisplay = string.IsNullOrEmpty(selected.CurrentValue) ? "(not set)" : selected.CurrentValue;
+
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"⚙ {selected.Path}");
+        Console.ResetColor();
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"   {selected.Description}");
+        Console.WriteLine($"   Current: {currentDisplay}");
+        Console.ResetColor();
+        Console.WriteLine();
+
+        // Show input options based on the setting type
+        string? newValue = null;
+        if (selected.Path == "Defaults:Mode")
+        {
+            var modeResult = InteractiveSelect.Show(
+                new[] { "anime", "manga" },
+                m => m,
+                new SelectorOptions<string> { Prompt = "Select mode", MaxVisibleItems = 3, ShowSearch = false });
+            if (!modeResult.Cancelled && modeResult.Selected != null)
+            {
+                newValue = modeResult.Selected;
+            }
+        }
+        else if (selected.Path.EndsWith("DownloadPath"))
+        {
+            Console.Write("Enter path (or empty to unset): ");
+            var input = Console.ReadLine();
+            if (input != null)
+            {
+                newValue = string.IsNullOrWhiteSpace(input) ? null : input.Trim();
+            }
+        }
+        else if (selected.Path == "Defaults:Quality")
+        {
+            var qualityOptions = new[] { "1080p", "720p", "480p", "360p", "auto" };
+            var qualityResult = InteractiveSelect.Show(
+                qualityOptions,
+                q => q,
+                new SelectorOptions<string> { Prompt = "Select quality", MaxVisibleItems = 6, ShowSearch = false });
+            if (!qualityResult.Cancelled && qualityResult.Selected != null)
+            {
+                newValue = qualityResult.Selected == "auto" ? null : qualityResult.Selected;
+            }
+        }
+        else if (selected.Path == "Defaults:PreferredMatchIndex")
+        {
+            Console.Write("Enter index (1-10, or empty to unset): ");
+            var input = Console.ReadLine();
+            if (!string.IsNullOrWhiteSpace(input) && int.TryParse(input, out var idx) && idx >= 1 && idx <= 10)
+            {
+                newValue = idx.ToString();
+            }
+            else if (string.IsNullOrWhiteSpace(input))
+            {
+                newValue = null;
+            }
+        }
+        else
+        {
+            Console.Write("Enter value (or empty to unset): ");
+            var input = Console.ReadLine();
+            if (input != null)
+            {
+                newValue = string.IsNullOrWhiteSpace(input) ? null : input.Trim();
+            }
+        }
+
+        // Apply the change
+        if (newValue == null && !string.IsNullOrEmpty(selected.CurrentValue))
+        {
+            TryUnsetConfigValue(root, selected.Path);
+            SaveUserConfig(root, configPath);
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"{Icons.Success} Removed {selected.Path}");
+            Console.ResetColor();
+        }
+        else if (newValue != null)
+        {
+            if (TrySetConfigValue(root, selected.Path, newValue, out var error))
+            {
+                SaveUserConfig(root, configPath);
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"{Icons.Success} Set {selected.Path} = {newValue}");
+                Console.ResetColor();
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"{Icons.Error} {error}");
+                Console.ResetColor();
+            }
+        }
+
+        // Refresh the config options with updated values
+        configOptions = new List<(string Path, string Description, string? CurrentValue)>
+        {
+            ("Defaults:Mode", "CLI mode (anime/manga)", GetConfigValueString(root, "Defaults:Mode")),
+            ("Defaults:Quality", "Default quality preference", GetConfigValueString(root, "Defaults:Quality")),
+            ("Defaults:PreferredMatchIndex", "Default search result index", GetConfigValueString(root, "Defaults:PreferredMatchIndex")),
+            ("Defaults:AnimeDownloadPath", "Anime download directory", GetConfigValueString(root, "Defaults:AnimeDownloadPath")),
+            ("Defaults:MangaDownloadPath", "Manga download directory", GetConfigValueString(root, "Defaults:MangaDownloadPath")),
+            ("Player:Command", "Video player executable", GetConfigValueString(root, "Player:Command")),
+            ("Player:Arguments", "Video player arguments", GetConfigValueString(root, "Player:Arguments")),
+            ("Reader:Command", "Manga reader executable", GetConfigValueString(root, "Reader:Command")),
+            ("Reader:Arguments", "Manga reader arguments", GetConfigValueString(root, "Reader:Arguments")),
+        };
+
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine("Press any key to continue...");
+        Console.ResetColor();
+        Console.ReadKey(intercept: true);
+    }
+}
+
+/// <summary>
+/// Get a config value as a display string.
+/// </summary>
+static string? GetConfigValueString(JsonObject root, string path)
+{
+    if (!TryGetConfigValue(root, path, out var value) || value is null)
+    {
+        return null;
+    }
+
+    if (value is JsonValue jsonValue)
+    {
+        if (jsonValue.TryGetValue<string>(out var strVal))
+        {
+            return string.IsNullOrWhiteSpace(strVal) ? null : strVal;
+        }
+        if (jsonValue.TryGetValue<int>(out var intVal))
+        {
+            return intVal.ToString();
+        }
+    }
+
+    return value.ToJsonString();
+}
+
+/// <summary>
 /// Print a short usage line for the <c>koware config</c> command.
 /// </summary>
 static void PrintConfigUsage()
 {
     Console.WriteLine("Usage:");
-    Console.WriteLine("  koware config                         Show config summary");
+    Console.WriteLine("  koware config                         Interactive config editor");
     Console.WriteLine("  koware config show [--json]           Show config (raw JSON with --json)");
     Console.WriteLine("  koware config path                    Print config file path");
     Console.WriteLine("  koware config get <path> [--json]     Read a value (e.g., Player:Command)");
