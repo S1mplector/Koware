@@ -5851,18 +5851,38 @@ static async Task DownloadWithHttpAsync(HttpClient httpClient, StreamLink stream
     using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
     response.EnsureSuccessStatusCode();
 
-    var total = response.Content.Headers.ContentLength;
+    var totalBytes = response.Content.Headers.ContentLength;
 
     await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
     await using var fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
 
     var buffer = new byte[81920];
+    long readTotal = 0;
     int read;
+
+    // Create progress bar if we know the total size
+    using var progressBar = totalBytes.HasValue && totalBytes.Value > 0
+        ? new Koware.Cli.Console.ConsoleProgressBar("Downloading", totalBytes.Value)
+        : null;
+
+    var lastReportTime = DateTime.UtcNow;
 
     while ((read = await responseStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
     {
         await fileStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        readTotal += read;
+
+        // Report progress at most every 100ms to avoid console flicker
+        var now = DateTime.UtcNow;
+        if (progressBar is not null && (now - lastReportTime).TotalMilliseconds >= 100)
+        {
+            progressBar.Report(readTotal);
+            lastReportTime = now;
+        }
     }
+
+    // Complete the progress bar
+    progressBar?.Complete("Download complete");
 }
 
 /// <summary>

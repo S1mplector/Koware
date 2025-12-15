@@ -42,12 +42,44 @@ public sealed record KowareLatestVersion(
     string? Name);
 
 /// <summary>
+/// Progress information for download operations.
+/// </summary>
+/// <param name="BytesDownloaded">Bytes downloaded so far.</param>
+/// <param name="TotalBytes">Total bytes to download (null if unknown).</param>
+/// <param name="Status">Current status message.</param>
+/// <param name="Phase">Current phase of the update process.</param>
+public sealed record UpdateProgress(
+    long BytesDownloaded,
+    long? TotalBytes,
+    string Status,
+    UpdatePhase Phase);
+
+/// <summary>
+/// Phases of the update process.
+/// </summary>
+public enum UpdatePhase
+{
+    /// <summary>Checking GitHub API for latest release.</summary>
+    CheckingVersion,
+    /// <summary>Downloading the release asset.</summary>
+    Downloading,
+    /// <summary>Extracting zip archive.</summary>
+    Extracting,
+    /// <summary>Launching installer.</summary>
+    Launching,
+    /// <summary>Update complete.</summary>
+    Complete
+}
+
+/// <summary>
 /// Static helper to check for updates and download/run the latest Koware installer from GitHub Releases.
 /// </summary>
 public static class KowareUpdater
 {
     private const string Owner = "S1mplector";
     private const string Repo = "Koware";
+    private const int MaxRetries = 3;
+    private const int RetryDelayMs = 1000;
 
     /// <summary>
     /// Query GitHub for the latest release version without downloading.
@@ -73,8 +105,31 @@ public static class KowareUpdater
     /// and attempts to find and launch an installer. If no installer is found,
     /// the extracted folder is opened for manual installation.
     /// </remarks>
-    public static async Task<KowareUpdateResult> DownloadAndRunLatestInstallerAsync(
+    public static Task<KowareUpdateResult> DownloadAndRunLatestInstallerAsync(
         IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        // Wrap string progress to UpdateProgress for backward compatibility
+        IProgress<UpdateProgress>? updateProgress = progress != null
+            ? new Progress<UpdateProgress>(p => progress.Report(p.Status))
+            : null;
+        return DownloadAndRunLatestInstallerAsync(updateProgress, cancellationToken);
+    }
+
+    /// <summary>
+    /// Download the latest release from GitHub and extract/run the installer with detailed progress.
+    /// </summary>
+    /// <param name="progress">Optional progress reporter for detailed update progress.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result indicating success/failure with metadata.</returns>
+    /// <remarks>
+    /// Windows only. Downloads to the user's Downloads folder, extracts if needed,
+    /// and attempts to find and launch an installer. If no installer is found,
+    /// the extracted folder is opened for manual installation.
+    /// Includes retry logic for transient network failures.
+    /// </remarks>
+    public static async Task<KowareUpdateResult> DownloadAndRunLatestInstallerAsync(
+        IProgress<UpdateProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         if (!OperatingSystem.IsWindows())
@@ -91,12 +146,13 @@ public static class KowareUpdater
         }
 
         using var httpClient = CreateGitHubClient();
+        httpClient.Timeout = TimeSpan.FromMinutes(30); // Long timeout for large downloads
 
         try
         {
-            progress?.Report("Contacting GitHub releases API...");
+            progress?.Report(new UpdateProgress(0, null, "Contacting GitHub releases API...", UpdatePhase.CheckingVersion));
 
-            var latest = await GetLatestInstallerAssetAsync(httpClient, cancellationToken).ConfigureAwait(false);
+            var latest = await GetLatestInstallerAssetWithRetryAsync(httpClient, cancellationToken).ConfigureAwait(false);
             if (latest.AssetUrl is null || string.IsNullOrWhiteSpace(latest.AssetName))
             {
                 return new KowareUpdateResult(
@@ -115,8 +171,8 @@ public static class KowareUpdater
             var safeTag = string.IsNullOrWhiteSpace(latest.Tag) ? "latest" : SanitizeForPath(latest.Tag);
             var downloadPath = Path.Combine(downloadsFolder, latest.AssetName);
 
-            progress?.Report($"Downloading {latest.AssetName} to Downloads folder...");
-            var containerPath = await DownloadAsync(httpClient, latest.AssetUrl, downloadPath, progress, cancellationToken).ConfigureAwait(false);
+            progress?.Report(new UpdateProgress(0, latest.AssetSize, $"Downloading {latest.AssetName}...", UpdatePhase.Downloading));
+            var containerPath = await DownloadWithRetryAsync(httpClient, latest.AssetUrl, downloadPath, latest.AssetSize, progress, cancellationToken).ConfigureAwait(false);
 
             var extension = Path.GetExtension(containerPath);
             string? installerPath = null;
@@ -129,7 +185,7 @@ public static class KowareUpdater
                 installerPath = containerPath;
                 extractPath = downloadsFolder;
                 
-                progress?.Report($"Launching {Path.GetFileName(installerPath)}...");
+                progress?.Report(new UpdateProgress(latest.AssetSize ?? 0, latest.AssetSize, $"Launching {Path.GetFileName(installerPath)}...", UpdatePhase.Launching));
                 LaunchExecutable(installerPath);
                 installerLaunched = true;
             }
@@ -153,7 +209,7 @@ public static class KowareUpdater
                     }
                 }
 
-                progress?.Report($"Extracting to: {extractPath}");
+                progress?.Report(new UpdateProgress(0, null, $"Extracting to: {extractPath}", UpdatePhase.Extracting));
                 ZipFile.ExtractToDirectory(containerPath, extractPath, overwriteFiles: true);
 
                 // Try to find an installer executable
@@ -161,16 +217,14 @@ public static class KowareUpdater
 
                 if (installerPath != null)
                 {
-                    progress?.Report($"Found installer: {Path.GetFileName(installerPath)}");
-                    progress?.Report("Launching installer...");
+                    progress?.Report(new UpdateProgress(0, null, $"Found installer: {Path.GetFileName(installerPath)}", UpdatePhase.Launching));
                     LaunchExecutable(installerPath);
                     installerLaunched = true;
                 }
                 else
                 {
                     // No installer found - open the folder for manual installation
-                    progress?.Report("No installer executable found in archive.");
-                    progress?.Report($"Opening folder: {extractPath}");
+                    progress?.Report(new UpdateProgress(0, null, "No installer executable found in archive. Opening folder...", UpdatePhase.Complete));
                     OpenFolder(extractPath);
                 }
 
@@ -309,7 +363,102 @@ public static class KowareUpdater
         return client;
     }
 
-    /// <summary>Download a file from a URL to a local path with progress reporting.</summary>
+    /// <summary>Download a file from a URL to a local path with retry logic and detailed progress.</summary>
+    private static async Task<string> DownloadWithRetryAsync(
+        HttpClient client,
+        Uri url,
+        string destinationPath,
+        long? expectedSize,
+        IProgress<UpdateProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        Exception? lastException = null;
+        
+        for (var attempt = 1; attempt <= MaxRetries; attempt++)
+        {
+            try
+            {
+                return await DownloadCoreAsync(client, url, destinationPath, expectedSize, progress, cancellationToken).ConfigureAwait(false);
+            }
+            catch (HttpRequestException ex) when (attempt < MaxRetries)
+            {
+                lastException = ex;
+                progress?.Report(new UpdateProgress(0, expectedSize, $"Download failed, retrying ({attempt}/{MaxRetries})...", UpdatePhase.Downloading));
+                
+                // Clean up partial download
+                try { if (File.Exists(destinationPath)) File.Delete(destinationPath); } catch { }
+                
+                await Task.Delay(RetryDelayMs * attempt, cancellationToken).ConfigureAwait(false);
+            }
+            catch (IOException ex) when (attempt < MaxRetries)
+            {
+                lastException = ex;
+                progress?.Report(new UpdateProgress(0, expectedSize, $"I/O error, retrying ({attempt}/{MaxRetries})...", UpdatePhase.Downloading));
+                
+                // Clean up partial download
+                try { if (File.Exists(destinationPath)) File.Delete(destinationPath); } catch { }
+                
+                await Task.Delay(RetryDelayMs * attempt, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        
+        throw lastException ?? new HttpRequestException("Download failed after retries.");
+    }
+
+    /// <summary>Core download implementation with byte-level progress reporting.</summary>
+    private static async Task<string> DownloadCoreAsync(
+        HttpClient client,
+        Uri url,
+        string destinationPath,
+        long? expectedSize,
+        IProgress<UpdateProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+
+        var totalBytes = response.Content.Headers.ContentLength ?? expectedSize;
+
+        if (File.Exists(destinationPath))
+        {
+            File.Delete(destinationPath);
+        }
+
+        // Ensure directory exists
+        var directory = Path.GetDirectoryName(destinationPath);
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using var fileStream = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+
+        var buffer = new byte[81920];
+        long readTotal = 0;
+        int read;
+        var lastReportTime = DateTime.UtcNow;
+
+        while ((read = await responseStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false)) > 0)
+        {
+            await fileStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+            readTotal += read;
+
+            // Report progress at most every 100ms to avoid console flicker
+            var now = DateTime.UtcNow;
+            if ((now - lastReportTime).TotalMilliseconds >= 100)
+            {
+                progress?.Report(new UpdateProgress(readTotal, totalBytes, "Downloading...", UpdatePhase.Downloading));
+                lastReportTime = now;
+            }
+        }
+
+        // Final progress report
+        progress?.Report(new UpdateProgress(readTotal, totalBytes, "Download complete", UpdatePhase.Downloading));
+        return destinationPath;
+    }
+
+    /// <summary>Download a file from a URL to a local path with progress reporting (legacy).</summary>
     private static async Task<string> DownloadAsync(
         HttpClient client,
         Uri url,
@@ -380,10 +529,35 @@ public static class KowareUpdater
     }
 
     /// <summary>
+    /// Query GitHub API for the latest release and find the best installer asset with retry logic.
+    /// </summary>
+    private static async Task<(string? Tag, string? Name, string? AssetName, Uri? AssetUrl, long? AssetSize)> GetLatestInstallerAssetWithRetryAsync(
+        HttpClient client,
+        CancellationToken cancellationToken)
+    {
+        Exception? lastException = null;
+        
+        for (var attempt = 1; attempt <= MaxRetries; attempt++)
+        {
+            try
+            {
+                return await GetLatestInstallerAssetAsync(client, cancellationToken).ConfigureAwait(false);
+            }
+            catch (HttpRequestException ex) when (attempt < MaxRetries)
+            {
+                lastException = ex;
+                await Task.Delay(RetryDelayMs * attempt, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        
+        throw lastException ?? new HttpRequestException("Failed to fetch release information after retries.");
+    }
+
+    /// <summary>
     /// Query GitHub API for the latest release and find the best installer asset.
     /// Uses /releases endpoint to include prereleases (e.g., beta versions).
     /// </summary>
-    private static async Task<(string? Tag, string? Name, string? AssetName, Uri? AssetUrl)> GetLatestInstallerAssetAsync(
+    private static async Task<(string? Tag, string? Name, string? AssetName, Uri? AssetUrl, long? AssetSize)> GetLatestInstallerAssetAsync(
         HttpClient client,
         CancellationToken cancellationToken)
     {
@@ -399,7 +573,7 @@ public static class KowareUpdater
         // /releases returns an array, so get the first element
         if (document.RootElement.ValueKind != JsonValueKind.Array || document.RootElement.GetArrayLength() == 0)
         {
-            return (null, null, null, null);
+            return (null, null, null, null, null);
         }
 
         var root = document.RootElement[0];
@@ -408,6 +582,7 @@ public static class KowareUpdater
         string? name = null;
         string? assetName = null;
         Uri? assetUrl = null;
+        long? assetSize = null;
 
         if (root.TryGetProperty("tag_name", out var tagElement) && tagElement.ValueKind == JsonValueKind.String)
         {
@@ -456,10 +631,16 @@ public static class KowareUpdater
                 bestScore = score;
                 assetName = candidateName;
                 assetUrl = parsed;
+                
+                // Get asset size if available
+                if (asset.TryGetProperty("size", out var sizeElement) && sizeElement.TryGetInt64(out var size))
+                {
+                    assetSize = size;
+                }
             }
         }
 
-        return (tag, name, assetName, assetUrl);
+        return (tag, name, assetName, assetUrl, assetSize);
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 // Author: Ilgaz Mehmetoğlu
+using Koware.Cli.Console;
 using Koware.Updater;
 
 namespace Koware.Cli.Commands;
@@ -102,13 +103,59 @@ public sealed class UpdateCommand : ICliCommand
                 return 1;
             }
 
-            // Download and run installer
-            var progress = new Progress<string>(message =>
+            // Download and run installer with visual progress bar
+            ConsoleProgressBar? progressBar = null;
+            var progress = new Progress<UpdateProgress>(p =>
             {
-                System.Console.WriteLine($"  {message}");
+                switch (p.Phase)
+                {
+                    case UpdatePhase.CheckingVersion:
+                        System.Console.WriteLine($"  {p.Status}");
+                        break;
+                        
+                    case UpdatePhase.Downloading:
+                        // Create progress bar on first download progress
+                        if (progressBar is null && p.TotalBytes.HasValue && p.TotalBytes.Value > 0)
+                        {
+                            progressBar = new ConsoleProgressBar("Downloading", p.TotalBytes.Value);
+                        }
+                        
+                        if (progressBar is not null)
+                        {
+                            progressBar.Report(p.BytesDownloaded);
+                        }
+                        else
+                        {
+                            System.Console.WriteLine($"  {p.Status}");
+                        }
+                        break;
+                        
+                    case UpdatePhase.Extracting:
+                        progressBar?.Complete("Download complete");
+                        progressBar?.Dispose();
+                        progressBar = null;
+                        System.Console.WriteLine($"  {p.Status}");
+                        break;
+                        
+                    case UpdatePhase.Launching:
+                    case UpdatePhase.Complete:
+                        progressBar?.Complete("Download complete");
+                        progressBar?.Dispose();
+                        progressBar = null;
+                        System.Console.WriteLine($"  {p.Status}");
+                        break;
+                }
             });
 
-            var result = await KowareUpdater.DownloadAndRunLatestInstallerAsync(progress, context.CancellationToken);
+            KowareUpdateResult result;
+            try
+            {
+                result = await KowareUpdater.DownloadAndRunLatestInstallerAsync(progress, context.CancellationToken);
+            }
+            finally
+            {
+                progressBar?.Dispose();
+            }
 
             if (!result.Success)
             {
