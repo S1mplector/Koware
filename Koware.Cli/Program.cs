@@ -3963,7 +3963,22 @@ static async Task<int> HandleOfflineAsync(string[] args, IServiceProvider servic
     // Interactive mode when no flags
     if (!jsonOutput && !showStats && !cleanup)
     {
-        var offlineManager = new Koware.Cli.Console.InteractiveOfflineManager(downloadStore, typeFilter, cancellationToken: cancellationToken);
+        Func<DownloadEntry, Task>? onPlay = null;
+        
+        if (typeFilter == DownloadType.Chapter)
+        {
+            onPlay = entry => PlayOfflineChapterAsync(entry, downloadStore, services, logger, cancellationToken);
+        }
+        else if (typeFilter == DownloadType.Episode)
+        {
+            onPlay = entry => PlayOfflineEpisodeAsync(entry, services, logger);
+        }
+        
+        var offlineManager = new Koware.Cli.Console.InteractiveOfflineManager(
+            downloadStore,
+            typeFilter,
+            onPlay,
+            cancellationToken);
         return await offlineManager.RunAsync();
     }
     
@@ -4104,6 +4119,222 @@ static string FormatNumberRanges(IReadOnlyList<int> numbers)
     ranges.Add(start == end ? start.ToString() : $"{start}-{end}");
     
     return string.Join(", ", ranges);
+}
+
+/// <summary>
+/// Launch the manga reader for an offline chapter directory.
+/// </summary>
+static async Task PlayOfflineChapterAsync(DownloadEntry entry, IDownloadStore downloadStore, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
+{
+    if (entry.Type != DownloadType.Chapter)
+    {
+        return;
+    }
+
+    if (!Directory.Exists(entry.FilePath))
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"File(s) missing for Chapter {entry.Number}. Run 'koware offline --cleanup' to remove stale entries.");
+        Console.ResetColor();
+        return;
+    }
+
+    var readerOptions = services.GetRequiredService<IOptions<ReaderOptions>>().Value;
+
+    var allEntries = await downloadStore.GetForContentAsync(entry.ContentId, cancellationToken);
+    var chapters = allEntries
+        .Where(d => d.Type == DownloadType.Chapter && (Directory.Exists(d.FilePath) || File.Exists(d.FilePath)))
+        .OrderBy(d => d.Number)
+        .Select(d => new
+        {
+            Entry = d,
+            Chapter = new Chapter(
+                new ChapterId(d.Id.ToString()),
+                $"Chapter {d.Number}",
+                d.Number,
+                new Uri(Path.GetFullPath(d.FilePath)))
+        })
+        .ToList();
+
+    if (chapters.Count == 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("No offline chapters found for this title.");
+        Console.ResetColor();
+        return;
+    }
+
+    var orderedChapters = chapters.OrderBy(c => c.Chapter.Number).ToList();
+    var current = orderedChapters.FirstOrDefault(c => c.Entry.Id == entry.Id) ?? orderedChapters.First();
+
+    var navPath = Path.Combine(Path.GetTempPath(), $"koware-nav-{Guid.NewGuid():N}.txt");
+    var exitCode = 0;
+
+    try
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var pages = BuildOfflinePages(current.Entry.FilePath);
+            if (pages.Count == 0)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"No images found in {current.Entry.FilePath}");
+                Console.ResetColor();
+                return;
+            }
+
+            var displayTitle = $"{current.Entry.ContentTitle} - Chapter {current.Entry.Number}";
+            exitCode = LaunchReader(
+                readerOptions,
+                pages,
+                orderedChapters.Select(c => c.Chapter).ToArray(),
+                current.Chapter,
+                logger,
+                null,
+                null,
+                displayTitle,
+                navPath,
+                1);
+
+            var nav = ReadNavigation(navPath);
+            if (nav.Action.StartsWith("goto:", StringComparison.OrdinalIgnoreCase))
+            {
+                var targetStr = nav.Action.Substring(5);
+                if (float.TryParse(targetStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var targetNum))
+                {
+                    var next = orderedChapters.FirstOrDefault(c => Math.Abs(c.Chapter.Number - targetNum) < 0.001f);
+                    if (next is not null)
+                    {
+                        current = next;
+                        continue;
+                    }
+                }
+                break;
+            }
+            else if (nav.Action is "next" or "prev")
+            {
+                var idx = orderedChapters.FindIndex(c => c.Entry.Id == current.Entry.Id);
+                if (idx < 0) break;
+
+                if (nav.Action == "next" && idx + 1 < orderedChapters.Count)
+                {
+                    current = orderedChapters[idx + 1];
+                    continue;
+                }
+                if (nav.Action == "prev" && idx - 1 >= 0)
+                {
+                    current = orderedChapters[idx - 1];
+                    continue;
+                }
+                break;
+            }
+            else
+            {
+                break;
+            }
+        }
+    }
+    finally
+    {
+        try { File.Delete(navPath); } catch { }
+    }
+
+    if (exitCode != 0)
+    {
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine("Reader exited with a non-zero code.");
+        Console.ResetColor();
+    }
+}
+
+/// <summary>
+/// Play a downloaded episode/video file with the configured player.
+/// </summary>
+static Task PlayOfflineEpisodeAsync(DownloadEntry entry, IServiceProvider services, ILogger logger)
+{
+    if (entry.Type != DownloadType.Episode)
+    {
+        return Task.CompletedTask;
+    }
+
+    if (!File.Exists(entry.FilePath))
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"File missing for Episode {entry.Number}. Run 'koware offline --cleanup' to remove stale entries.");
+        Console.ResetColor();
+        return Task.CompletedTask;
+    }
+
+    var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
+    var stream = new StreamLink(new Uri(Path.GetFullPath(entry.FilePath)), entry.Quality ?? "offline", "offline", null);
+    var title = $"{entry.ContentTitle} - Episode {entry.Number}";
+    LaunchPlayer(playerOptions, stream, logger, null, null, title);
+    return Task.CompletedTask;
+}
+
+static IReadOnlyCollection<ChapterPage> BuildOfflinePages(string rootPath)
+{
+    if (File.Exists(rootPath))
+    {
+        return new[] { new ChapterPage(1, new Uri(Path.GetFullPath(rootPath))) };
+    }
+
+    if (!Directory.Exists(rootPath))
+    {
+        return Array.Empty<ChapterPage>();
+    }
+
+    var allowedExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"
+    };
+
+    var files = Directory.EnumerateFiles(rootPath)
+        .Where(f => allowedExts.Contains(Path.GetExtension(f)))
+        .Select(f => new { Path = f, Number = ExtractFirstNumber(Path.GetFileNameWithoutExtension(f)) })
+        .OrderBy(f => f.Number ?? int.MaxValue)
+        .ThenBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    var pages = new List<ChapterPage>();
+    var index = 1;
+
+    foreach (var file in files)
+    {
+        var pageNum = file.Number ?? index;
+        pages.Add(new ChapterPage(pageNum, new Uri(Path.GetFullPath(file.Path))));
+        index++;
+    }
+
+    return pages;
+}
+
+static int? ExtractFirstNumber(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value)) return null;
+
+    var start = -1;
+    for (int i = 0; i < value.Length; i++)
+    {
+        if (char.IsDigit(value[i]))
+        {
+            start = i;
+            break;
+        }
+    }
+
+    if (start < 0) return null;
+
+    var end = start + 1;
+    while (end < value.Length && char.IsDigit(value[end]))
+    {
+        end++;
+    }
+
+    var slice = value[start..end];
+    return int.TryParse(slice, out var num) ? num : null;
 }
 
 /// <summary>

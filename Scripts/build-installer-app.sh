@@ -337,8 +337,13 @@ fi
 # Copy CLI into app bundle for reference
 cp "$RESOURCES_DIR/koware" "$APP_DIR/Contents/Resources/"
 
+# Copy app icon if available
+if [ -f "$RESOURCES_DIR/AppIcon.icns" ]; then
+    cp "$RESOURCES_DIR/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
+fi
+
 # Create Info.plist
-cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
+cat > "$APP_DIR/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -350,9 +355,9 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
     <key>CFBundleIdentifier</key>
     <string>com.ilgazmehmetoglu.koware</string>
     <key>CFBundleVersion</key>
-    <string>0.8.1</string>
+    <string>$VERSION</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.8.1-beta</string>
+    <string>$VERSION</string>
     <key>CFBundleExecutable</key>
     <string>Koware</string>
     <key>CFBundlePackageType</key>
@@ -363,6 +368,8 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
     <true/>
     <key>NSRequiresAquaSystemAppearance</key>
     <false/>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
 </dict>
 </plist>
 PLIST
