@@ -35,7 +35,7 @@ public sealed class DownloadEntry
     public string FilePath { get; init; } = string.Empty;
     public long FileSizeBytes { get; init; }
     public DateTimeOffset DownloadedAt { get; init; }
-    public bool Exists => File.Exists(FilePath);
+    public bool Exists => File.Exists(FilePath) || Directory.Exists(FilePath);
 }
 
 /// <summary>
