@@ -50,7 +50,8 @@ public enum DiagnosticCategory
     Data,
     Security,
     Terminal,
-    Updates
+    Updates,
+    Engine
 }
 
 /// <summary>
@@ -108,37 +109,65 @@ public sealed class DiagnosticsEngine
     /// </summary>
     public async Task<IReadOnlyList<DiagnosticResult>> RunAllAsync(CancellationToken cancellationToken = default)
     {
+        return await RunAllWithProgressAsync(null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Run all diagnostic checks with progress reporting.
+    /// </summary>
+    /// <param name="progress">Progress reporter that receives (current, total, categoryName).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<IReadOnlyList<DiagnosticResult>> RunAllWithProgressAsync(
+        IProgress<(int current, int total, string category)>? progress,
+        CancellationToken cancellationToken = default)
+    {
         var results = new List<DiagnosticResult>();
+        const int totalCategories = 11;
+        var currentCategory = 0;
 
         // Environment checks
+        progress?.Report((++currentCategory, totalCategories, "Environment"));
         results.AddRange(RunEnvironmentChecks());
 
         // Terminal checks
+        progress?.Report((++currentCategory, totalCategories, "Terminal"));
         results.AddRange(RunTerminalChecks());
 
         // Configuration checks
+        progress?.Report((++currentCategory, totalCategories, "Configuration"));
         results.AddRange(RunConfigurationChecks());
 
         // Storage checks
+        progress?.Report((++currentCategory, totalCategories, "Storage"));
         results.AddRange(await RunStorageChecksAsync(cancellationToken));
 
         // Data integrity checks
+        progress?.Report((++currentCategory, totalCategories, "Data Integrity"));
         results.AddRange(await RunDataIntegrityChecksAsync(cancellationToken));
 
         // Network checks
+        progress?.Report((++currentCategory, totalCategories, "Network"));
         results.AddRange(await RunNetworkChecksAsync(cancellationToken));
 
         // Security checks
+        progress?.Report((++currentCategory, totalCategories, "Security"));
         results.AddRange(await RunSecurityChecksAsync(cancellationToken));
 
         // Provider checks
+        progress?.Report((++currentCategory, totalCategories, "Providers"));
         results.AddRange(await RunProviderChecksAsync(cancellationToken));
 
         // Toolchain checks
+        progress?.Report((++currentCategory, totalCategories, "Toolchain"));
         results.AddRange(RunToolchainChecks());
 
         // Update checks
+        progress?.Report((++currentCategory, totalCategories, "Updates"));
         results.AddRange(await RunUpdateChecksAsync(cancellationToken));
+
+        // Engine checks (core functionality)
+        progress?.Report((++currentCategory, totalCategories, "Engine"));
+        results.AddRange(await RunEngineChecksAsync(cancellationToken));
 
         return results;
     }
@@ -160,6 +189,7 @@ public sealed class DiagnosticsEngine
             DiagnosticCategory.Providers => await RunProviderChecksAsync(cancellationToken),
             DiagnosticCategory.Toolchain => RunToolchainChecks(),
             DiagnosticCategory.Updates => await RunUpdateChecksAsync(cancellationToken),
+            DiagnosticCategory.Engine => await RunEngineChecksAsync(cancellationToken),
             _ => Array.Empty<DiagnosticResult>()
         };
     }
@@ -1885,6 +1915,307 @@ public sealed class DiagnosticsEngine
 
     #endregion
 
+    #region Engine Checks
+
+    private async Task<List<DiagnosticResult>> RunEngineChecksAsync(CancellationToken cancellationToken)
+    {
+        var results = new List<DiagnosticResult>();
+
+        // Check 1: Assembly loading - verify core assemblies are loadable
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var entryAssembly = Assembly.GetEntryAssembly();
+            var referencedAssemblies = entryAssembly?.GetReferencedAssemblies() ?? Array.Empty<AssemblyName>();
+            var loadedCount = 0;
+            var failedAssemblies = new List<string>();
+
+            foreach (var asmName in referencedAssemblies.Take(20)) // Check first 20 to avoid long delays
+            {
+                try
+                {
+                    Assembly.Load(asmName);
+                    loadedCount++;
+                }
+                catch
+                {
+                    failedAssemblies.Add(asmName.Name ?? "unknown");
+                }
+            }
+            sw.Stop();
+
+            results.Add(new DiagnosticResult
+            {
+                Name = "Assembly Loading",
+                Category = DiagnosticCategory.Engine,
+                Severity = failedAssemblies.Count == 0 ? DiagnosticSeverity.Ok : DiagnosticSeverity.Warning,
+                Message = failedAssemblies.Count == 0 ? $"{loadedCount} assemblies verified" : $"{failedAssemblies.Count} failed to load",
+                Detail = failedAssemblies.Count > 0 ? string.Join(", ", failedAssemblies.Take(5)) : null,
+                Duration = sw.Elapsed
+            });
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            results.Add(new DiagnosticResult
+            {
+                Name = "Assembly Loading",
+                Category = DiagnosticCategory.Engine,
+                Severity = DiagnosticSeverity.Error,
+                Message = "Failed to verify assemblies",
+                Detail = ex.Message,
+                Duration = sw.Elapsed
+            });
+        }
+
+        // Check 2: Configuration serialization - verify JSON serialization works
+        sw = Stopwatch.StartNew();
+        try
+        {
+            var testObject = new { test = "value", number = 42, nested = new { inner = true } };
+            var json = JsonSerializer.Serialize(testObject);
+            var parsed = JsonDocument.Parse(json);
+            var valid = parsed.RootElement.TryGetProperty("test", out var prop) && prop.GetString() == "value";
+            sw.Stop();
+
+            results.Add(new DiagnosticResult
+            {
+                Name = "JSON Serialization",
+                Category = DiagnosticCategory.Engine,
+                Severity = valid ? DiagnosticSeverity.Ok : DiagnosticSeverity.Error,
+                Message = valid ? "Working" : "Serialization mismatch",
+                Duration = sw.Elapsed
+            });
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            results.Add(new DiagnosticResult
+            {
+                Name = "JSON Serialization",
+                Category = DiagnosticCategory.Engine,
+                Severity = DiagnosticSeverity.Error,
+                Message = "Failed",
+                Detail = ex.Message,
+                Duration = sw.Elapsed
+            });
+        }
+
+        // Check 3: Async/Task infrastructure
+        sw = Stopwatch.StartNew();
+        try
+        {
+            var tcs = new TaskCompletionSource<bool>();
+            tcs.SetResult(true);
+            var result = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken);
+            sw.Stop();
+
+            results.Add(new DiagnosticResult
+            {
+                Name = "Async Infrastructure",
+                Category = DiagnosticCategory.Engine,
+                Severity = result ? DiagnosticSeverity.Ok : DiagnosticSeverity.Error,
+                Message = result ? "Working" : "Task completion failed",
+                Duration = sw.Elapsed
+            });
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            results.Add(new DiagnosticResult
+            {
+                Name = "Async Infrastructure",
+                Category = DiagnosticCategory.Engine,
+                Severity = DiagnosticSeverity.Error,
+                Message = "Failed",
+                Detail = ex.Message,
+                Duration = sw.Elapsed
+            });
+        }
+
+        // Check 4: File I/O - verify temp file operations work
+        sw = Stopwatch.StartNew();
+        try
+        {
+            var tempFile = Path.Combine(Path.GetTempPath(), $"koware-engine-test-{Guid.NewGuid():N}.tmp");
+            var testContent = "Koware engine test " + DateTime.UtcNow.Ticks;
+            await File.WriteAllTextAsync(tempFile, testContent, cancellationToken);
+            var readBack = await File.ReadAllTextAsync(tempFile, cancellationToken);
+            File.Delete(tempFile);
+            sw.Stop();
+
+            var valid = readBack == testContent;
+            results.Add(new DiagnosticResult
+            {
+                Name = "File I/O",
+                Category = DiagnosticCategory.Engine,
+                Severity = valid ? DiagnosticSeverity.Ok : DiagnosticSeverity.Error,
+                Message = valid ? "Working" : "Read/write mismatch",
+                Duration = sw.Elapsed
+            });
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            results.Add(new DiagnosticResult
+            {
+                Name = "File I/O",
+                Category = DiagnosticCategory.Engine,
+                Severity = DiagnosticSeverity.Error,
+                Message = "Failed",
+                Detail = ex.Message,
+                Duration = sw.Elapsed
+            });
+        }
+
+        // Check 5: HTTP client functionality
+        sw = Stopwatch.StartNew();
+        try
+        {
+            using var testClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            testClient.DefaultRequestHeaders.UserAgent.ParseAdd("Koware-EngineTest/1.0");
+            
+            // Simple connectivity test - just check if we can create and configure the client properly
+            var baseAddress = new Uri("https://api.github.com");
+            var request = new HttpRequestMessage(HttpMethod.Head, baseAddress);
+            
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(5000);
+            
+            var response = await testClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            sw.Stop();
+
+            results.Add(new DiagnosticResult
+            {
+                Name = "HTTP Client",
+                Category = DiagnosticCategory.Engine,
+                Severity = DiagnosticSeverity.Ok,
+                Message = "Working",
+                Detail = $"Response: {(int)response.StatusCode}",
+                Duration = sw.Elapsed
+            });
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            results.Add(new DiagnosticResult
+            {
+                Name = "HTTP Client",
+                Category = DiagnosticCategory.Engine,
+                Severity = DiagnosticSeverity.Warning,
+                Message = "Limited connectivity",
+                Detail = ex.Message.Length > 100 ? ex.Message[..100] + "..." : ex.Message,
+                Duration = sw.Elapsed
+            });
+        }
+
+        // Check 6: Garbage collection / memory management
+        sw = Stopwatch.StartNew();
+        try
+        {
+            var beforeGc = GC.GetTotalMemory(forceFullCollection: false);
+            GC.Collect(0, GCCollectionMode.Optimized, blocking: false);
+            var afterGc = GC.GetTotalMemory(forceFullCollection: false);
+            sw.Stop();
+
+            results.Add(new DiagnosticResult
+            {
+                Name = "Memory Management",
+                Category = DiagnosticCategory.Engine,
+                Severity = DiagnosticSeverity.Ok,
+                Message = "Working",
+                Detail = $"Heap: {afterGc / (1024.0 * 1024):F1} MB",
+                Duration = sw.Elapsed
+            });
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            results.Add(new DiagnosticResult
+            {
+                Name = "Memory Management",
+                Category = DiagnosticCategory.Engine,
+                Severity = DiagnosticSeverity.Warning,
+                Message = "Check failed",
+                Detail = ex.Message,
+                Duration = sw.Elapsed
+            });
+        }
+
+        // Check 7: Thread pool health
+        sw = Stopwatch.StartNew();
+        try
+        {
+            ThreadPool.GetAvailableThreads(out var workerThreads, out var completionPortThreads);
+            ThreadPool.GetMaxThreads(out var maxWorker, out var maxCompletion);
+            sw.Stop();
+
+            var workerUsage = 100 - (workerThreads * 100 / maxWorker);
+            var severity = workerUsage > 90 ? DiagnosticSeverity.Warning : DiagnosticSeverity.Ok;
+
+            results.Add(new DiagnosticResult
+            {
+                Name = "Thread Pool",
+                Category = DiagnosticCategory.Engine,
+                Severity = severity,
+                Message = severity == DiagnosticSeverity.Ok ? "Healthy" : "High usage",
+                Detail = $"Workers: {maxWorker - workerThreads}/{maxWorker} in use",
+                Duration = sw.Elapsed
+            });
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            results.Add(new DiagnosticResult
+            {
+                Name = "Thread Pool",
+                Category = DiagnosticCategory.Engine,
+                Severity = DiagnosticSeverity.Warning,
+                Message = "Check failed",
+                Detail = ex.Message,
+                Duration = sw.Elapsed
+            });
+        }
+
+        // Check 8: Provider options validation
+        sw = Stopwatch.StartNew();
+        try
+        {
+            var animeOpts = _animeOptions.Value;
+            var mangaOpts = _mangaOptions.Value;
+            var animeConfigured = animeOpts?.IsConfigured ?? false;
+            var mangaConfigured = mangaOpts?.IsConfigured ?? false;
+            sw.Stop();
+
+            results.Add(new DiagnosticResult
+            {
+                Name = "Provider Options",
+                Category = DiagnosticCategory.Engine,
+                Severity = (animeConfigured || mangaConfigured) ? DiagnosticSeverity.Ok : DiagnosticSeverity.Info,
+                Message = (animeConfigured || mangaConfigured) ? "Configured" : "Using defaults",
+                Detail = $"Anime: {(animeConfigured ? "configured" : "default")}, Manga: {(mangaConfigured ? "configured" : "default")}",
+                Duration = sw.Elapsed
+            });
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            results.Add(new DiagnosticResult
+            {
+                Name = "Provider Options",
+                Category = DiagnosticCategory.Engine,
+                Severity = DiagnosticSeverity.Warning,
+                Message = "Failed to load",
+                Detail = ex.Message,
+                Duration = sw.Elapsed
+            });
+        }
+
+        return results;
+    }
+
+    #endregion
+
     #region Update Checks
 
     private async Task<List<DiagnosticResult>> RunUpdateChecksAsync(CancellationToken cancellationToken)
@@ -1894,7 +2225,8 @@ public sealed class DiagnosticsEngine
         var sw = Stopwatch.StartNew();
         try
         {
-            var request = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com/repos/S1mplector/Koware/releases/latest");
+            // Use /releases?per_page=1 instead of /releases/latest to include prereleases (e.g., beta versions)
+            var request = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com/repos/S1mplector/Koware/releases?per_page=1");
             request.Headers.UserAgent.ParseAdd("Koware-Doctor/1.0");
             request.Headers.Accept.ParseAdd("application/vnd.github+json");
 
@@ -1920,7 +2252,23 @@ public sealed class DiagnosticsEngine
 
             var json = await response.Content.ReadAsStringAsync(cts.Token);
             using var doc = JsonDocument.Parse(json);
-            var tagName = doc.RootElement.GetProperty("tag_name").GetString() ?? "unknown";
+            
+            // /releases returns an array, so get the first element
+            if (doc.RootElement.ValueKind != JsonValueKind.Array || doc.RootElement.GetArrayLength() == 0)
+            {
+                results.Add(new DiagnosticResult
+                {
+                    Name = "Update Check",
+                    Category = DiagnosticCategory.Updates,
+                    Severity = DiagnosticSeverity.Warning,
+                    Message = "No releases found",
+                    Duration = sw.Elapsed
+                });
+                return results;
+            }
+            
+            var release = doc.RootElement[0];
+            var tagName = release.GetProperty("tag_name").GetString() ?? "unknown";
             var currentVersion = GetVersionLabel();
 
             // Simple version comparison (remove 'v' prefix if present)

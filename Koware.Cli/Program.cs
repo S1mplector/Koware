@@ -645,9 +645,26 @@ static async Task<int> HandleDoctorAsync(string[] args, IServiceProvider service
         {
             if (!jsonOutput)
             {
-                var step = ConsoleStep.Start("Running full diagnostics");
-                results = await engine.RunAllAsync(cancellationToken);
-                step.Succeed($"{results.Count} checks completed");
+                // Show progress bar while running diagnostics
+                var lastCategory = "";
+                var progress = new Progress<(int current, int total, string category)>(p =>
+                {
+                    lastCategory = p.category;
+                    var percent = (int)(p.current * 100.0 / p.total);
+                    var filled = (int)(p.current * 30.0 / p.total);
+                    var empty = 30 - filled;
+                    var bar = new string('█', filled) + new string('░', empty);
+                    
+                    Console.Write($"\r  [{bar}] {percent,3}% - {p.category,-20}");
+                });
+                
+                results = await engine.RunAllWithProgressAsync(progress, cancellationToken);
+                
+                // Clear progress bar and show completion
+                Console.Write("\r" + new string(' ', 70) + "\r");
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"  ✔ {results.Count} checks completed");
+                Console.ResetColor();
             }
             else
             {
@@ -784,6 +801,7 @@ static void PrintDoctorHelp()
     Console.WriteLine("  providers  Providers (DNS, HTTP, API validation for anime/manga)");
     Console.WriteLine("  tools      Toolchain (ffmpeg, yt-dlp, aria2c)");
     Console.WriteLine("  updates    Updates (check for newer versions)");
+    Console.WriteLine("  engine     Engine (core functionality: assemblies, I/O, HTTP, threading)");
     Console.WriteLine();
     Console.WriteLine("Examples:");
     Console.WriteLine("  koware doctor                     Run all diagnostics");
@@ -808,6 +826,7 @@ static DiagnosticCategory? ParseDiagnosticCategory(string name) => name.ToLowerI
     "providers" or "provider" => DiagnosticCategory.Providers,
     "tools" or "toolchain" => DiagnosticCategory.Toolchain,
     "updates" or "update" => DiagnosticCategory.Updates,
+    "engine" => DiagnosticCategory.Engine,
     _ => null
 };
 
@@ -828,6 +847,7 @@ static void WriteDiagnosticCategoryHeader(DiagnosticCategory category)
         DiagnosticCategory.Providers => "Providers",
         DiagnosticCategory.Toolchain => "Toolchain",
         DiagnosticCategory.Updates => "Updates",
+        DiagnosticCategory.Engine => "Engine",
         _ => category.ToString()
     };
 
