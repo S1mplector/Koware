@@ -142,17 +142,31 @@ static async Task<int> RunAsync(IHost host, string[] args)
     if (args.Length == 0)
     {
         PrintBanner();
+        // Show warning if no providers configured on first run
+        WarnIfNoProvidersConfigured(services);
         return 0;
     }
 
     var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
     var command = args[0].ToLowerInvariant();
 
-    // Commands that require configured providers
+    // Commands that require configured providers (will block if not configured)
     var providerRequiredCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "search", "plan", "stream", "watch", "play", "download", "read", "last", "continue", "list", "recommend", "rec"
     };
+
+    // Commands that should NOT show the provider warning (utility/setup commands)
+    var utilityCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "help", "version", "update", "doctor", "provider", "config", "theme", "mode"
+    };
+
+    // Show non-blocking warning for commands that don't require providers but aren't utility commands
+    if (!providerRequiredCommands.Contains(command) && !utilityCommands.Contains(command))
+    {
+        WarnIfNoProvidersConfigured(services);
+    }
 
     try
     {
@@ -284,6 +298,24 @@ static bool CheckProvidersConfigured(IServiceProvider services, CliMode mode, IL
     }
 
     return true;
+}
+
+/// <summary>
+/// Show a non-blocking warning if no providers are configured at all.
+/// This is displayed on startup for informational purposes.
+/// </summary>
+static void WarnIfNoProvidersConfigured(IServiceProvider services)
+{
+    var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+    var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+
+    // Check if ANY provider is configured
+    var hasAnyProvider = allAnime.IsConfigured || allManga.IsConfigured;
+
+    if (!hasAnyProvider)
+    {
+        Koware.Cli.Console.ErrorDisplay.NoProvidersWarning();
+    }
 }
 
 /// <summary>

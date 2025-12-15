@@ -67,6 +67,31 @@ public static class ErrorDisplay
         WriteHint("koware provider init", "Create a template config file");
     }
 
+    public static void NoProvidersWarning()
+    {
+        Con.WriteLine();
+        Con.ForegroundColor = ConsoleColor.Yellow;
+        Con.Write($"{Icons.Warning} ");
+        Con.ResetColor();
+        Con.WriteLine("No providers configured");
+        Con.WriteLine();
+        
+        Con.ForegroundColor = ConsoleColor.DarkGray;
+        Con.WriteLine("  Koware needs at least one provider to search, stream, or download content.");
+        Con.WriteLine("  Run one of the following commands to get started:");
+        Con.ResetColor();
+        Con.WriteLine();
+        
+        WriteHint("koware provider autoconfig", "Auto-configure from remote repository (recommended)");
+        WriteHint("koware provider add", "Configure a provider interactively");
+        Con.WriteLine();
+        
+        Con.ForegroundColor = ConsoleColor.DarkGray;
+        Con.WriteLine("  For more information, run: koware provider --help");
+        Con.ResetColor();
+        Con.WriteLine();
+    }
+
     public static void NoResults(string query, string contentType = "content")
     {
         Con.WriteLine();
