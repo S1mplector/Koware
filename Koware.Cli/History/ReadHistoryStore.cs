@@ -52,6 +52,12 @@ public interface IReadHistoryStore
 
     /// <summary>Get aggregated stats per manga (count, last read).</summary>
     Task<IReadOnlyList<ReadHistoryStat>> GetStatsAsync(string? mangaFilter, CancellationToken cancellationToken = default);
+
+    /// <summary>Clear all read history entries.</summary>
+    Task<int> ClearAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Clear read history for a specific manga.</summary>
+    Task<int> ClearForMangaAsync(string mangaTitle, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -297,6 +303,36 @@ public sealed class SqliteReadHistoryStore : IReadHistoryStore
         }
 
         return results;
+    }
+
+    public async Task<int> ClearAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"DELETE FROM {TableName};";
+        return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<int> ClearForMangaAsync(string mangaTitle, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(mangaTitle))
+        {
+            throw new ArgumentException("Manga title is required", nameof(mangaTitle));
+        }
+
+        await EnsureInitializedAsync(cancellationToken);
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"DELETE FROM {TableName} WHERE manga_title LIKE @pattern COLLATE NOCASE;";
+        command.Parameters.AddWithValue("@pattern", $"%{mangaTitle}%");
+        return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)

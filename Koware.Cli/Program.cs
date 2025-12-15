@@ -2192,6 +2192,12 @@ static async Task<int> HandleHistoryAsync(string[] args, IServiceProvider servic
     var history = services.GetRequiredService<IWatchHistoryStore>();
     var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
 
+    // Handle 'koware history clear' subcommand
+    if (args.Length > 1 && args[1].Equals("clear", StringComparison.OrdinalIgnoreCase))
+    {
+        return await HandleHistoryClearAsync(args, history, cancellationToken);
+    }
+
     string? search = null;
     int limit = 10;
     DateTimeOffset? after = null;
@@ -2426,11 +2432,144 @@ static void RenderHistory(IReadOnlyList<WatchHistoryEntry> entries)
 }
 
 /// <summary>
+/// Handle 'koware history clear' subcommand for anime watch history.
+/// </summary>
+static async Task<int> HandleHistoryClearAsync(string[] args, IWatchHistoryStore history, CancellationToken cancellationToken)
+{
+    string? animeFilter = null;
+    bool confirmed = false;
+
+    // Parse args: koware history clear [--anime <title>] [--confirm]
+    for (int i = 2; i < args.Length; i++)
+    {
+        var arg = args[i].ToLowerInvariant();
+        switch (arg)
+        {
+            case "--anime":
+                if (i + 1 >= args.Length)
+                {
+                    Console.WriteLine("Missing value for --anime");
+                    return 1;
+                }
+                animeFilter = args[++i];
+                break;
+            case "--confirm":
+            case "-y":
+                confirmed = true;
+                break;
+        }
+    }
+
+    // Require confirmation for destructive action
+    if (!confirmed)
+    {
+        var target = string.IsNullOrWhiteSpace(animeFilter) ? "ALL watch history" : $"watch history for '{animeFilter}'";
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"⚠ This will permanently delete {target}.");
+        Console.ResetColor();
+        Console.WriteLine();
+        Console.Write("Are you sure? Type 'yes' to confirm: ");
+        var response = Console.ReadLine()?.Trim();
+        if (!string.Equals(response, "yes", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine("Cancelled.");
+            return 0;
+        }
+    }
+
+    int deleted;
+    if (string.IsNullOrWhiteSpace(animeFilter))
+    {
+        deleted = await history.ClearAsync(cancellationToken);
+    }
+    else
+    {
+        deleted = await history.ClearForAnimeAsync(animeFilter, cancellationToken);
+    }
+
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.Write("✓ ");
+    Console.ResetColor();
+    Console.WriteLine($"Cleared {deleted} watch history {(deleted == 1 ? "entry" : "entries")}.");
+    return 0;
+}
+
+/// <summary>
+/// Handle 'koware history clear' subcommand for manga read history.
+/// </summary>
+static async Task<int> HandleMangaHistoryClearAsync(string[] args, IReadHistoryStore history, CancellationToken cancellationToken)
+{
+    string? mangaFilter = null;
+    bool confirmed = false;
+
+    // Parse args: koware history clear [--manga <title>] [--confirm]
+    for (int i = 2; i < args.Length; i++)
+    {
+        var arg = args[i].ToLowerInvariant();
+        switch (arg)
+        {
+            case "--manga":
+            case "--anime": // Allow --anime as alias
+                if (i + 1 >= args.Length)
+                {
+                    Console.WriteLine("Missing value for --manga");
+                    return 1;
+                }
+                mangaFilter = args[++i];
+                break;
+            case "--confirm":
+            case "-y":
+                confirmed = true;
+                break;
+        }
+    }
+
+    // Require confirmation for destructive action
+    if (!confirmed)
+    {
+        var target = string.IsNullOrWhiteSpace(mangaFilter) ? "ALL read history" : $"read history for '{mangaFilter}'";
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"⚠ This will permanently delete {target}.");
+        Console.ResetColor();
+        Console.WriteLine();
+        Console.Write("Are you sure? Type 'yes' to confirm: ");
+        var response = Console.ReadLine()?.Trim();
+        if (!string.Equals(response, "yes", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine("Cancelled.");
+            return 0;
+        }
+    }
+
+    int deleted;
+    if (string.IsNullOrWhiteSpace(mangaFilter))
+    {
+        deleted = await history.ClearAsync(cancellationToken);
+    }
+    else
+    {
+        deleted = await history.ClearForMangaAsync(mangaFilter, cancellationToken);
+    }
+
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.Write("✓ ");
+    Console.ResetColor();
+    Console.WriteLine($"Cleared {deleted} read history {(deleted == 1 ? "entry" : "entries")}.");
+    return 0;
+}
+
+/// <summary>
 /// Handle history command in manga mode: browse read history.
 /// </summary>
 static async Task<int> HandleMangaHistoryAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
 {
     var readHistory = services.GetRequiredService<IReadHistoryStore>();
+
+    // Handle 'koware history clear' subcommand in manga mode
+    if (args.Length > 1 && args[1].Equals("clear", StringComparison.OrdinalIgnoreCase))
+    {
+        return await HandleMangaHistoryClearAsync(args, readHistory, cancellationToken);
+    }
 
     string? search = null;
     int limit = 10;

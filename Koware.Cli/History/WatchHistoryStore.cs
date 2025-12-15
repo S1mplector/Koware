@@ -54,6 +54,12 @@ public interface IWatchHistoryStore
 
     /// <summary>Get aggregated stats per anime (count, last watched).</summary>
     Task<IReadOnlyList<HistoryStat>> GetStatsAsync(string? animeFilter, CancellationToken cancellationToken = default);
+
+    /// <summary>Clear all watch history entries.</summary>
+    Task<int> ClearAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Clear watch history for a specific anime.</summary>
+    Task<int> ClearForAnimeAsync(string animeTitle, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -361,6 +367,36 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
         }
 
         return stats;
+    }
+
+    public async Task<int> ClearAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"DELETE FROM {TableName};";
+        return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<int> ClearForAnimeAsync(string animeTitle, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(animeTitle))
+        {
+            throw new ArgumentException("Anime title is required", nameof(animeTitle));
+        }
+
+        await EnsureInitializedAsync(cancellationToken);
+
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"DELETE FROM {TableName} WHERE anime_title LIKE $pattern ESCAPE '\\' COLLATE NOCASE;";
+        command.Parameters.AddWithValue("$pattern", $"%{EscapeLike(animeTitle)}%");
+        return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
