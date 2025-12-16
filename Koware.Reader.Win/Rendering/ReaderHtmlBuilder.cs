@@ -451,7 +451,7 @@ internal static class ReaderHtmlBuilder
             color: var(--accent);
         }
 
-        /* Page indicator toast */
+        /* Page indicator toast - theme sensitive */
         #page-toast {
             position: fixed;
             top: 50%;
@@ -461,16 +461,25 @@ internal static class ReaderHtmlBuilder
             color: var(--text);
             padding: 12px 24px;
             border-radius: 10px;
+            border: 1px solid var(--border);
             font-weight: 600;
             font-size: 18px;
             pointer-events: none;
             opacity: 0;
             transition: opacity 0.2s ease;
             z-index: 50;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
         }
 
         #page-toast.visible {
             opacity: 1;
+        }
+        
+        /* Light themes get lighter toast background */
+        body.theme-sepia #page-toast,
+        body.theme-light #page-toast {
+            background: color-mix(in srgb, var(--panel) 90%, transparent);
         }
 
         /* Chapters panel */
@@ -629,26 +638,40 @@ internal static class ReaderHtmlBuilder
             transition: opacity 0.3s ease, transform 0.3s ease;
         }
 
-        /* Zen mode indicator toast */
+        /* Zen mode indicator toast - theme sensitive */
         #zen-toast {
             position: fixed;
             bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.85);
+            background: color-mix(in srgb, var(--panel) 85%, transparent);
             color: var(--text);
             padding: 10px 20px;
             border-radius: 8px;
+            border: 1px solid var(--border);
             font-weight: 600;
             font-size: 13px;
             pointer-events: none;
             opacity: 0;
             transition: opacity 0.2s ease;
             z-index: 100;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
         }
 
         #zen-toast.visible {
             opacity: 1;
+        }
+        
+        /* Dark themes get darker toast background */
+        body:not(.theme-sepia):not(.theme-light) #zen-toast {
+            background: rgba(0, 0, 0, 0.85);
+        }
+        
+        /* Light themes get lighter toast background */
+        body.theme-sepia #zen-toast,
+        body.theme-light #zen-toast {
+            background: color-mix(in srgb, var(--panel) 90%, transparent);
         }
     </style>
 </head>
@@ -1231,17 +1254,21 @@ internal static class ReaderHtmlBuilder
         // ===== Zen Mode =====
         
         function initZenMode() {
-            // Mouse movement shows controls temporarily in zen mode
+            // Mouse movement near top shows controls temporarily in zen mode
             document.addEventListener("mousemove", onZenMouseMove);
             document.addEventListener("mouseleave", () => {
                 if (zenMode) scheduleZenHide();
             });
         }
         
-        function onZenMouseMove() {
+        function onZenMouseMove(e) {
             if (!zenMode) return;
-            showZenControls();
-            scheduleZenHide();
+            // Only show controls when hovering near the top (header area)
+            const headerHeight = header.offsetHeight + 20; // Add some margin
+            if (e.clientY <= headerHeight) {
+                showZenControls();
+                scheduleZenHide();
+            }
         }
         
         function showZenControls() {
@@ -1270,7 +1297,8 @@ internal static class ReaderHtmlBuilder
             zenBtn.classList.toggle("active", zenMode);
             
             if (zenMode) {
-                showZenToast("Zen Mode ON — Move mouse to show controls");
+                showZenToast("Zen Mode ON — Hover top to show controls");
+                hideZenControls(); // Immediately hide UI
                 scheduleZenHide();
             } else {
                 hideZenControls();

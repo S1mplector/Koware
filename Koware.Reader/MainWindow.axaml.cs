@@ -106,7 +106,7 @@ public partial class MainWindow : Window
             Interval = TimeSpan.FromSeconds(3)
         };
         _uiHideTimer.Tick += (_, _) => SetUiVisibility(false);
-        PointerMoved += (_, _) => ResetUiHideTimer();
+        PointerMoved += OnWindowPointerMoved;
         
         // Toast timer
         _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
@@ -1233,21 +1233,46 @@ public partial class MainWindow : Window
             _ => "#2a2a3a"
         }));
         
+        // Zen toast and page toast - theme sensitive backgrounds
+        var toastBg = theme switch
+        {
+            "sepia" => "#d9e8dfc9",
+            "light" => "#d9f1f5f9",
+            "contrast" => "#d9000000",
+            _ => "#d9000000"
+        };
+        var toastText = theme switch
+        {
+            "sepia" => "#5c4b37",
+            "light" => "#1e293b",
+            "contrast" => "#ffffff",
+            _ => "#e2e8f0"
+        };
+        ZenToast.Background = new SolidColorBrush(Color.Parse(toastBg));
+        ZenToastText.Foreground = new SolidColorBrush(Color.Parse(toastText));
+        PageToast.Background = new SolidColorBrush(Color.Parse(toastBg));
+        PageToastText.Foreground = new SolidColorBrush(Color.Parse(toastText));
+        
         PersistPrefs();
     }
 
-    private void ResetUiHideTimer()
+    private void OnWindowPointerMoved(object? sender, PointerEventArgs e)
     {
-        if (!_zenMode && !_autoHideUi) return;
-        SetUiVisibility(true);
-        
         if (_zenMode)
         {
-            _zenHideTimer.Stop();
-            _zenHideTimer.Start();
+            // In zen mode, only show UI when hovering near the top (header area)
+            var pos = e.GetPosition(this);
+            var headerHeight = HeaderBar.Bounds.Height + 20; // Add some margin
+            if (pos.Y <= headerHeight)
+            {
+                SetUiVisibility(true);
+                _zenHideTimer.Stop();
+                _zenHideTimer.Start();
+            }
         }
         else if (_autoHideUi)
         {
+            SetUiVisibility(true);
             _uiHideTimer.Stop();
             _uiHideTimer.Start();
         }
@@ -1260,7 +1285,8 @@ public partial class MainWindow : Window
         if (_zenMode)
         {
             ZenButton.Classes.Add("active");
-            ShowZenToast("Zen Mode ON — Move mouse to show controls");
+            ShowZenToast("Zen Mode ON — Hover top to show controls");
+            SetUiVisibility(false); // Immediately hide UI
             _zenHideTimer.Start();
         }
         else
