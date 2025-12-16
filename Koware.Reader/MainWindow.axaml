@@ -96,6 +96,24 @@
             <Setter Property="Opacity" Value="0.3" />
         </Style>
         
+        <!-- Loading progress bar with smooth animation -->
+        <Style Selector="ProgressBar#LoadingProgressBar">
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <DoubleTransition Property="Value" Duration="0:0:0.3" Easing="CubicEaseOut" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="ProgressBar#LoadingProgressBar /template/ Border#PART_Indicator">
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <DoubleTransition Property="Width" Duration="0:0:0.3" Easing="CubicEaseOut" />
+                </Transitions>
+            </Setter>
+        </Style>
+        
         <!-- Page slider -->
         <Style Selector="Slider#PageSlider">
             <Setter Property="Height" Value="32" />
@@ -417,10 +435,10 @@
                            HorizontalAlignment="Center" />
                 <ProgressBar x:Name="LoadingProgressBar"
                              Minimum="0" Maximum="100" Value="0"
-                             Height="8"
+                             Height="10"
                              Margin="0,16,0,8"
-                             Background="#333"
-                             Foreground="#60a5fa" />
+                             Background="#2a2a3a"
+                             Foreground="#38bdf8" />
                 <TextBlock x:Name="LoadingProgress"
                            Text="0 / 0"
                            Foreground="#888"

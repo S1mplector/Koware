@@ -1223,6 +1223,16 @@ public partial class MainWindow : Window
             btn.Foreground = textBrush;
         }
         
+        // Loading progress bar - use theme accent color
+        LoadingProgressBar.Foreground = accentBrush;
+        LoadingProgressBar.Background = new SolidColorBrush(Color.Parse(theme switch
+        {
+            "sepia" => "#d4c5a9",
+            "light" => "#e2e8f0",
+            "contrast" => "#333333",
+            _ => "#2a2a3a"
+        }));
+        
         PersistPrefs();
     }
 
