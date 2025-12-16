@@ -1141,7 +1141,8 @@ public partial class MainWindow : Window
             _ => ("#0f172a", "#0f172a", "#1e293b", "#e2e8f0", "#94a3b8", "#38bdf8", "#141e32", "#2a3a52") // dark
         };
 
-        // Apply to content area
+        // Apply to content area and window background (for zen mode edges)
+        Background = new SolidColorBrush(Color.Parse(bg));
         ContentWrapper.Background = new SolidColorBrush(Color.Parse(bg));
         ScrollViewer.Background = new SolidColorBrush(Color.Parse(bg));
         
