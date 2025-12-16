@@ -13,14 +13,35 @@ CONFIGURATION="${CONFIGURATION:-Release}"
 APP_VERSION=$(sed -n 's/.*<Version>\(.*\)<\/Version>.*/\1/p' "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj")
 COPY_TO_DESKTOP="${COPY_TO_DESKTOP:-false}"
 
-# Output paths
-BUILD_DIR="$REPO_ROOT/publish/macos-app"
-OUTPUT_DIR="$REPO_ROOT/publish"
-DMG_NAME="Koware-Installer-${APP_VERSION}-${RUNTIME}.dmg"
-
 info() { echo -e "\033[36m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 err()  { echo -e "\033[31m[ERR ]\033[0m $1"; exit 1; }
+
+# Dependency checks
+ensure_cmd() {
+    local cmd="$1"
+    local friendly="$2"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        err "'$cmd' ($friendly) is required but not found in PATH."
+    fi
+}
+
+warn_cmd() {
+    local cmd="$1"
+    local friendly="$2"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        warn "'$cmd' ($friendly) not found. Continuing without it."
+        return 1
+    fi
+    return 0
+}
+
+ensure_cmd "dotnet" ".NET SDK"
+ensure_cmd "sips" "macOS image tool"
+ensure_cmd "iconutil" "macOS icon utility"
+ensure_cmd "osascript" "AppleScript runtime"
+# SetFile is only needed for custom DMG icon; warn if missing
+warn_cmd "SetFile" "Xcode Command Line Tools (for DMG icon)" >/dev/null || true
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -38,6 +59,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Output paths (after parsing args)
+BUILD_DIR="$REPO_ROOT/publish/macos-app"
+OUTPUT_DIR="$REPO_ROOT/publish"
+RUNTIME_LABEL="$RUNTIME"
+DMG_NAME="Koware-Installer-${APP_VERSION}-${RUNTIME_LABEL}.dmg"
+
+# Universal builds need lipo (after runtime is finalized)
+if [[ "$RUNTIME" == "universal" ]]; then
+    ensure_cmd "lipo" "Mach-O lipo"
+fi
+
 info "Building Koware Installer App v$APP_VERSION ($RUNTIME)"
 
 # Clean
@@ -45,53 +77,75 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 mkdir -p "$OUTPUT_DIR"
 
+TARGET_RIDS=("$RUNTIME")
+if [[ "$RUNTIME" == "universal" ]]; then
+    TARGET_RIDS=("osx-arm64" "osx-x64")
+fi
+
+publish_app() {
+    local project="$1"
+    local output_dir="$2"
+    local exe_name="$3"
+    local single_file="$4" # "true" to enable single-file publish
+
+    rm -rf "$output_dir"
+    mkdir -p "$output_dir"
+
+    if [[ "$RUNTIME" == "universal" ]]; then
+        local tmp_base="$BUILD_DIR/tmp-$exe_name"
+        rm -rf "$tmp_base"
+        mkdir -p "$tmp_base"
+
+        for rid in "${TARGET_RIDS[@]}"; do
+            local rid_dir="$tmp_base/$rid"
+            mkdir -p "$rid_dir"
+            dotnet publish "$project" \
+                -c "$CONFIGURATION" \
+                -r "$rid" \
+                -o "$rid_dir" \
+                --self-contained true \
+                $( [[ "$single_file" == "true" ]] && echo "/p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true /p:EnableCompressionInSingleFile=true" )
+        done
+
+        # Use arm64 output as base, then lipo the executable
+        cp -R "$tmp_base/osx-arm64/." "$output_dir"
+        rsync -a "$tmp_base/osx-x64/" "$output_dir/" >/dev/null 2>&1 || true
+        if [[ -f "$tmp_base/osx-arm64/$exe_name" && -f "$tmp_base/osx-x64/$exe_name" ]]; then
+            lipo -create "$tmp_base/osx-arm64/$exe_name" "$tmp_base/osx-x64/$exe_name" -output "$output_dir/$exe_name"
+            chmod +x "$output_dir/$exe_name" 2>/dev/null || true
+        fi
+    else
+        dotnet publish "$project" \
+            -c "$CONFIGURATION" \
+            -r "$RUNTIME" \
+            -o "$output_dir" \
+            --self-contained true \
+            $( [[ "$single_file" == "true" ]] && echo "/p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true /p:EnableCompressionInSingleFile=true" )
+        chmod +x "$output_dir/$exe_name" 2>/dev/null || true
+    fi
+}
+
 # Step 1: Publish CLI
 info "Publishing Koware CLI..."
 PUBLISH_DIR="$BUILD_DIR/cli"
-dotnet publish "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj" \
-    -c "$CONFIGURATION" \
-    -r "$RUNTIME" \
-    -o "$PUBLISH_DIR" \
-    /p:PublishSingleFile=true \
-    /p:IncludeNativeLibrariesForSelfExtract=true \
-    /p:EnableCompressionInSingleFile=true \
-    --self-contained true
-
+publish_app "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj" "$PUBLISH_DIR" "Koware.Cli" "true"
 mv "$PUBLISH_DIR/Koware.Cli" "$PUBLISH_DIR/koware"
 chmod +x "$PUBLISH_DIR/koware"
 
 # Step 1b: Publish Avalonia Player
 info "Publishing Koware Player (Avalonia)..."
 PLAYER_DIR="$BUILD_DIR/player"
-dotnet publish "$REPO_ROOT/Koware.Player/Koware.Player.csproj" \
-    -c "$CONFIGURATION" \
-    -r "$RUNTIME" \
-    -o "$PLAYER_DIR" \
-    --self-contained true
-
-chmod +x "$PLAYER_DIR/Koware.Player" 2>/dev/null || true
+publish_app "$REPO_ROOT/Koware.Player/Koware.Player.csproj" "$PLAYER_DIR" "Koware.Player" ""
 
 # Step 1c: Publish Avalonia Reader
 info "Publishing Koware Reader (Avalonia)..."
 READER_DIR="$BUILD_DIR/reader"
-dotnet publish "$REPO_ROOT/Koware.Reader/Koware.Reader.csproj" \
-    -c "$CONFIGURATION" \
-    -r "$RUNTIME" \
-    -o "$READER_DIR" \
-    --self-contained true
-
-chmod +x "$READER_DIR/Koware.Reader" 2>/dev/null || true
+publish_app "$REPO_ROOT/Koware.Reader/Koware.Reader.csproj" "$READER_DIR" "Koware.Reader" ""
 
 # Step 1d: Publish Avalonia Browser
 info "Publishing Koware Browser (Avalonia)..."
 BROWSER_DIR="$BUILD_DIR/browser"
-dotnet publish "$REPO_ROOT/Koware.Browser/Koware.Browser.csproj" \
-    -c "$CONFIGURATION" \
-    -r "$RUNTIME" \
-    -o "$BROWSER_DIR" \
-    --self-contained true
-
-chmod +x "$BROWSER_DIR/Koware.Browser" 2>/dev/null || true
+publish_app "$REPO_ROOT/Koware.Browser/Koware.Browser.csproj" "$BROWSER_DIR" "Koware.Browser" ""
 
 # Step 2: Create macOS icon from PNG
 info "Creating app icon..."
@@ -198,18 +252,31 @@ cat > "$APP_BUNDLE/Contents/MacOS/installer" << 'SCRIPT'
 
 SCRIPT_DIR="$(dirname "$0")"
 RESOURCES_DIR="$SCRIPT_DIR/../Resources"
-INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="$HOME/.config/koware"
 VERSION="__VERSION__"
+INSTALL_DIR="/usr/local/bin"
+HOMEBREW_BIN="/opt/homebrew/bin"
+
+resolve_install_dir() {
+    if [ -d "$HOMEBREW_BIN" ]; then
+        INSTALL_DIR="$HOMEBREW_BIN"
+    else
+        INSTALL_DIR="/usr/local/bin"
+    fi
+}
+
+resolve_install_dir
 
 # Check if already installed
 is_installed() {
-    [ -f "$INSTALL_DIR/koware" ]
+    [ -f "$INSTALL_DIR/koware" ] || [ -f "/usr/local/bin/koware" ]
 }
 
 get_installed_version() {
     if is_installed; then
-        "$INSTALL_DIR/koware" --version 2>/dev/null | head -1 || echo "unknown"
+        local bin_path="$INSTALL_DIR/koware"
+        [ -f "$bin_path" ] || bin_path="/usr/local/bin/koware"
+        "$bin_path" --version 2>/dev/null | head -1 || echo "unknown"
     fi
 }
 
@@ -291,13 +358,32 @@ EOF
 
 # ============== INSTALL ==============
 do_install() {
+    # Backup config if present (for reinstall safety)
+    local backup_dir=""
+    if [ -d "$CONFIG_DIR" ]; then
+        backup_dir="${CONFIG_DIR}.backup-$(date +%Y%m%d-%H%M%S)"
+        cp -a "$CONFIG_DIR" "$backup_dir" 2>/dev/null || true
+    fi
+
     # Create temp script for complex installation
     local INSTALL_SCRIPT=$(mktemp)
     cat > "$INSTALL_SCRIPT" << 'INSTALLSCRIPT'
 #!/bin/bash
+set -e
 RESOURCES_DIR="$1"
 INSTALL_DIR="$2"
+CONFIG_DIR="$3"
+BACKUP_DIR="$4"
 APP_DIR="/Applications/Koware.app"
+
+restore_config() {
+    if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
+        rm -rf "$CONFIG_DIR"
+        cp -a "$BACKUP_DIR" "$CONFIG_DIR" 2>/dev/null || true
+    fi
+}
+
+trap restore_config ERR
 
 # 1. Install CLI to /usr/local/bin
 mkdir -p "$INSTALL_DIR"
@@ -342,6 +428,9 @@ if [ -f "$RESOURCES_DIR/AppIcon.icns" ]; then
     cp "$RESOURCES_DIR/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 fi
 
+# Create CLI symlink inside app bundle for drag-drop installs
+ln -sf "../Resources/koware" "$APP_DIR/Contents/MacOS/koware"
+
 # Create Info.plist
 cat > "$APP_DIR/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -380,12 +469,15 @@ INSTALLSCRIPT
 
     # Use AppleScript to get admin privileges and run install script
     osascript << EOF 2>/dev/null
-do shell script "bash '$INSTALL_SCRIPT' '$RESOURCES_DIR' '$INSTALL_DIR'" with administrator privileges
+do shell script "bash '$INSTALL_SCRIPT' '$RESOURCES_DIR' '$INSTALL_DIR' '$CONFIG_DIR' '$backup_dir'" with administrator privileges
 EOF
     local install_result=$?
     rm -f "$INSTALL_SCRIPT"
     
     if [ $install_result -ne 0 ]; then
+        if [ -n "$backup_dir" ] && [ -d "$backup_dir" ]; then
+            cp -a "$backup_dir" "$CONFIG_DIR" 2>/dev/null || true
+        fi
         osascript -e 'display dialog "Installation cancelled or failed." buttons {"OK"} with title "Koware Installer" with icon stop'
         return 1
     fi
@@ -409,7 +501,7 @@ do_uninstall() {
     local result=$(osascript << 'EOF'
 display dialog "This will remove Koware from this machine:
 • /Applications/Koware.app
-• /usr/local/bin/koware
+• /usr/local/bin/koware (and /opt/homebrew/bin/koware if present)
 
 Your config at ~/.config/koware/ will be preserved.
 
@@ -423,7 +515,7 @@ EOF
 
     # Remove with admin privileges
     osascript << EOF 2>/dev/null
-do shell script "rm -f '$INSTALL_DIR/koware' && rm -rf '$INSTALL_DIR/koware-apps' && rm -rf '/Applications/Koware.app'" with administrator privileges
+do shell script "rm -f '$INSTALL_DIR/koware' && rm -f '/opt/homebrew/bin/koware' && rm -rf '$INSTALL_DIR/koware-apps' && rm -rf '/Applications/Koware.app'" with administrator privileges
 EOF
 
     if [ $? -ne 0 ]; then
