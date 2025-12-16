@@ -2,7 +2,7 @@
 // Fuzzy string matching algorithm for search functionality.
 using System;
 using System.Collections.Generic;
-using System.Linq;
+using System.Runtime.CompilerServices;
 
 namespace Koware.Cli.Console;
 
@@ -23,27 +23,63 @@ public static class FuzzyMatcher
         if (string.IsNullOrEmpty(pattern)) return 1;
         if (string.IsNullOrEmpty(text)) return 0;
 
-        var textLower = text.ToLowerInvariant();
-        var patternLower = pattern.ToLowerInvariant();
+        var textSpan = text.AsSpan();
+        var patternSpan = pattern.AsSpan();
 
-        // Exact substring match gets highest score
-        if (textLower.Contains(patternLower))
+        // Check for substring match (combines Contains + StartsWith in single pass)
+        var substringIndex = IndexOfIgnoreCase(textSpan, patternSpan);
+        if (substringIndex >= 0)
         {
             // Bonus for match at start
-            if (textLower.StartsWith(patternLower))
-                return 1000 + patternLower.Length;
-            return 500 + patternLower.Length;
+            return substringIndex == 0 ? 1000 + patternSpan.Length : 500 + patternSpan.Length;
         }
 
         // Fuzzy match: all pattern characters must appear in order
+        return ScoreFuzzy(textSpan, patternSpan);
+    }
+
+    /// <summary>
+    /// Find index of pattern in text using case-insensitive comparison.
+    /// Returns -1 if not found.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int IndexOfIgnoreCase(ReadOnlySpan<char> text, ReadOnlySpan<char> pattern)
+    {
+        var patternLen = pattern.Length;
+        var maxStart = text.Length - patternLen;
+
+        for (var i = 0; i <= maxStart; i++)
+        {
+            var matched = true;
+            for (var j = 0; j < patternLen; j++)
+            {
+                if (char.ToLowerInvariant(text[i + j]) != char.ToLowerInvariant(pattern[j]))
+                {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) return i;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Score a fuzzy match where pattern characters appear in order but not necessarily contiguous.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int ScoreFuzzy(ReadOnlySpan<char> text, ReadOnlySpan<char> pattern)
+    {
         var score = 0;
         var patternIndex = 0;
         var consecutiveBonus = 0;
         var lastMatchIndex = -1;
+        var patternLen = pattern.Length;
+        var textLen = text.Length;
 
-        for (var i = 0; i < textLower.Length && patternIndex < patternLower.Length; i++)
+        for (var i = 0; i < textLen && patternIndex < patternLen; i++)
         {
-            if (textLower[i] == patternLower[patternIndex])
+            if (char.ToLowerInvariant(text[i]) == char.ToLowerInvariant(pattern[patternIndex]))
             {
                 score += 10;
 
@@ -54,7 +90,7 @@ public static class FuzzyMatcher
                 }
 
                 // Bonus for matching at word boundaries
-                if (i == 0 || !char.IsLetterOrDigit(textLower[i - 1]))
+                if (i == 0 || !char.IsLetterOrDigit(text[i - 1]))
                 {
                     score += 15;
                 }
@@ -65,7 +101,7 @@ public static class FuzzyMatcher
         }
 
         // All pattern characters must match
-        if (patternIndex < patternLower.Length)
+        if (patternIndex < patternLen)
             return 0;
 
         return score + consecutiveBonus;
@@ -84,17 +120,33 @@ public static class FuzzyMatcher
         Func<T, string> getText,
         string pattern)
     {
+        var count = items.Count;
+
         if (string.IsNullOrWhiteSpace(pattern))
         {
-            return items
-                .Select((item, index) => (item, index, Score: 0))
-                .ToList();
+            var allResults = new (T Item, int OriginalIndex, int Score)[count];
+            for (var i = 0; i < count; i++)
+            {
+                allResults[i] = (items[i], i, 0);
+            }
+            return allResults;
         }
 
-        return items
-            .Select((item, index) => (item, index, Score: Score(getText(item), pattern)))
-            .Where(x => x.Score > 0)
-            .OrderByDescending(x => x.Score)
-            .ToList();
+        // Pre-allocate with estimated capacity to avoid resizing
+        var results = new List<(T Item, int OriginalIndex, int Score)>(Math.Min(count, 64));
+
+        for (var i = 0; i < count; i++)
+        {
+            var score = Score(getText(items[i]), pattern);
+            if (score > 0)
+            {
+                results.Add((items[i], i, score));
+            }
+        }
+
+        // Sort in-place by score descending
+        results.Sort((a, b) => b.Score.CompareTo(a.Score));
+
+        return results;
     }
 }

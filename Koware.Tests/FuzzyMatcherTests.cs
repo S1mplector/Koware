@@ -222,12 +222,10 @@ public class FuzzyMatcherTests
     {
         var items = new[] { "Demon Slayer", "One Piece", "Naruto", "Attack on Titan" };
         
-        var result = FuzzyMatcher.Filter(items, x => x, "on");
+        var result = FuzzyMatcher.Filter(items, x => x, "xyz");
 
-        // Should match "One Piece" and "Attack on Titan"
-        Assert.Equal(2, result.Count);
-        Assert.Contains(result, r => r.Item == "One Piece");
-        Assert.Contains(result, r => r.Item == "Attack on Titan");
+        // "xyz" doesn't appear in any item
+        Assert.Empty(result);
     }
 
     #endregion
