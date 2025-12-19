@@ -429,15 +429,31 @@ public partial class MainWindow : Window
     {
         try
         {
+            // Handle local file paths (file:// URIs) for offline/downloaded manga
+            if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.IsFile)
+            {
+                var localPath = uri.LocalPath;
+                if (File.Exists(localPath))
+                {
+                    await using var fileStream = File.OpenRead(localPath);
+                    using var memoryStream = new MemoryStream();
+                    await fileStream.CopyToAsync(memoryStream, cancellationToken);
+                    memoryStream.Position = 0;
+                    return new Bitmap(memoryStream);
+                }
+                return null;
+            }
+            
+            // Handle HTTP/HTTPS URLs for online manga
             using var response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
             
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var memoryStream = new MemoryStream();
-            await stream.CopyToAsync(memoryStream, cancellationToken);
-            memoryStream.Position = 0;
+            using var memoryStream2 = new MemoryStream();
+            await stream.CopyToAsync(memoryStream2, cancellationToken);
+            memoryStream2.Position = 0;
             
-            return new Bitmap(memoryStream);
+            return new Bitmap(memoryStream2);
         }
         catch
         {
