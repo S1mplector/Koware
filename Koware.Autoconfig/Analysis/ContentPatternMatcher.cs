@@ -73,20 +73,26 @@ public sealed class ContentPatternMatcher : IContentPatternMatcher
             _ => SearchMethod.HtmlScrape
         };
 
-        // Analyze sample response to build field mappings
-        var mappings = new List<FieldMapping>();
+        // Use auto-detected mappings from endpoint if available, otherwise analyze sample response
+        var mappings = endpoint.FieldMappings ?? new List<FieldMapping>();
         
-        if (!string.IsNullOrEmpty(endpoint.SampleResponse))
+        if (mappings.Count == 0 && !string.IsNullOrEmpty(endpoint.SampleResponse))
         {
             mappings = AnalyzeJsonResponse(endpoint.SampleResponse, "search");
         }
+
+        // Determine results path - prefer auto-detected, fallback to analysis
+        var resultsPath = endpoint.ResultsPath ?? DetermineResultsPath(endpoint.SampleResponse);
+
+        _logger.LogInformation("Built search pattern with {Count} field mappings, results path: {Path}",
+            mappings.Count, resultsPath ?? "none");
 
         return new SearchPattern
         {
             Method = method,
             Endpoint = endpoint.Url.PathAndQuery,
             QueryTemplate = endpoint.SampleQuery ?? BuildQueryTemplate(endpoint, "search"),
-            ResultsPath = DetermineResultsPath(endpoint.SampleResponse),
+            ResultsPath = resultsPath,
             FieldMappings = mappings
         };
     }

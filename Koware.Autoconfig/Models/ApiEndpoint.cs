@@ -29,4 +29,10 @@ public sealed record ApiEndpoint
     
     /// <summary>Additional notes about the endpoint.</summary>
     public string? Notes { get; init; }
+    
+    /// <summary>Auto-detected field mappings from response analysis.</summary>
+    public List<FieldMapping>? FieldMappings { get; init; }
+    
+    /// <summary>JSON path to results array in the response.</summary>
+    public string? ResultsPath { get; init; }
 }

@@ -26,6 +26,7 @@ using Koware.Autoconfig.DependencyInjection;
 using Koware.Autoconfig.Orchestration;
 using Koware.Autoconfig.Storage;
 using Koware.Autoconfig.Models;
+using Koware.Autoconfig.Runtime;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -105,6 +106,30 @@ static IHost BuildHost(string[] args)
     builder.Services.AddSingleton<IDownloadStore, SqliteDownloadStore>();
     builder.Services.AddAutoconfigServices();
     builder.Services.AddHttpClient();
+    
+    // Register aggregate catalogs that combine built-in and dynamic providers
+    builder.Services.AddSingleton<AggregateAnimeCatalog>(sp =>
+    {
+        var builtIn = sp.GetRequiredService<AllAnimeCatalog>();
+        var store = sp.GetRequiredService<IProviderStore>();
+        var transforms = sp.GetRequiredService<ITransformEngine>();
+        var http = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
+        var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+        return new AggregateAnimeCatalog(builtIn, store, transforms, http, loggerFactory);
+    });
+    builder.Services.AddSingleton<AggregateMangaCatalog>(sp =>
+    {
+        var builtIn = sp.GetRequiredService<AllMangaCatalog>();
+        var store = sp.GetRequiredService<IProviderStore>();
+        var transforms = sp.GetRequiredService<ITransformEngine>();
+        var http = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
+        var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+        return new AggregateMangaCatalog(builtIn, store, transforms, http, loggerFactory);
+    });
+    
+    // Override the default catalog registrations with aggregate versions
+    builder.Services.AddSingleton<IAnimeCatalog>(sp => sp.GetRequiredService<AggregateAnimeCatalog>());
+    builder.Services.AddSingleton<IMangaCatalog>(sp => sp.GetRequiredService<AggregateMangaCatalog>());
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware.cli", LogLevel.Warning);
     builder.Logging.AddFilter("Koware.Infrastructure", LogLevel.Warning);
@@ -1163,7 +1188,7 @@ static Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
     switch (subcommand)
     {
         case "list":
-            return Task.FromResult(HandleProviderList(allAnime, allManga));
+            return HandleProviderListAsync(allAnime, allManga, services);
             
         case "add":
             var providerToAdd = args.Length > 2 ? args[2] : null;
@@ -1177,7 +1202,7 @@ static Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
             
         case "test":
             var providerToTest = args.Length > 2 ? args[2] : null;
-            return HandleProviderTestAsync(providerToTest, allAnime, allManga);
+            return HandleProviderTestAsync(providerToTest, allAnime, allManga, services);
             
         case "autoconfig":
         case "auto":
@@ -1210,18 +1235,19 @@ static Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
 /// <summary>
 /// List all providers with their configuration status.
 /// </summary>
-static int HandleProviderList(AllAnimeOptions allAnime, AllMangaOptions allManga)
+static async Task<int> HandleProviderListAsync(AllAnimeOptions allAnime, AllMangaOptions allManga, IServiceProvider services)
 {
     Console.WriteLine("Provider Status:");
     Console.WriteLine(new string('─', 60));
     
-    var providers = new[]
+    // Built-in providers
+    var builtInProviders = new[]
     {
-        ("AllAnime", allAnime.IsConfigured, allAnime.Enabled, allAnime.ApiBase, "Anime"),
-        ("AllManga", allManga.IsConfigured, allManga.Enabled, allManga.ApiBase, "Manga"),
+        ("AllAnime", allAnime.IsConfigured, allAnime.Enabled, allAnime.ApiBase, "Anime", false),
+        ("AllManga", allManga.IsConfigured, allManga.Enabled, allManga.ApiBase, "Manga", false),
     };
     
-    foreach (var (name, isConfigured, isEnabled, apiBase, type) in providers)
+    foreach (var (name, isConfigured, isEnabled, apiBase, type, isActive) in builtInProviders)
     {
         Console.Write($"  {name,-12} ");
         
@@ -1254,11 +1280,48 @@ static int HandleProviderList(AllAnimeOptions allAnime, AllMangaOptions allManga
         Console.WriteLine();
     }
     
+    // Dynamic providers from autoconfig
+    var providerStore = services.GetRequiredService<IProviderStore>();
+    var dynamicProviders = await providerStore.ListAsync();
+    
+    if (dynamicProviders.Count > 0)
+    {
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine("Dynamic Providers (Autoconfig):");
+        Console.ResetColor();
+        Console.WriteLine(new string('─', 60));
+        
+        foreach (var provider in dynamicProviders)
+        {
+            Console.Write($"  {provider.Name,-12} ");
+            
+            if (provider.IsActive)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.Write($"{Icons.Success} Active       ");
+                Console.ResetColor();
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Blue;
+                Console.Write("○ Available    ");
+                Console.ResetColor();
+            }
+            
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.Write($" [{provider.Type}]");
+            Console.Write($" {provider.BaseHost}");
+            Console.ResetColor();
+            Console.WriteLine();
+        }
+    }
+    
     Console.WriteLine();
     Console.WriteLine("Commands:");
     Console.WriteLine("  koware provider add <name>    Configure a provider");
+    Console.WriteLine("  koware provider autoconfig    Auto-configure from URL");
     Console.WriteLine("  koware provider edit          Open config file");
-    Console.WriteLine("  koware provider init          Create template config");
     Console.WriteLine("  koware provider test [name]   Test connectivity");
     
     return 0;
@@ -1478,13 +1541,26 @@ static int HandleProviderInit(string configPath)
 /// <summary>
 /// Test provider connectivity.
 /// </summary>
-static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOptions allAnime, AllMangaOptions allManga)
+static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOptions allAnime, AllMangaOptions allManga, IServiceProvider services)
 {
-    var providers = new Dictionary<string, (bool configured, string? apiBase, string? referer, string? userAgent)>(StringComparer.OrdinalIgnoreCase)
+    var providers = new Dictionary<string, (bool configured, string? apiBase, string? referer, string? userAgent, bool isDynamic)>(StringComparer.OrdinalIgnoreCase)
     {
-        ["allanime"] = (allAnime.IsConfigured, allAnime.ApiBase, allAnime.Referer, allAnime.UserAgent),
-        ["allmanga"] = (allManga.IsConfigured, allManga.ApiBase, allManga.Referer, allManga.UserAgent),
+        ["allanime"] = (allAnime.IsConfigured, allAnime.ApiBase, allAnime.Referer, allAnime.UserAgent, false),
+        ["allmanga"] = (allManga.IsConfigured, allManga.ApiBase, allManga.Referer, allManga.UserAgent, false),
     };
+    
+    // Add dynamic providers from autoconfig
+    var providerStore = services.GetRequiredService<IProviderStore>();
+    var dynamicProviders = await providerStore.ListAsync();
+    
+    foreach (var dp in dynamicProviders)
+    {
+        var config = await providerStore.GetAsync(dp.Slug);
+        if (config != null)
+        {
+            providers[dp.Slug] = (true, $"https://{config.Hosts.BaseHost}", config.Hosts.Referer, config.Hosts.UserAgent, true);
+        }
+    }
     
     var toTest = string.IsNullOrWhiteSpace(providerName)
         ? providers.Keys.ToList()

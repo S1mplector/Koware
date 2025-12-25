@@ -12,20 +12,23 @@ namespace Koware.Autoconfig.Analysis;
 public sealed class ApiDiscoveryEngine : IApiDiscoveryEngine
 {
     private readonly HttpClient _httpClient;
+    private readonly IResponseAnalyzer _responseAnalyzer;
     private readonly ILogger<ApiDiscoveryEngine> _logger;
 
     private static readonly string[] CommonApiPaths = 
     [
         "/api", "/api/v1", "/api/v2", "/graphql", "/gql",
-        "/api/anime", "/api/manga", "/api/search", "/api/shows"
+        "/api/anime", "/api/manga", "/api/search", "/api/shows",
+        "/api/gallery", "/api/video", "/api/hentai", "/api/browse"
     ];
 
     private static readonly string[] SearchQuerySamples = 
-        ["naruto", "one piece", "attack on titan"];
+        ["naruto", "one piece", "attack on titan", "love", "demon"];
 
-    public ApiDiscoveryEngine(HttpClient httpClient, ILogger<ApiDiscoveryEngine> logger)
+    public ApiDiscoveryEngine(HttpClient httpClient, IResponseAnalyzer responseAnalyzer, ILogger<ApiDiscoveryEngine> logger)
     {
         _httpClient = httpClient;
+        _responseAnalyzer = responseAnalyzer;
         _logger = logger;
     }
 
@@ -285,12 +288,63 @@ public sealed class ApiDiscoveryEngine : IApiDiscoveryEngine
         IReadOnlyList<ApiEndpoint> existingEndpoints, 
         CancellationToken ct)
     {
+        // Extended search path patterns for various site types
         var searchPaths = new[]
         {
-            "/api/search?q=", "/api/search?query=", "/search?q=",
-            "/api/anime/search?q=", "/api/manga/search?q="
+            "/api/search?q=", "/api/search?query=", "/search?q=", "/search?s=",
+            "/api/anime/search?q=", "/api/manga/search?q=",
+            "/api/gallery?search=", "/api/galleries?q=", "/galleries?q=",
+            "/api/video/search?q=", "/api/videos?search=",
+            "/api/hentai?search=", "/hentai?q=",
+            "/api/browse?q=", "/browse?search=",
+            "/?s=", "/?q=", "/index.php?page=dapi&s=gimage&q="
         };
 
+        var headers = new Dictionary<string, string>
+        {
+            ["Referer"] = profile.BaseUrl.ToString(),
+            ["Origin"] = profile.BaseUrl.GetLeftPart(UriPartial.Authority)
+        };
+        foreach (var (key, value) in profile.RequiredHeaders)
+        {
+            headers[key] = value;
+        }
+
+        // First try with ResponseAnalyzer for intelligent detection
+        foreach (var path in searchPaths)
+        {
+            var basePath = path.Split('?')[0];
+            var queryParam = path.Contains('?') ? path.Split('?')[1].Split('=')[0] + "=" : "q=";
+            var queryTemplate = $"?{queryParam}${{query}}";
+            
+            var analysisResult = await _responseAnalyzer.AnalyzeSearchEndpointAsync(
+                profile.BaseUrl.GetLeftPart(UriPartial.Authority),
+                basePath,
+                queryTemplate.Replace("${query}", ""),
+                headers,
+                ct);
+
+            if (analysisResult.Confidence > 0.5f && analysisResult.SearchMappings.Count > 0)
+            {
+                _logger.LogInformation("Found search endpoint at {Path} with {Count} field mappings (confidence: {Confidence:P0})",
+                    basePath, analysisResult.SearchMappings.Count, analysisResult.Confidence);
+
+                return new ApiEndpoint
+                {
+                    Url = BuildUrl(profile.BaseUrl, basePath),
+                    Type = ApiType.REST,
+                    Method = HttpMethod.Get,
+                    Purpose = EndpointPurpose.Search,
+                    SampleQuery = queryTemplate,
+                    SampleResponse = analysisResult.SampleResponse,
+                    FieldMappings = analysisResult.SearchMappings,
+                    ResultsPath = analysisResult.ResultsPath,
+                    Confidence = (int)(analysisResult.Confidence * 100)
+                };
+            }
+        }
+
+        // Fallback to basic detection
         foreach (var path in searchPaths)
         {
             foreach (var sample in SearchQuerySamples)
@@ -311,18 +365,26 @@ public sealed class ApiDiscoveryEngine : IApiDiscoveryEngine
                     
                     // Check for search results
                     if (content.Contains("results") || content.Contains("data") || 
-                        content.Contains("items") || content.Contains("\"id\""))
+                        content.Contains("items") || content.Contains("\"id\"") ||
+                        content.Contains("galleries") || content.Contains("videos"))
                     {
                         var basePath = path.Split('?')[0];
+                        var queryParam = path.Contains('?') ? path.Split('?')[1].Split('=')[0] : "q";
+                        
+                        // Try to analyze the response for field mappings
+                        var analysis = _responseAnalyzer.AnalyzeJsonStructure(content, "Search");
+                        
                         return new ApiEndpoint
                         {
                             Url = BuildUrl(profile.BaseUrl, basePath),
                             Type = ApiType.REST,
                             Method = HttpMethod.Get,
                             Purpose = EndpointPurpose.Search,
-                            SampleQuery = $"?q={sample}",
-                            SampleResponse = content.Length > 500 ? content[..500] : content,
-                            Confidence = 85
+                            SampleQuery = $"?{queryParam}=${{query}}",
+                            SampleResponse = content.Length > 2000 ? content[..2000] : content,
+                            FieldMappings = analysis.Mappings,
+                            ResultsPath = analysis.ArrayPath,
+                            Confidence = analysis.Mappings.Count > 0 ? 90 : 70
                         };
                     }
                 }
