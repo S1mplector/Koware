@@ -96,6 +96,8 @@ static IHost BuildHost(string[] args)
     builder.Services.Configure<ReaderOptions>(builder.Configuration.GetSection("Reader"));
     builder.Services.Configure<DefaultCliOptions>(builder.Configuration.GetSection("Defaults"));
     builder.Services.Configure<ThemeOptions>(builder.Configuration.GetSection("Theme"));
+    builder.Services.Configure<DatabaseOptions>(builder.Configuration.GetSection("Database"));
+    builder.Services.AddSingleton<IDatabaseConnectionFactory, DatabaseConnectionFactory>();
     builder.Services.AddSingleton<IWatchHistoryStore, SqliteWatchHistoryStore>();
     builder.Services.AddSingleton<IReadHistoryStore, SqliteReadHistoryStore>();
     builder.Services.AddSingleton<IAnimeListStore, SqliteAnimeListStore>();

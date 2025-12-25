@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Diagnostics;
 using Microsoft.Data.Sqlite;
+using Koware.Cli.Configuration;
 
 namespace Koware.Cli.History;
 
@@ -100,7 +101,8 @@ public sealed record HistoryStat(
 public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
 {
     private const string TableName = "watch_history";
-    private readonly string _connectionString;
+    private readonly IDatabaseConnectionFactory _connectionFactory;
+    private readonly string _dbPath;
     private readonly string _legacyFilePath;
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private readonly JsonSerializerOptions _legacySerializerOptions = new()
@@ -109,8 +111,9 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
     };
     private bool _initialized;
 
-    public SqliteWatchHistoryStore()
+    public SqliteWatchHistoryStore(IDatabaseConnectionFactory connectionFactory)
     {
+        _connectionFactory = connectionFactory;
         var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         if (string.IsNullOrWhiteSpace(baseDir))
         {
@@ -119,17 +122,22 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
 
         var dir = Path.Combine(baseDir, "koware");
         Directory.CreateDirectory(dir);
-        var dbPath = Path.Combine(dir, "history.db");
+        _dbPath = Path.Combine(dir, "history.db");
         _legacyFilePath = Path.Combine(dir, "history.json");
-        _connectionString = $"Data Source={dbPath};Cache=Shared";
+    }
+
+    /// <summary>
+    /// Parameterless constructor for backward compatibility.
+    /// </summary>
+    public SqliteWatchHistoryStore() : this(new DatabaseConnectionFactory())
+    {
     }
 
     public async Task AddAsync(WatchHistoryEntry entry, CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
         await InsertAsync(connection, entry, null, cancellationToken);
     }
 
@@ -137,8 +145,7 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
@@ -175,8 +182,7 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
 
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         await using var command = connection.CreateCommand();
         command.CommandText =
@@ -216,15 +222,14 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
 
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         await using var command = connection.CreateCommand();
         command.CommandText =
             """
             SELECT provider, anime_id, anime_title, episode_number, episode_title, quality, watched_at_utc
             FROM watch_history
-            WHERE anime_title LIKE $pattern ESCAPE '\' COLLATE NOCASE OR anime_id = $exactId
+            WHERE anime_title LIKE $pattern ESCAPE '\\' COLLATE NOCASE OR anime_id = $exactId
             ORDER BY watched_at_utc DESC
             LIMIT 1;
             """;
@@ -253,8 +258,7 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         var where = new List<string>();
         var parameters = new List<SqliteParameter>();
@@ -330,8 +334,7 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         var where = string.Empty;
         var parameters = new List<SqliteParameter>();
@@ -373,8 +376,7 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         await using var command = connection.CreateCommand();
         command.CommandText = $"DELETE FROM {TableName};";
@@ -390,11 +392,10 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
 
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = $"DELETE FROM {TableName} WHERE anime_title LIKE $pattern ESCAPE '\\' COLLATE NOCASE;";
+        command.CommandText = $"DELETE FROM {TableName} WHERE anime_title LIKE $pattern ESCAPE '\\\\' COLLATE NOCASE;";
         command.Parameters.AddWithValue("$pattern", $"%{EscapeLike(animeTitle)}%");
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -414,8 +415,7 @@ public sealed class SqliteWatchHistoryStore : IWatchHistoryStore
                 return;
             }
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
             await using (var command = connection.CreateCommand())
             {

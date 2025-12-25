@@ -3,9 +3,11 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
+using Koware.Cli.Configuration;
 
 namespace Koware.Cli.History;
 
@@ -97,12 +99,14 @@ public interface IMangaListStore
 public sealed class SqliteMangaListStore : IMangaListStore
 {
     private const string TableName = "manga_list";
-    private readonly string _connectionString;
+    private readonly IDatabaseConnectionFactory _connectionFactory;
+    private readonly string _dbPath;
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private bool _initialized;
 
-    public SqliteMangaListStore()
+    public SqliteMangaListStore(IDatabaseConnectionFactory connectionFactory)
     {
+        _connectionFactory = connectionFactory;
         var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         if (string.IsNullOrWhiteSpace(baseDir))
         {
@@ -111,16 +115,21 @@ public sealed class SqliteMangaListStore : IMangaListStore
 
         var dir = Path.Combine(baseDir, "koware");
         Directory.CreateDirectory(dir);
-        var dbPath = Path.Combine(dir, "history.db");
-        _connectionString = $"Data Source={dbPath};Cache=Shared";
+        _dbPath = Path.Combine(dir, "history.db");
+    }
+
+    /// <summary>
+    /// Parameterless constructor for backward compatibility.
+    /// </summary>
+    public SqliteMangaListStore() : this(new DatabaseConnectionFactory())
+    {
     }
 
     public async Task<MangaListEntry> AddAsync(string mangaId, string mangaTitle, MangaReadStatus status, int? totalChapters = null, CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         // Check if already exists
         var existing = await GetByTitleInternalAsync(connection, mangaTitle, cancellationToken);
@@ -165,8 +174,7 @@ public sealed class SqliteMangaListStore : IMangaListStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         var sets = new List<string> { "updated_at = $now" };
         var parameters = new List<SqliteParameter>
@@ -231,8 +239,7 @@ public sealed class SqliteMangaListStore : IMangaListStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         await using var command = connection.CreateCommand();
         command.CommandText = $"DELETE FROM {TableName} WHERE manga_title = $mangaTitle COLLATE NOCASE;";
@@ -246,8 +253,7 @@ public sealed class SqliteMangaListStore : IMangaListStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         return await GetByTitleInternalAsync(connection, mangaTitle, cancellationToken);
     }
@@ -256,8 +262,7 @@ public sealed class SqliteMangaListStore : IMangaListStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
@@ -276,8 +281,7 @@ public sealed class SqliteMangaListStore : IMangaListStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         var where = statusFilter.HasValue ? "WHERE status = $status" : string.Empty;
 
@@ -316,8 +320,7 @@ public sealed class SqliteMangaListStore : IMangaListStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         await using var command = connection.CreateCommand();
         command.CommandText = $"""
@@ -350,8 +353,7 @@ public sealed class SqliteMangaListStore : IMangaListStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         var existing = await GetByTitleInternalAsync(connection, mangaTitle, cancellationToken);
         var chapterInt = (int)Math.Ceiling(chapterNumber);
@@ -455,8 +457,7 @@ public sealed class SqliteMangaListStore : IMangaListStore
                 return;
             }
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
             await using var command = connection.CreateCommand();
             command.CommandText = $"""

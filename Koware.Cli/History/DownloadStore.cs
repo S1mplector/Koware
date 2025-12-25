@@ -7,6 +7,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
+using Koware.Cli.Configuration;
 
 namespace Koware.Cli.History;
 
@@ -87,12 +88,14 @@ public interface IDownloadStore
 public sealed class SqliteDownloadStore : IDownloadStore
 {
     private const string TableName = "downloads";
-    private readonly string _connectionString;
+    private readonly IDatabaseConnectionFactory _connectionFactory;
+    private readonly string _dbPath;
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private bool _initialized;
 
-    public SqliteDownloadStore()
+    public SqliteDownloadStore(IDatabaseConnectionFactory connectionFactory)
     {
+        _connectionFactory = connectionFactory;
         var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         if (string.IsNullOrWhiteSpace(baseDir))
         {
@@ -101,16 +104,21 @@ public sealed class SqliteDownloadStore : IDownloadStore
 
         var kowareDir = Path.Combine(baseDir, "koware");
         Directory.CreateDirectory(kowareDir);
-        var dbPath = Path.Combine(kowareDir, "history.db");
-        _connectionString = $"Data Source={dbPath};Cache=Shared";
+        _dbPath = Path.Combine(kowareDir, "history.db");
+    }
+
+    /// <summary>
+    /// Parameterless constructor for backward compatibility.
+    /// </summary>
+    public SqliteDownloadStore() : this(new DatabaseConnectionFactory())
+    {
     }
 
     public async Task<DownloadEntry> AddAsync(DownloadType type, string contentId, string contentTitle, int number, string? quality, string filePath, long fileSizeBytes, CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         // Upsert: update if same content+number exists
         var upsertSql = $@"
@@ -155,8 +163,7 @@ public sealed class SqliteDownloadStore : IDownloadStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         var sql = $"SELECT id, type, content_id, content_title, number, quality, file_path, file_size_bytes, downloaded_at FROM {TableName} WHERE content_id = @contentId ORDER BY number";
         await using var cmd = new SqliteCommand(sql, connection);
@@ -176,8 +183,7 @@ public sealed class SqliteDownloadStore : IDownloadStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         var sql = typeFilter.HasValue
             ? $"SELECT id, type, content_id, content_title, number, quality, file_path, file_size_bytes, downloaded_at FROM {TableName} WHERE type = @type ORDER BY downloaded_at DESC"
@@ -203,8 +209,7 @@ public sealed class SqliteDownloadStore : IDownloadStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         var sql = $"SELECT id, type, content_id, content_title, number, quality, file_path, file_size_bytes, downloaded_at FROM {TableName} WHERE content_id = @contentId AND number = @number";
         await using var cmd = new SqliteCommand(sql, connection);
@@ -224,8 +229,7 @@ public sealed class SqliteDownloadStore : IDownloadStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         var sql = $"DELETE FROM {TableName} WHERE id = @id";
         await using var cmd = new SqliteCommand(sql, connection);
@@ -238,8 +242,7 @@ public sealed class SqliteDownloadStore : IDownloadStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         var sql = $@"
             SELECT 
@@ -289,8 +292,7 @@ public sealed class SqliteDownloadStore : IDownloadStore
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         var sql = $"SELECT number FROM {TableName} WHERE content_id = @contentId";
         await using var cmd = new SqliteCommand(sql, connection);
@@ -315,8 +317,7 @@ public sealed class SqliteDownloadStore : IDownloadStore
         {
             if (_initialized) return;
 
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
             var createTableSql = $@"
                 CREATE TABLE IF NOT EXISTS {TableName} (
