@@ -32,6 +32,13 @@ public static class Icons
     public static string Download => IsWindows ? "[v]" : "📥";
     public static string New => IsWindows ? "[*]" : "✨";
     
+    // Menu/Action icons
+    public static string Provider => IsWindows ? "[P]" : "🔌";
+    public static string Add => IsWindows ? "[+]" : "➕";
+    public static string Edit => IsWindows ? "[E]" : "✏️";
+    public static string Back => IsWindows ? "<-" : "←";
+    public static string Delete => IsWindows ? "[D]" : "🗑️";
+    
     // Aliases for backward compatibility
     public static string Preview => Book;
     public static string Watched => Success;

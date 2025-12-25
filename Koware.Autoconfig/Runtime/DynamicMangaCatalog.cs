@@ -237,7 +237,12 @@ public sealed class DynamicMangaCatalog : IMangaCatalog
         try
         {
             var baseUrl = _config.Hosts.ApiBase ?? $"https://{_config.Hosts.BaseHost}";
+            // Strip provider prefix if present (e.g., "nhentai:617766" -> "617766")
             var galleryId = chapter.Id.Value;
+            if (galleryId.Contains(':'))
+            {
+                galleryId = galleryId.Split(':').Last();
+            }
             
             // Fetch gallery details from nhentai API
             var response = await ExecuteRequestAsync(

@@ -86,11 +86,12 @@ publish_app() {
     local project="$1"
     local output_dir="$2"
     local exe_name="$3"
-    local single_file="$4" # "true" to enable single-file publish
+    local single_file="$4" # "true" to enable single-file publish (but NOT native extraction)
 
     rm -rf "$output_dir"
     mkdir -p "$output_dir"
 
+    # Self-contained deployment with native libraries for SQLite support
     if [[ "$RUNTIME" == "universal" ]]; then
         local tmp_base="$BUILD_DIR/tmp-$exe_name"
         rm -rf "$tmp_base"

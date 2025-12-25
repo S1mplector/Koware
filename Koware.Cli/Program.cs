@@ -1162,167 +1162,216 @@ static async Task<int> HandleUpdateAsync(string[] args, ILogger logger, Cancella
 }
 
 /// <summary>
-/// Implement the <c>koware provider</c> command.
+/// Implement the <c>koware provider</c> command as a unified interactive experience.
 /// </summary>
-/// <param name="args">CLI arguments; supports subcommands: list, add, edit, init, test, --enable, --disable.</param>
-/// <param name="services">Service provider for provider toggle options.</param>
+/// <param name="args">CLI arguments; optional URL for quick autoconfig.</param>
+/// <param name="services">Service provider.</param>
 /// <returns>Exit code: 0 on success.</returns>
-/// <remarks>
-/// Subcommands:
-/// - list: Show all providers with configuration status
-/// - add [name]: Interactive wizard to configure a provider  
-/// - edit: Open config file in default editor
-/// - init: Create template configuration file
-/// - test [name]: Test provider connectivity
-/// - --enable/--disable: Toggle provider on/off
-/// </remarks>
-static Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
+static async Task<int> HandleProviderAsync(string[] args, IServiceProvider services)
 {
-    var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
-    var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
     var configPath = GetUserConfigFilePath();
-
-    // Parse subcommand
-    var subcommand = args.Length > 1 ? args[1].ToLowerInvariant() : "list";
-
-    switch (subcommand)
+    
+    // Quick autoconfig if URL provided directly
+    if (args.Length > 1 && (args[1].StartsWith("http://") || args[1].StartsWith("https://")))
     {
-        case "list":
-            return HandleProviderListAsync(allAnime, allManga, services);
-            
-        case "add":
-            var providerToAdd = args.Length > 2 ? args[2] : null;
-            return HandleProviderAddAsync(providerToAdd, configPath);
-            
-        case "edit":
-            return Task.FromResult(HandleProviderEdit(configPath));
-            
-        case "init":
-            return Task.FromResult(HandleProviderInit(configPath));
-            
-        case "test":
-            var providerToTest = args.Length > 2 ? args[2] : null;
-            return HandleProviderTestAsync(providerToTest, allAnime, allManga, services);
-            
-        case "autoconfig":
-        case "auto":
-            var providerToAuto = args.Length > 2 ? args[2] : null;
-            var listOnly = args.Skip(2).Any(a => a.Equals("--list", StringComparison.OrdinalIgnoreCase));
-            return HandleProviderAutoConfigAsync(providerToAuto, args.Skip(2).ToArray(), listOnly, configPath, services);
-            
-        case "--enable":
-        case "--disable":
-            if (args.Length < 3)
-            {
-                Console.WriteLine("Usage: koware provider --enable <name> | --disable <name>");
-                return Task.FromResult(1);
-            }
-            return Task.FromResult(HandleProviderToggle(args[2], subcommand == "--enable", configPath));
-            
-        case "help":
-        case "--help":
-        case "-h":
-            PrintProviderHelp();
-            return Task.FromResult(0);
-            
-        default:
-            // Legacy: if arg looks like a provider name, show its status
-            PrintProviderHelp();
-            return Task.FromResult(1);
+        return await HandleProviderAutoConfigAsync(args[1], args.Skip(2).ToArray(), false, configPath, services);
     }
+    
+    // Legacy subcommand support for scripts
+    if (args.Length > 1)
+    {
+        var subcommand = args[1].ToLowerInvariant();
+        if (subcommand == "autoconfig" || subcommand == "auto")
+        {
+            var url = args.Length > 2 ? args[2] : null;
+            return await HandleProviderAutoConfigAsync(url, args.Skip(3).ToArray(), false, configPath, services);
+        }
+        if (subcommand == "test")
+        {
+            var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+            var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+            var providerToTest = args.Length > 2 ? args[2] : null;
+            return await HandleProviderTestAsync(providerToTest, allAnime, allManga, services);
+        }
+    }
+    
+    // Interactive provider management
+    return await HandleProviderInteractiveAsync(services, configPath);
 }
 
 /// <summary>
-/// List all providers with their configuration status.
+/// Interactive provider management hub.
+/// </summary>
+static async Task<int> HandleProviderInteractiveAsync(IServiceProvider services, string configPath)
+{
+    var providerStore = services.GetRequiredService<IProviderStore>();
+    var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+    var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+    
+    while (true)
+    {
+        // Build menu items
+        var menuItems = new List<(string Id, string Label, string Description)>
+        {
+            ("providers", $"{Icons.Provider} Manage Providers", "View, enable, or disable providers"),
+            ("add", $"{Icons.Add} Add Provider (URL)", "Auto-configure a new provider from website URL"),
+            ("test", $"{Icons.Search} Test Provider", "Test connectivity to a provider"),
+            ("edit", $"{Icons.Edit} Edit Config", "Open configuration file in editor"),
+            ("back", $"{Icons.Back} Back", "Return to main menu")
+        };
+        
+        var result = Koware.Cli.Console.InteractiveSelect.Show(
+            menuItems,
+            m => m.Label,
+            new Koware.Cli.Console.SelectorOptions<(string Id, string Label, string Description)>
+            {
+                Prompt = "Provider Management",
+                MaxVisibleItems = 6,
+                ShowSearch = false,
+                PreviewFunc = m => m.Description
+            });
+        
+        if (result.Cancelled || result.Selected.Id == "back")
+            break;
+        
+        switch (result.Selected.Id)
+        {
+            case "providers":
+                await HandleProviderListAsync(allAnime, allManga, services);
+                break;
+                
+            case "add":
+                Console.Write("\nEnter website URL: ");
+                var url = Console.ReadLine()?.Trim();
+                if (!string.IsNullOrEmpty(url))
+                {
+                    await HandleProviderAutoConfigAsync(url, Array.Empty<string>(), false, configPath, services);
+                }
+                break;
+                
+            case "test":
+                await HandleProviderTestAsync(null, allAnime, allManga, services);
+                break;
+                
+            case "edit":
+                HandleProviderEdit(configPath);
+                break;
+        }
+    }
+    
+    return 0;
+}
+
+/// <summary>
+/// List all providers with interactive selection to enable/disable.
 /// </summary>
 static async Task<int> HandleProviderListAsync(AllAnimeOptions allAnime, AllMangaOptions allManga, IServiceProvider services)
 {
-    Console.WriteLine("Provider Status:");
-    Console.WriteLine(new string('─', 60));
-    
-    // Built-in providers
-    var builtInProviders = new[]
-    {
-        ("AllAnime", allAnime.IsConfigured, allAnime.Enabled, allAnime.ApiBase, "Anime", false),
-        ("AllManga", allManga.IsConfigured, allManga.Enabled, allManga.ApiBase, "Manga", false),
-    };
-    
-    foreach (var (name, isConfigured, isEnabled, apiBase, type, isActive) in builtInProviders)
-    {
-        Console.Write($"  {name,-12} ");
-        
-        if (!isConfigured)
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.Write($"{Icons.Error} Not configured");
-            Console.ResetColor();
-        }
-        else if (!isEnabled)
-        {
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.Write("○ Disabled     ");
-            Console.ResetColor();
-        }
-        else
-        {
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"{Icons.Success} Ready        ");
-            Console.ResetColor();
-        }
-        
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.Write($" [{type}]");
-        if (!string.IsNullOrWhiteSpace(apiBase))
-        {
-            Console.Write($" {apiBase}");
-        }
-        Console.ResetColor();
-        Console.WriteLine();
-    }
-    
-    // Dynamic providers from autoconfig
     var providerStore = services.GetRequiredService<IProviderStore>();
-    var dynamicProviders = await providerStore.ListAsync();
     
-    if (dynamicProviders.Count > 0)
+    while (true)
     {
-        Console.WriteLine();
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine("Dynamic Providers (Autoconfig):");
-        Console.ResetColor();
-        Console.WriteLine(new string('─', 60));
+        // Build provider list
+        var providers = new List<ProviderItem>();
         
-        foreach (var provider in dynamicProviders)
+        // Built-in providers
+        providers.Add(new ProviderItem(
+            "AllAnime",
+            "Anime",
+            allAnime.IsConfigured ? (allAnime.Enabled ? "Ready" : "Disabled") : "Not configured",
+            allAnime.ApiBase ?? "https://api.allanime.day",
+            allAnime.Enabled,
+            false
+        ));
+        
+        providers.Add(new ProviderItem(
+            "AllManga", 
+            "Manga",
+            allManga.IsConfigured ? (allManga.Enabled ? "Ready" : "Disabled") : "Not configured",
+            allManga.ApiBase ?? "https://api.allanime.day",
+            allManga.Enabled,
+            false
+        ));
+        
+        // Dynamic providers
+        var dynamicProviders = await providerStore.ListAsync();
+        foreach (var dp in dynamicProviders)
         {
-            Console.Write($"  {provider.Name,-12} ");
-            
-            if (provider.IsActive)
+            providers.Add(new ProviderItem(
+                dp.Name,
+                dp.Type.ToString(),
+                dp.IsActive ? "Active" : "Available",
+                dp.BaseHost,
+                dp.IsActive,
+                true,
+                dp.Slug
+            ));
+        }
+        
+        // Show interactive selector
+        var result = Koware.Cli.Console.InteractiveSelect.Show(
+            providers,
+            p => {
+                var statusIcon = p.Status switch
+                {
+                    "Ready" or "Active" => $"{Icons.Success}",
+                    "Available" => "○",
+                    "Disabled" => "○",
+                    _ => $"{Icons.Error}"
+                };
+                var dynamicTag = p.IsDynamic ? " [dynamic]" : " [built-in]";
+                return $"{statusIcon} {p.Name,-14} [{p.Type}] {p.Host}{dynamicTag}";
+            },
+            new Koware.Cli.Console.SelectorOptions<ProviderItem>
             {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.Write($"{Icons.Success} Active       ");
+                Prompt = "Provider Management (Enter to toggle, Esc to exit)",
+                MaxVisibleItems = 10,
+                ShowSearch = true,
+                PreviewFunc = p => $"Status: {p.Status}\nType: {p.Type}\nHost: {p.Host}\n\nPress Enter to {(p.IsActive ? "disable" : "enable")} this provider"
+            });
+        
+        if (result.Cancelled || result.Selected == null)
+        {
+            break;
+        }
+        
+        var selected = result.Selected;
+        
+        // Toggle provider status
+        if (selected.IsDynamic && selected.Slug != null)
+        {
+            var providerType = selected.Type == "Anime" 
+                ? Koware.Autoconfig.Models.ProviderType.Anime 
+                : Koware.Autoconfig.Models.ProviderType.Manga;
+            
+            if (selected.IsActive)
+            {
+                // Disable by clearing active status (set empty slug)
+                await providerStore.SetActiveAsync("", providerType);
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"\n○ Disabled provider: {selected.Name}");
                 Console.ResetColor();
             }
             else
             {
-                Console.ForegroundColor = ConsoleColor.Blue;
-                Console.Write("○ Available    ");
+                // Enable by setting as active
+                await providerStore.SetActiveAsync(selected.Slug, providerType);
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"\n{Icons.Success} Enabled provider: {selected.Name}");
                 Console.ResetColor();
             }
             
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.Write($" [{provider.Type}]");
-            Console.Write($" {provider.BaseHost}");
+            await Task.Delay(500); // Brief pause to show message
+        }
+        else
+        {
+            // Built-in providers need config file changes
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"\nBuilt-in providers can be configured via 'koware provider add {selected.Name.ToLower()}'");
             Console.ResetColor();
-            Console.WriteLine();
+            await Task.Delay(1000);
         }
     }
-    
-    Console.WriteLine();
-    Console.WriteLine("Commands:");
-    Console.WriteLine("  koware provider add <name>    Configure a provider");
-    Console.WriteLine("  koware provider autoconfig    Auto-configure from URL");
-    Console.WriteLine("  koware provider edit          Open config file");
-    Console.WriteLine("  koware provider test [name]   Test connectivity");
     
     return 0;
 }
@@ -9244,6 +9293,18 @@ static async Task<int> HandleStatsAsync(string[] args, IServiceProvider services
 }
 
 // ===== Record Types =====
+
+/// <summary>
+/// Provider item for interactive selection.
+/// </summary>
+record ProviderItem(
+    string Name, 
+    string Type, 
+    string Status, 
+    string Host, 
+    bool IsActive, 
+    bool IsDynamic,
+    string? Slug = null);
 
 /// <summary>
 /// Navigation result from reader including current page.
