@@ -1658,35 +1658,27 @@ static async Task<int> HandleUrlAutoconfigAsync(string urlString, string[] args,
     
     Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine($"  Analyzing {url.Host}...");
+    Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
+    Console.WriteLine("║          Koware Provider Autoconfiguration Engine            ║");
+    Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
     Console.ResetColor();
     Console.WriteLine();
     
     var orchestrator = services.GetRequiredService<IAutoconfigOrchestrator>();
     
-    // Progress display
-    var currentPhase = "";
+    // Progress display with progress bar
     var progress = new Progress<AutoconfigProgress>(p =>
     {
-        if (p.Phase != currentPhase)
-        {
-            currentPhase = p.Phase;
-            Console.Write($"  [{p.Phase}] ");
-        }
+        var percent = p.Percentage;
+        var filled = (int)(percent * 30.0 / 100);
+        var empty = 30 - filled;
+        var bar = new string('█', filled) + new string('░', empty);
         
-        if (p.Succeeded.HasValue)
+        Console.Write($"\r  [{bar}] {percent,3}% - {p.Phase,-20}");
+        
+        if (p.Phase == "Complete" || percent >= 100)
         {
-            if (p.Succeeded.Value)
-            {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"{Icons.Success} {p.Step}");
-            }
-            else
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"{Icons.Error} {p.Step}");
-            }
-            Console.ResetColor();
+            Console.WriteLine();
         }
     });
     
@@ -1694,6 +1686,11 @@ static async Task<int> HandleUrlAutoconfigAsync(string urlString, string[] args,
     {
         var result = await orchestrator.AnalyzeAndConfigureAsync(url, options, progress);
         
+        // Clear progress bar and show completion
+        Console.Write("\r" + new string(' ', 70) + "\r");
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"  ✔ Analysis completed in {result.Duration.TotalSeconds:F1}s");
+        Console.ResetColor();
         Console.WriteLine();
         
         if (result.IsSuccess && result.Config != null)
