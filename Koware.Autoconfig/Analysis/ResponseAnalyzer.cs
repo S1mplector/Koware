@@ -21,15 +21,54 @@ public sealed class ResponseAnalyzer : IResponseAnalyzer
     // Field detection patterns - maps target field to potential JSON property names
     private static readonly Dictionary<string, string[]> FieldPatterns = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["Id"] = ["id", "_id", "ID", "Id", "mediaId", "media_id", "slug", "code", "galleryId", "gallery_id"],
-        ["Title"] = ["title", "name", "Title", "Name", "englishTitle", "english_title", "romajiTitle", "romaji_title", "japanese_title", "japaneseTitle"],
-        ["Synopsis"] = ["synopsis", "description", "summary", "plot", "desc", "about", "overview"],
-        ["CoverImage"] = ["cover", "coverImage", "cover_image", "thumbnail", "thumb", "poster", "image", "img", "cover_url", "coverUrl", "images.cover"],
-        ["DetailPage"] = ["url", "link", "detailPage", "detail_page", "href", "page_url", "pageUrl"],
-        ["Number"] = ["number", "num", "episode", "chapter", "ep", "ch", "episodeNumber", "chapterNumber", "episode_number", "chapter_number"],
-        ["Url"] = ["url", "src", "source", "link", "stream", "video", "file", "hls", "m3u8", "mp4"],
-        ["Quality"] = ["quality", "resolution", "res", "height", "label", "format"],
-        ["Language"] = ["lang", "language", "locale", "sub", "dub", "audio"],
+        ["Id"] = [
+            "id", "_id", "ID", "Id", "mediaId", "media_id", "slug", "code", 
+            "galleryId", "gallery_id", "hentai_video_id", "videoId", "video_id",
+            "manga_id", "anime_id", "content_id", "item_id"
+        ],
+        ["Title"] = [
+            "title", "name", "Title", "Name", "englishTitle", "english_title", 
+            "romajiTitle", "romaji_title", "japanese_title", "japaneseTitle",
+            "pretty", "title_english", "title_romaji", "alt_title", "original_title"
+        ],
+        ["Synopsis"] = [
+            "synopsis", "description", "summary", "plot", "desc", "about", 
+            "overview", "info", "details", "content"
+        ],
+        ["CoverImage"] = [
+            "cover", "coverImage", "cover_image", "thumbnail", "thumb", "poster", 
+            "image", "img", "cover_url", "coverUrl", "images.cover", "poster_url",
+            "thumbnail_url", "banner", "artwork", "photo"
+        ],
+        ["DetailPage"] = [
+            "url", "link", "detailPage", "detail_page", "href", "page_url", 
+            "pageUrl", "permalink", "canonical"
+        ],
+        ["Number"] = [
+            "number", "num", "episode", "chapter", "ep", "ch", "episodeNumber", 
+            "chapterNumber", "episode_number", "chapter_number", "sequence", "order"
+        ],
+        ["Url"] = [
+            "url", "src", "source", "link", "stream", "video", "file", "hls", 
+            "m3u8", "mp4", "video_url", "stream_url", "manifest", "player_url"
+        ],
+        ["Quality"] = [
+            "quality", "resolution", "res", "height", "label", "format", 
+            "video_quality", "bitrate"
+        ],
+        ["Language"] = [
+            "lang", "language", "locale", "sub", "dub", "audio", "subtitles"
+        ],
+        ["Tags"] = [
+            "tags", "genres", "categories", "labels", "keywords"
+        ],
+        ["PageCount"] = [
+            "num_pages", "page_count", "pages", "total_pages", "num_images"
+        ],
+        ["ReleaseDate"] = [
+            "release_date", "released", "released_at", "created_at", "upload_date",
+            "date", "published", "aired"
+        ]
     };
 
     // URL patterns for detecting image/video fields
@@ -160,8 +199,13 @@ public sealed class ResponseAnalyzer : IResponseAnalyzer
 
     private (JsonElement? element, string path) FindResultsArray(JsonElement root)
     {
-        // Common paths where results arrays are found
-        string[] commonPaths = ["data", "results", "items", "list", "entries", "edges", "nodes", "galleries", "videos", "anime", "manga", "shows", "result"];
+        // Common paths where results arrays are found (expanded for more sites)
+        string[] commonPaths = [
+            "data", "results", "items", "list", "entries", "edges", "nodes", 
+            "galleries", "videos", "anime", "manga", "shows", "result",
+            "hentai_videos", "search_results", "content", "hits", "records",
+            "chapters", "episodes", "pages", "images", "streams"
+        ];
 
         // Check if root is already an array
         if (root.ValueKind == JsonValueKind.Array)

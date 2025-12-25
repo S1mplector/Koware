@@ -129,6 +129,9 @@ public sealed record SearchConfig
     /// <summary>Field mappings for result extraction.</summary>
     public IReadOnlyList<FieldMapping> ResultMapping { get; init; } = [];
     
+    /// <summary>JSONPath to the results array in the response.</summary>
+    public string? ResultsPath { get; init; }
+    
     /// <summary>Maximum results per page.</summary>
     public int PageSize { get; init; } = 20;
 }

@@ -51,4 +51,37 @@ public sealed record SiteProfile
     
     /// <summary>Any errors encountered during probing.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
+    
+    /// <summary>Pre-configured knowledge about this site type if recognized.</summary>
+    public SiteKnowledge? KnownSiteInfo { get; init; }
+}
+
+/// <summary>
+/// Pre-configured knowledge about known site types for improved detection.
+/// </summary>
+public sealed record SiteKnowledge
+{
+    /// <summary>Expected content category for this site type.</summary>
+    public ContentCategory Category { get; init; } = ContentCategory.Unknown;
+    
+    /// <summary>Known API path patterns for this site.</summary>
+    public string[] ApiPatterns { get; init; } = [];
+    
+    /// <summary>Known search endpoint template. Use {query} as placeholder.</summary>
+    public string? SearchEndpoint { get; init; }
+    
+    /// <summary>Regex pattern to extract content IDs from URLs.</summary>
+    public string? IdPattern { get; init; }
+    
+    /// <summary>Known content detail endpoint template. Use {id} as placeholder.</summary>
+    public string? ContentEndpoint { get; init; }
+    
+    /// <summary>Known episodes/chapters endpoint template.</summary>
+    public string? EpisodesEndpoint { get; init; }
+    
+    /// <summary>Known streams/pages endpoint template.</summary>
+    public string? StreamsEndpoint { get; init; }
+    
+    /// <summary>Expected field mappings for this site type.</summary>
+    public Dictionary<string, string>? FieldMappings { get; init; }
 }

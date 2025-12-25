@@ -45,6 +45,20 @@ public sealed class RestAnimeTemplate : IProviderTemplate
     {
         var slug = GenerateSlug(providerName);
         var apiBase = DetermineApiBase(profile, schema);
+        
+        // Get search endpoint from discovered endpoints
+        var searchEndpoint = schema.Endpoints.FirstOrDefault(e => e.Purpose == EndpointPurpose.Search);
+        var detailEndpoint = schema.Endpoints.FirstOrDefault(e => e.Purpose == EndpointPurpose.Details || e.Purpose == EndpointPurpose.Episodes);
+        var streamEndpoint = schema.Endpoints.FirstOrDefault(e => e.Purpose == EndpointPurpose.Streams);
+        
+        // Use discovered mappings or fall back to defaults
+        var searchMappings = searchEndpoint?.FieldMappings?.Count > 0 
+            ? searchEndpoint.FieldMappings 
+            : schema.SearchPattern?.FieldMappings?.ToList() ?? GetDefaultSearchMappings();
+            
+        var searchPath = searchEndpoint?.Url.AbsolutePath ?? "/search";
+        var searchQuery = searchEndpoint?.SampleQuery ?? schema.SearchPattern?.QueryTemplate ?? "?q=${query}";
+        var resultsPath = searchEndpoint?.ResultsPath ?? schema.SearchPattern?.ResultsPath;
 
         return new DynamicProviderConfig
         {
@@ -61,9 +75,10 @@ public sealed class RestAnimeTemplate : IProviderTemplate
             Search = new SearchConfig
             {
                 Method = SearchMethod.REST,
-                Endpoint = "/search",
-                QueryTemplate = schema.SearchPattern?.QueryTemplate ?? "?q=${query}",
-                ResultMapping = schema.SearchPattern?.FieldMappings.ToList() ?? GetDefaultSearchMappings(),
+                Endpoint = searchPath,
+                QueryTemplate = searchQuery,
+                ResultMapping = searchMappings,
+                ResultsPath = resultsPath,
                 PageSize = 20
             },
             Content = new ContentConfig
@@ -71,9 +86,11 @@ public sealed class RestAnimeTemplate : IProviderTemplate
                 Episodes = new EndpointConfig
                 {
                     Method = SearchMethod.REST,
-                    Endpoint = "/info",
-                    QueryTemplate = schema.EpisodePattern?.QueryTemplate ?? "/${id}",
-                    ResultMapping = schema.EpisodePattern?.FieldMappings.ToList() ?? GetDefaultEpisodeMappings()
+                    Endpoint = detailEndpoint?.Url.AbsolutePath ?? "/info",
+                    QueryTemplate = detailEndpoint?.SampleQuery ?? schema.EpisodePattern?.QueryTemplate ?? "/${id}",
+                    ResultMapping = detailEndpoint?.FieldMappings?.Count > 0 
+                        ? detailEndpoint.FieldMappings 
+                        : schema.EpisodePattern?.FieldMappings.ToList() ?? GetDefaultEpisodeMappings()
                 }
             },
             Media = new MediaConfig
@@ -81,9 +98,11 @@ public sealed class RestAnimeTemplate : IProviderTemplate
                 Streams = new StreamConfig
                 {
                     Method = SearchMethod.REST,
-                    Endpoint = "/watch",
-                    QueryTemplate = schema.MediaPattern?.QueryTemplate ?? "/${episodeId}",
-                    ResultMapping = schema.MediaPattern?.FieldMappings.ToList() ?? GetDefaultStreamMappings()
+                    Endpoint = streamEndpoint?.Url.AbsolutePath ?? "/watch",
+                    QueryTemplate = streamEndpoint?.SampleQuery ?? schema.MediaPattern?.QueryTemplate ?? "/${episodeId}",
+                    ResultMapping = streamEndpoint?.FieldMappings?.Count > 0
+                        ? streamEndpoint.FieldMappings
+                        : schema.MediaPattern?.FieldMappings.ToList() ?? GetDefaultStreamMappings()
                 }
             },
             Transforms = []

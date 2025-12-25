@@ -18,13 +18,72 @@ public sealed class SiteProber : ISiteProber
     private readonly ILogger<SiteProber> _logger;
 
     private static readonly string[] AnimeKeywords = 
-        ["anime", "episode", "watch", "stream", "sub", "dub", "season"];
+        ["anime", "episode", "watch", "stream", "sub", "dub", "season", "hentai", "video", "play"];
     private static readonly string[] MangaKeywords = 
-        ["manga", "chapter", "read", "scan", "webtoon", "comic", "manhwa", "manhua"];
+        ["manga", "chapter", "read", "scan", "webtoon", "comic", "manhwa", "manhua", "doujin", "gallery", "nhentai", "page"];
     private static readonly string[] GraphQLIndicators = 
         ["graphql", "gql", "__schema", "query {", "mutation {"];
     private static readonly string[] SpaFrameworks = 
         ["react", "vue", "angular", "next", "nuxt", "svelte"];
+    
+    // Known site patterns for specialized detection
+    private static readonly Dictionary<string, SiteKnowledge> KnownSites = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["nhentai"] = new SiteKnowledge
+        {
+            Category = ContentCategory.Manga,
+            ApiPatterns = ["/api/gallery/", "/api/galleries/search"],
+            SearchEndpoint = "/api/galleries/search?query={query}",
+            IdPattern = @"/g/(\d+)",
+            ContentEndpoint = "/api/gallery/{id}",
+            FieldMappings = new Dictionary<string, string>
+            {
+                ["Id"] = "$.id",
+                ["Title"] = "$.title.english",
+                ["TitleAlt"] = "$.title.japanese",
+                ["CoverImage"] = "$.images.cover.url",
+                ["PageCount"] = "$.num_pages",
+                ["Tags"] = "$.tags[*].name"
+            }
+        },
+        ["hanime"] = new SiteKnowledge
+        {
+            Category = ContentCategory.Anime,
+            ApiPatterns = ["/api/v8/", "/rapi/v7/"],
+            SearchEndpoint = "/rapi/v7/hentai_videos?search={query}",
+            IdPattern = @"/videos/hentai/([\w-]+)",
+            ContentEndpoint = "/rapi/v7/videos_manifests/{id}",
+            FieldMappings = new Dictionary<string, string>
+            {
+                ["Id"] = "$.id",
+                ["Title"] = "$.name",
+                ["CoverImage"] = "$.poster_url",
+                ["Synopsis"] = "$.description"
+            }
+        },
+        ["hentaihaven"] = new SiteKnowledge
+        {
+            Category = ContentCategory.Anime,
+            ApiPatterns = ["/wp-json/", "/api/"],
+            SearchEndpoint = "/wp-json/wp/v2/posts?search={query}",
+            IdPattern = @"/watch/([\w-]+)"
+        },
+        ["mangadex"] = new SiteKnowledge
+        {
+            Category = ContentCategory.Manga,
+            ApiPatterns = ["/api/v5/"],
+            SearchEndpoint = "/api/v5/manga?title={query}",
+            IdPattern = @"/title/([a-f0-9-]+)",
+            ContentEndpoint = "/api/v5/manga/{id}"
+        },
+        ["gogoanime"] = new SiteKnowledge
+        {
+            Category = ContentCategory.Anime,
+            ApiPatterns = ["/ajax/", "/api/"],
+            SearchEndpoint = "/search.html?keyword={query}",
+            IdPattern = @"/category/([\w-]+)"
+        }
+    };
 
     public SiteProber(HttpClient httpClient, ILogger<SiteProber> logger)
     {
@@ -43,6 +102,9 @@ public sealed class SiteProber : ISiteProber
 
         // Normalize URL
         var baseUrl = new Uri($"{url.Scheme}://{url.Host}");
+        
+        // Check for known site patterns
+        var knownSite = DetectKnownSite(url.Host);
 
         // Fetch main page
         string? htmlContent = null;
@@ -142,6 +204,14 @@ public sealed class SiteProber : ISiteProber
         // Required headers for requests
         headers["Referer"] = baseUrl.ToString();
         headers["Origin"] = baseUrl.ToString().TrimEnd('/');
+        
+        // Add known site API endpoints
+        if (knownSite != null)
+        {
+            apiEndpoints.AddRange(knownSite.ApiPatterns);
+            if (category == ContentCategory.Unknown)
+                category = knownSite.Category;
+        }
 
         return new SiteProfile
         {
@@ -159,8 +229,21 @@ public sealed class SiteProber : ISiteProber
             SiteTitle = siteTitle,
             SiteDescription = siteDescription,
             RobotsTxt = robotsTxt,
+            KnownSiteInfo = knownSite,
             Errors = errors
         };
+    }
+    
+    private static SiteKnowledge? DetectKnownSite(string host)
+    {
+        foreach (var (siteName, knowledge) in KnownSites)
+        {
+            if (host.Contains(siteName, StringComparison.OrdinalIgnoreCase))
+            {
+                return knowledge;
+            }
+        }
+        return null;
     }
 
     private static string DetectJsFramework(IDocument document, string html)

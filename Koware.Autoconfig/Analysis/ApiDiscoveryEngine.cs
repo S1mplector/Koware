@@ -17,9 +17,14 @@ public sealed class ApiDiscoveryEngine : IApiDiscoveryEngine
 
     private static readonly string[] CommonApiPaths = 
     [
-        "/api", "/api/v1", "/api/v2", "/graphql", "/gql",
+        "/api", "/api/v1", "/api/v2", "/api/v3", "/api/v5", "/api/v7", "/api/v8",
+        "/graphql", "/gql", "/api/graphql",
         "/api/anime", "/api/manga", "/api/search", "/api/shows",
-        "/api/gallery", "/api/video", "/api/hentai", "/api/browse"
+        "/api/gallery", "/api/galleries", "/api/video", "/api/videos",
+        "/api/hentai", "/api/browse", "/api/content",
+        "/rapi/v7", "/rapi/v8",  // hanime patterns
+        "/wp-json/wp/v2",  // WordPress patterns
+        "/ajax", "/ajax/load", "/ajax/search"  // AJAX patterns
     ];
 
     private static readonly string[] SearchQuerySamples = 
@@ -38,9 +43,20 @@ public sealed class ApiDiscoveryEngine : IApiDiscoveryEngine
         
         _logger.LogInformation("Discovering APIs for {Url}", profile.BaseUrl);
 
+        // If we have known site info, prioritize those endpoints
+        if (profile.KnownSiteInfo != null)
+        {
+            _logger.LogInformation("Using known site patterns for {Host}", profile.BaseUrl.Host);
+            var knownEndpoints = await DiscoverFromKnownSiteAsync(profile, cancellationToken);
+            endpoints.AddRange(knownEndpoints);
+        }
+
         // Test known endpoints from probing
         foreach (var path in profile.DetectedApiEndpoints)
         {
+            if (endpoints.Any(e => e.Url.ToString().Contains(path)))
+                continue;
+                
             var endpoint = await TestEndpointAsync(profile, path, cancellationToken);
             if (endpoint != null)
             {
@@ -52,6 +68,8 @@ public sealed class ApiDiscoveryEngine : IApiDiscoveryEngine
         foreach (var path in CommonApiPaths)
         {
             if (profile.DetectedApiEndpoints.Any(e => e.Contains(path, StringComparison.OrdinalIgnoreCase)))
+                continue;
+            if (endpoints.Any(e => e.Url.ToString().Contains(path)))
                 continue;
 
             var endpoint = await TestEndpointAsync(profile, path, cancellationToken);
@@ -68,14 +86,95 @@ public sealed class ApiDiscoveryEngine : IApiDiscoveryEngine
             endpoints.AddRange(graphqlEndpoints);
         }
 
-        // Try to find search endpoint
-        var searchEndpoint = await DiscoverSearchEndpointAsync(profile, endpoints, cancellationToken);
-        if (searchEndpoint != null && !endpoints.Any(e => e.Purpose == EndpointPurpose.Search))
+        // Try to find search endpoint if we don't have one
+        if (!endpoints.Any(e => e.Purpose == EndpointPurpose.Search))
         {
-            endpoints.Add(searchEndpoint);
+            var searchEndpoint = await DiscoverSearchEndpointAsync(profile, endpoints, cancellationToken);
+            if (searchEndpoint != null)
+            {
+                endpoints.Add(searchEndpoint);
+            }
         }
 
         return endpoints.DistinctBy(e => e.Url.ToString()).ToList();
+    }
+    
+    private async Task<IReadOnlyList<ApiEndpoint>> DiscoverFromKnownSiteAsync(SiteProfile profile, CancellationToken ct)
+    {
+        var endpoints = new List<ApiEndpoint>();
+        var knownSite = profile.KnownSiteInfo!;
+        var headers = new Dictionary<string, string>
+        {
+            ["Referer"] = profile.BaseUrl.ToString(),
+            ["Origin"] = profile.BaseUrl.GetLeftPart(UriPartial.Authority)
+        };
+        foreach (var (key, value) in profile.RequiredHeaders)
+        {
+            headers[key] = value;
+        }
+
+        // Try the known search endpoint
+        if (!string.IsNullOrEmpty(knownSite.SearchEndpoint))
+        {
+            var searchPath = knownSite.SearchEndpoint.Split('?')[0];
+            var queryPart = knownSite.SearchEndpoint.Contains('?') 
+                ? "?" + knownSite.SearchEndpoint.Split('?')[1].Replace("{query}", "")
+                : "?q=";
+            
+            var analysisResult = await _responseAnalyzer.AnalyzeSearchEndpointAsync(
+                profile.BaseUrl.GetLeftPart(UriPartial.Authority),
+                searchPath,
+                queryPart,
+                headers,
+                ct);
+
+            if (analysisResult.Confidence > 0.3f || analysisResult.SearchMappings.Count > 0)
+            {
+                _logger.LogInformation("Known site search endpoint confirmed at {Path} with {Count} mappings",
+                    searchPath, analysisResult.SearchMappings.Count);
+
+                endpoints.Add(new ApiEndpoint
+                {
+                    Url = BuildUrl(profile.BaseUrl, searchPath),
+                    Type = ApiType.REST,
+                    Method = HttpMethod.Get,
+                    Purpose = EndpointPurpose.Search,
+                    SampleQuery = knownSite.SearchEndpoint.Replace(searchPath, "").Replace("{query}", "${query}"),
+                    SampleResponse = analysisResult.SampleResponse,
+                    FieldMappings = analysisResult.SearchMappings,
+                    ResultsPath = analysisResult.ResultsPath,
+                    Confidence = Math.Max(85, (int)(analysisResult.Confidence * 100))
+                });
+            }
+        }
+
+        // Try content detail endpoint with a sample ID if we have one
+        if (!string.IsNullOrEmpty(knownSite.ContentEndpoint))
+        {
+            var contentPath = knownSite.ContentEndpoint.Replace("{id}", "1"); // Try with ID 1
+            var contentAnalysis = await _responseAnalyzer.AnalyzeEndpointAsync(
+                BuildUrl(profile.BaseUrl, contentPath).ToString(),
+                headers,
+                "Details",
+                ct);
+
+            if (contentAnalysis.Confidence > 0.3f)
+            {
+                endpoints.Add(new ApiEndpoint
+                {
+                    Url = BuildUrl(profile.BaseUrl, knownSite.ContentEndpoint.Split('?')[0]),
+                    Type = ApiType.REST,
+                    Method = HttpMethod.Get,
+                    Purpose = EndpointPurpose.Details,
+                    SampleQuery = "/{id}",
+                    SampleResponse = contentAnalysis.SampleResponse,
+                    FieldMappings = contentAnalysis.SearchMappings,
+                    Confidence = 80
+                });
+            }
+        }
+
+        return endpoints;
     }
 
     private async Task<ApiEndpoint?> TestEndpointAsync(SiteProfile profile, string path, CancellationToken ct)
