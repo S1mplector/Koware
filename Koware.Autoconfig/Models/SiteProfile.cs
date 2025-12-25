@@ -67,8 +67,20 @@ public sealed record SiteKnowledge
     /// <summary>Known API path patterns for this site.</summary>
     public string[] ApiPatterns { get; init; } = [];
     
+    /// <summary>API base URL if different from main site.</summary>
+    public string? ApiBase { get; init; }
+    
     /// <summary>Known search endpoint template. Use {query} as placeholder.</summary>
     public string? SearchEndpoint { get; init; }
+    
+    /// <summary>HTTP method for search (GET or POST). Default is GET.</summary>
+    public string? SearchMethod { get; init; }
+    
+    /// <summary>JSON body template for POST search requests. Use {query} as placeholder.</summary>
+    public string? SearchBodyTemplate { get; init; }
+    
+    /// <summary>JSONPath to the results array in search responses.</summary>
+    public string? ResultsPath { get; init; }
     
     /// <summary>Regex pattern to extract content IDs from URLs.</summary>
     public string? IdPattern { get; init; }

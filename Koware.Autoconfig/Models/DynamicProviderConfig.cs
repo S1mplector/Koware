@@ -123,8 +123,11 @@ public sealed record SearchConfig
     /// <summary>Endpoint URL or path.</summary>
     public required string Endpoint { get; init; }
     
-    /// <summary>Query template with placeholders.</summary>
+    /// <summary>Query template with placeholders (for GET) or body template (for POST).</summary>
     public required string QueryTemplate { get; init; }
+    
+    /// <summary>JSON body template for POST requests. Use ${query} as placeholder.</summary>
+    public string? BodyTemplate { get; init; }
     
     /// <summary>Field mappings for result extraction.</summary>
     public IReadOnlyList<FieldMapping> ResultMapping { get; init; } = [];

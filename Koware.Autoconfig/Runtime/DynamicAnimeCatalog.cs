@@ -48,20 +48,32 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
         try
         {
             var searchConfig = _config.Search;
-            var requestBody = BuildRequest(searchConfig.QueryTemplate, new Dictionary<string, string>
+            var variables = new Dictionary<string, string>
             {
                 ["query"] = query,
                 ["search"] = query,
                 ["limit"] = searchConfig.PageSize.ToString()
-            });
+            };
+            
+            string response;
+            
+            // Check if this is a POST request with body template
+            if (!string.IsNullOrEmpty(searchConfig.BodyTemplate))
+            {
+                var body = BuildRequest(searchConfig.BodyTemplate, variables);
+                response = await ExecutePostRequestAsync(searchConfig.Endpoint, body, cancellationToken);
+            }
+            else
+            {
+                var requestBody = BuildRequest(searchConfig.QueryTemplate, variables);
+                response = await ExecuteRequestAsync(
+                    searchConfig.Endpoint,
+                    searchConfig.Method,
+                    requestBody,
+                    cancellationToken);
+            }
 
-            var response = await ExecuteRequestAsync(
-                searchConfig.Endpoint,
-                searchConfig.Method,
-                requestBody,
-                cancellationToken);
-
-            var results = _transforms.ExtractAll(response, searchConfig.ResultMapping);
+            var results = _transforms.ExtractAll(response, searchConfig.ResultMapping, searchConfig.ResultsPath);
             
             return results.Select(r => new Anime(
                 new AnimeId(GetString(r, "Id") ?? Guid.NewGuid().ToString()),
@@ -207,6 +219,32 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
             _logger.LogError(ex, "GetStreams failed for episode {EpisodeId}", episode.Id.Value);
             return Array.Empty<StreamLink>();
         }
+    }
+
+    private async Task<string> ExecutePostRequestAsync(
+        string endpoint,
+        string jsonBody,
+        CancellationToken cancellationToken)
+    {
+        var baseUrl = _config.Hosts.ApiBase ?? $"https://{_config.Hosts.BaseHost}";
+        var fullUrl = endpoint.StartsWith("http") ? endpoint : $"{baseUrl.TrimEnd('/')}/{endpoint.TrimStart('/')}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, fullUrl);
+        request.Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
+        
+        // Add headers
+        request.Headers.Referrer = new Uri(_config.Hosts.Referer);
+        request.Headers.UserAgent.ParseAdd(_config.Hosts.UserAgent);
+        
+        foreach (var (key, value) in _config.Hosts.CustomHeaders)
+        {
+            request.Headers.TryAddWithoutValidation(key, value);
+        }
+
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        
+        return await response.Content.ReadAsStringAsync(cancellationToken);
     }
 
     private async Task<string> ExecuteRequestAsync(

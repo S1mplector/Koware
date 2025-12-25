@@ -50,14 +50,19 @@ public sealed class SiteProber : ISiteProber
         {
             Category = ContentCategory.Anime,
             ApiPatterns = ["/api/v8/", "/rapi/v7/"],
-            SearchEndpoint = "/rapi/v7/hentai_videos?search={query}",
+            // hanime API is at search.htv-services.com, uses POST with JSON body
+            ApiBase = "https://search.htv-services.com",
+            SearchEndpoint = "/api/v8/search",
+            SearchMethod = "POST",
+            SearchBodyTemplate = """{"search_text": "{query}", "tags": [], "tags_mode": "AND", "brands": [], "blacklist": [], "order_by": "likes", "ordering": "desc", "page": 0}""",
+            ResultsPath = "$.hits",
             IdPattern = @"/videos/hentai/([\w-]+)",
-            ContentEndpoint = "/rapi/v7/videos_manifests/{id}",
+            ContentEndpoint = "/api/v8/video?id={id}",
             FieldMappings = new Dictionary<string, string>
             {
                 ["Id"] = "$.id",
                 ["Title"] = "$.name",
-                ["CoverImage"] = "$.poster_url",
+                ["CoverImage"] = "$.cover_url",
                 ["Synopsis"] = "$.description"
             }
         },
