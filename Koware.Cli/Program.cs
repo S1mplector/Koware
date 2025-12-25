@@ -1716,13 +1716,64 @@ static async Task<int> HandleUrlAutoconfigAsync(string urlString, string[] args,
                 }
             }
             
+            // Post-completion dialogue
+            Console.WriteLine();
+            Console.WriteLine(new string('─', 64));
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("  Provider Configuration");
+            Console.ResetColor();
+            Console.WriteLine();
+            
+            // Ask for custom name
+            Console.Write($"  Enter a name for this provider [{result.Config.Name}]: ");
+            var newName = Console.ReadLine()?.Trim();
+            
+            var finalConfig = result.Config;
+            var providerStore = services.GetRequiredService<IProviderStore>();
+            
+            if (!string.IsNullOrEmpty(newName) && newName != result.Config.Name)
+            {
+                // Create new config with updated name and slug
+                var newSlug = newName.ToLowerInvariant().Replace(' ', '-').Replace("'", "");
+                finalConfig = result.Config with 
+                { 
+                    Name = newName,
+                    Slug = newSlug
+                };
+                
+                // Delete old config and save new one
+                await providerStore.DeleteAsync(result.Config.Slug);
+                await providerStore.SaveAsync(finalConfig);
+                
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"  {Icons.Success} Provider renamed to '{newName}'");
+                Console.ResetColor();
+            }
+            
+            Console.WriteLine();
+            
+            // Ask to add to active configuration
+            var typeLabel = finalConfig.Type == ProviderType.Manga ? "manga" : "anime";
+            Console.Write($"  Set as active {typeLabel} provider? [y/N]: ");
+            var setActive = Console.ReadLine()?.Trim();
+            
+            if (!string.IsNullOrEmpty(setActive) && setActive.Equals("y", StringComparison.OrdinalIgnoreCase))
+            {
+                await providerStore.SetActiveAsync(finalConfig.Slug, finalConfig.Type);
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"  {Icons.Success} '{finalConfig.Name}' is now the active {typeLabel} provider");
+                Console.ResetColor();
+            }
+            
+            Console.WriteLine();
+            Console.WriteLine(new string('─', 64));
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Yellow;
             Console.WriteLine("Note: This provider config is saved but NOT yet integrated with");
             Console.WriteLine("      koware watch/read commands. Full integration coming soon.");
             Console.ResetColor();
             Console.WriteLine();
-            Console.WriteLine($"Config saved to: ~/.config/koware/providers/custom/{result.Config.Slug}.json");
+            Console.WriteLine($"Config saved to: ~/.config/koware/providers/custom/{finalConfig.Slug}.json");
             
             return 0;
         }

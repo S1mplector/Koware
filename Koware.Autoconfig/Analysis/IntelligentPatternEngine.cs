@@ -187,7 +187,7 @@ public sealed class IntelligentPatternEngine : IIntelligentPatternEngine
                 Type = "Architecture",
                 Value = matchedArchitecture,
                 Confidence = architectureConfidence,
-                Evidence = $"Matched {KnownArchitectures[matchedArchitecture].Indicators.Count} indicators"
+                Evidence = $"Matched {KnownArchitectures[matchedArchitecture].Indicators.Length} indicators"
             });
             
             recommendations.Add($"Site matches '{matchedArchitecture}' architecture - using optimized templates");
@@ -293,7 +293,7 @@ public sealed class IntelligentPatternEngine : IIntelligentPatternEngine
         foreach (var (name, signature) in KnownArchitectures)
         {
             var matchCount = signature.Indicators.Count(i => fullText.Contains(i.ToLowerInvariant()));
-            var score = (float)matchCount / signature.Indicators.Count;
+            var score = (float)matchCount / signature.Indicators.Length;
             
             // Boost score for API type match
             if (profile.HasGraphQL && signature.ApiType == ApiType.GraphQL)
