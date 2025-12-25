@@ -54,16 +54,23 @@ public sealed class DynamicMangaCatalog : IMangaCatalog
                 requestBody,
                 cancellationToken);
 
-            var results = _transforms.ExtractAll(response, searchConfig.ResultMapping);
+            var results = _transforms.ExtractAll(response, searchConfig.ResultMapping, searchConfig.ResultsPath);
+            var baseUrl = _config.Hosts.ApiBase ?? $"https://{_config.Hosts.BaseHost}";
             
-            return results.Select(r => new Manga(
-                new MangaId(GetString(r, "Id") ?? Guid.NewGuid().ToString()),
-                GetString(r, "Title") ?? "Unknown",
-                synopsis: GetString(r, "Synopsis"),
-                coverImage: TryParseUri(GetString(r, "CoverImage")),
-                detailPage: TryParseUri(GetString(r, "DetailPage")),
-                chapters: Array.Empty<Chapter>()
-            )).ToList();
+            return results.Select(r => {
+                var id = GetString(r, "Id") ?? Guid.NewGuid().ToString();
+                var detailPage = TryParseUri(GetString(r, "DetailPage")) 
+                    ?? new Uri($"{baseUrl.TrimEnd('/')}/g/{id}");
+                
+                return new Manga(
+                    new MangaId(id),
+                    GetString(r, "Title") ?? "Unknown",
+                    synopsis: GetString(r, "Synopsis"),
+                    coverImage: TryParseUri(GetString(r, "CoverImage")),
+                    detailPage: detailPage,
+                    chapters: Array.Empty<Chapter>()
+                );
+            }).ToList();
         }
         catch (Exception ex)
         {
@@ -80,10 +87,22 @@ public sealed class DynamicMangaCatalog : IMangaCatalog
     public async Task<IReadOnlyCollection<Chapter>> GetChaptersAsync(Manga manga, CancellationToken cancellationToken = default)
     {
         var chapterConfig = _config.Content.Chapters;
-        if (chapterConfig == null)
+        
+        // For sites like nhentai where galleries ARE the content (no chapters),
+        // create a synthetic chapter representing the whole gallery
+        if (chapterConfig == null || chapterConfig.Endpoint == "/info")
         {
-            _logger.LogWarning("No chapter configuration for provider {Provider}", _config.Slug);
-            return Array.Empty<Chapter>();
+            _logger.LogDebug("Using gallery-as-chapter mode for provider {Provider}", _config.Slug);
+            var baseUrl = _config.Hosts.ApiBase ?? $"https://{_config.Hosts.BaseHost}";
+            return new List<Chapter>
+            {
+                new Chapter(
+                    new ChapterId(manga.Id.Value),
+                    manga.Title,
+                    1f,
+                    new Uri($"{baseUrl.TrimEnd('/')}/g/{manga.Id.Value}")
+                )
+            };
         }
 
         try
@@ -102,6 +121,22 @@ public sealed class DynamicMangaCatalog : IMangaCatalog
 
             var results = _transforms.ExtractAll(response, chapterConfig.ResultMapping);
             
+            // If no chapters found, treat the manga itself as a single chapter (gallery mode)
+            if (results.Count == 0)
+            {
+                _logger.LogDebug("No chapters found, using gallery-as-chapter mode for {MangaId}", manga.Id.Value);
+                var baseUrl = _config.Hosts.ApiBase ?? $"https://{_config.Hosts.BaseHost}";
+                return new List<Chapter>
+                {
+                    new Chapter(
+                        new ChapterId(manga.Id.Value),
+                        manga.Title,
+                        1f,
+                        new Uri($"{baseUrl.TrimEnd('/')}/g/{manga.Id.Value}")
+                    )
+                };
+            }
+            
             var chapters = new List<Chapter>();
             var number = 1f;
             
@@ -112,7 +147,7 @@ public sealed class DynamicMangaCatalog : IMangaCatalog
                 var title = GetString(r, "Title") ?? $"Chapter {chNum}";
                 var page = TryParseUri(GetString(r, "Page"));
                 
-                chapters.Add(new Chapter(new ChapterId(chId), title, chNum, page));
+                chapters.Add(new Chapter(new ChapterId(chId), title, chNum, page ?? manga.DetailPage));
                 number++;
             }
             
@@ -120,18 +155,29 @@ public sealed class DynamicMangaCatalog : IMangaCatalog
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "GetChapters failed for manga {MangaId}", manga.Id.Value);
-            return Array.Empty<Chapter>();
+            _logger.LogDebug(ex, "GetChapters failed for manga {MangaId}, using gallery-as-chapter mode", manga.Id.Value);
+            // Fall back to gallery-as-chapter mode on error
+            var baseUrl = _config.Hosts.ApiBase ?? $"https://{_config.Hosts.BaseHost}";
+            return new List<Chapter>
+            {
+                new Chapter(
+                    new ChapterId(manga.Id.Value),
+                    manga.Title,
+                    1f,
+                    new Uri($"{baseUrl.TrimEnd('/')}/g/{manga.Id.Value}")
+                )
+            };
         }
     }
 
     public async Task<IReadOnlyCollection<ChapterPage>> GetPagesAsync(Chapter chapter, CancellationToken cancellationToken = default)
     {
         var pageConfig = _config.Media.Pages;
-        if (pageConfig == null)
+        
+        // For nhentai-style galleries, fetch from the gallery API endpoint
+        if (pageConfig == null || pageConfig.Endpoint == "/read")
         {
-            _logger.LogWarning("No page configuration for provider {Provider}", _config.Slug);
-            return Array.Empty<ChapterPage>();
+            return await GetPagesFromGalleryApiAsync(chapter, cancellationToken);
         }
 
         try
@@ -182,6 +228,68 @@ public sealed class DynamicMangaCatalog : IMangaCatalog
         catch (Exception ex)
         {
             _logger.LogError(ex, "GetPages failed for chapter {ChapterId}", chapter.Id.Value);
+            return Array.Empty<ChapterPage>();
+        }
+    }
+
+    private async Task<IReadOnlyCollection<ChapterPage>> GetPagesFromGalleryApiAsync(Chapter chapter, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var baseUrl = _config.Hosts.ApiBase ?? $"https://{_config.Hosts.BaseHost}";
+            var galleryId = chapter.Id.Value;
+            
+            // Fetch gallery details from nhentai API
+            var response = await ExecuteRequestAsync(
+                $"/api/gallery/{galleryId}",
+                SearchMethod.REST,
+                "",
+                cancellationToken);
+            
+            // Parse the response to extract images
+            using var doc = System.Text.Json.JsonDocument.Parse(response);
+            var root = doc.RootElement;
+            
+            var pages = new List<ChapterPage>();
+            var pageNum = 1;
+            
+            // nhentai structure: images.pages[] with t (type) field
+            if (root.TryGetProperty("images", out var images) && 
+                images.TryGetProperty("pages", out var pagesArray))
+            {
+                // Get media_id for constructing image URLs
+                var mediaId = root.TryGetProperty("media_id", out var mid) 
+                    ? mid.GetString() 
+                    : galleryId;
+                
+                foreach (var page in pagesArray.EnumerateArray())
+                {
+                    var ext = "jpg";
+                    if (page.TryGetProperty("t", out var typeEl))
+                    {
+                        var type = typeEl.GetString();
+                        ext = type switch
+                        {
+                            "j" => "jpg",
+                            "p" => "png",
+                            "g" => "gif",
+                            "w" => "webp",
+                            _ => "jpg"
+                        };
+                    }
+                    
+                    // nhentai image URL format: https://i.nhentai.net/galleries/{media_id}/{page}.{ext}
+                    var imageUrl = new Uri($"https://i.nhentai.net/galleries/{mediaId}/{pageNum}.{ext}");
+                    pages.Add(new ChapterPage(pageNum, imageUrl, _config.Hosts.Referer));
+                    pageNum++;
+                }
+            }
+            
+            return pages;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetPages from gallery API failed for chapter {ChapterId}", chapter.Id.Value);
             return Array.Empty<ChapterPage>();
         }
     }
