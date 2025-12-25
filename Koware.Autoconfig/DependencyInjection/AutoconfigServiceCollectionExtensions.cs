@@ -29,6 +29,8 @@ public static class AutoconfigServiceCollectionExtensions
         services.AddTransient<ISiteProber, SiteProber>();
         services.AddTransient<IApiDiscoveryEngine, ApiDiscoveryEngine>();
         services.AddTransient<IContentPatternMatcher, ContentPatternMatcher>();
+        services.AddTransient<IIntelligentPatternEngine, IntelligentPatternEngine>();
+        services.AddTransient<IGraphQLIntrospector, GraphQLIntrospector>();
         
         // Generation
         services.AddSingleton<IProviderTemplateLibrary, ProviderTemplateLibrary>();
