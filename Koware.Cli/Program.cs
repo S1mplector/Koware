@@ -181,7 +181,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
     // Commands that require configured providers (will block if not configured)
     var providerRequiredCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "search", "plan", "stream", "watch", "play", "download", "read", "last", "continue", "list", "recommend", "rec"
+        "search", "explore", "plan", "stream", "watch", "play", "download", "read", "last", "continue", "list", "recommend", "rec"
     };
 
     // Commands that should NOT show the provider warning (utility/setup commands)
@@ -223,6 +223,8 @@ static async Task<int> RunAsync(IHost host, string[] args)
         {
             case "search":
                 return await HandleSearchAsync(orchestrator, args, services, logger, defaults, cts.Token);
+            case "explore":
+                return await HandleExploreAsync(args, services, logger, defaults, cts.Token);
             case "plan":
             case "stream":
                 return await HandlePlanAsync(orchestrator, args, logger, defaults, cts.Token);
@@ -3520,6 +3522,13 @@ static async Task<int> LaunchFromHistory(WatchHistoryEntry entry, ScrapeOrchestr
 static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
     var jsonOutput = args.Skip(1).Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+    if (!jsonOutput)
+    {
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine("Note: 'search' is deprecated. Use 'koware explore' for the new interactive explorer.");
+        Console.ResetColor();
+        Console.WriteLine();
+    }
     
     // Parse filters from arguments
     var filters = SearchFilters.Parse(args);
@@ -3642,6 +3651,1132 @@ static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string
     }
 
     return 0;
+}
+
+private enum ExploreView
+{
+    Search,
+    Popular
+}
+
+private sealed record ExploreProviderChoice(
+    string Name,
+    string Slug,
+    ProviderType Type,
+    bool IsBuiltIn,
+    bool IsActive,
+    string Host);
+
+private sealed class ExploreProviderContext
+{
+    public ExploreProviderChoice Info { get; init; } = default!;
+    public IAnimeCatalog? AnimeCatalog { get; init; }
+    public IMangaCatalog? MangaCatalog { get; init; }
+    public string? Referrer { get; init; }
+    public string? UserAgent { get; init; }
+}
+
+private sealed class ListStatusLookup
+{
+    private readonly Dictionary<string, ItemStatus> _byId = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ItemStatus> _byTitle = new(StringComparer.OrdinalIgnoreCase);
+
+    public ItemStatus Resolve(string id, string title)
+    {
+        if (!string.IsNullOrWhiteSpace(id) && _byId.TryGetValue(id, out var status))
+        {
+            return status;
+        }
+
+        if (!string.IsNullOrWhiteSpace(title) && _byTitle.TryGetValue(title, out status))
+        {
+            return status;
+        }
+
+        return ItemStatus.None;
+    }
+
+    public void Set(string id, string title, ItemStatus status)
+    {
+        if (!string.IsNullOrWhiteSpace(id))
+        {
+            _byId[id] = status;
+        }
+
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            _byTitle[title] = status;
+        }
+    }
+}
+
+private sealed record ExploreMenuItem(string Id, string Label, string Description);
+private sealed record ExploreActionItem(string Id, string Label, string Description);
+
+/// <summary>
+/// Implement the <c>koware explore</c> command: interactive catalog browser with provider selection.
+/// </summary>
+static async Task<int> HandleExploreAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
+{
+    var mode = defaults.GetMode();
+    var filters = SearchFilters.Parse(args);
+
+    var providerChoices = await BuildExploreProviderChoicesAsync(mode, services, cancellationToken);
+    if (providerChoices.Count == 0)
+    {
+        Console.WriteLine("No providers available for explore. Configure one with:");
+        Console.WriteLine("  koware provider autoconfig");
+        return 1;
+    }
+
+    var providerSelection = SelectExploreProviders(providerChoices, mode);
+    if (providerSelection.Cancelled)
+    {
+        return 0;
+    }
+
+    if (providerSelection.Selected.Count == 0)
+    {
+        Console.WriteLine("No providers selected.");
+        return 0;
+    }
+
+    var providerContexts = await BuildExploreProviderContextsAsync(mode, providerSelection.Selected, services, logger, cancellationToken);
+    if (providerContexts.Count == 0)
+    {
+        Console.WriteLine("No providers are ready for explore.");
+        return 1;
+    }
+
+    var statusLookup = mode == CliMode.Manga
+        ? await BuildMangaStatusLookupAsync(services, cancellationToken)
+        : await BuildAnimeStatusLookupAsync(services, cancellationToken);
+
+    var providerSummary = BuildProviderSummary(providerContexts.Select(p => p.Info.Name));
+
+    while (true)
+    {
+        var menuChoice = ShowExploreMenu(mode, providerSummary);
+        if (menuChoice == "exit")
+        {
+            return 0;
+        }
+
+        if (menuChoice == "providers")
+        {
+            providerChoices = await BuildExploreProviderChoicesAsync(mode, services, cancellationToken);
+            providerSelection = SelectExploreProviders(providerChoices, mode);
+            if (providerSelection.Cancelled)
+            {
+                return 0;
+            }
+
+            if (providerSelection.Selected.Count == 0)
+            {
+                Console.WriteLine("No providers selected.");
+                continue;
+            }
+
+            providerContexts = await BuildExploreProviderContextsAsync(mode, providerSelection.Selected, services, logger, cancellationToken);
+            if (providerContexts.Count == 0)
+            {
+                Console.WriteLine("No providers are ready for explore.");
+                continue;
+            }
+            providerSummary = BuildProviderSummary(providerContexts.Select(p => p.Info.Name));
+            continue;
+        }
+
+        var view = menuChoice == "popular" ? ExploreView.Popular : ExploreView.Search;
+        string? query = null;
+
+        if (view == ExploreView.Search)
+        {
+            query = PromptForSearchQuery(mode);
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                Console.WriteLine("Search query is required.");
+                continue;
+            }
+        }
+
+        var fetchStep = ConsoleStep.Start(view == ExploreView.Popular ? "Fetching popular entries" : $"Searching \"{query}\"");
+        List<ExploreEntry> entries;
+        try
+        {
+            entries = await FetchExploreEntriesAsync(
+                mode,
+                view,
+                query,
+                filters,
+                providerContexts,
+                statusLookup,
+                logger,
+                cancellationToken);
+            fetchStep.Succeed($"Found {entries.Count} entry(s)");
+        }
+        catch
+        {
+            fetchStep.Fail("Explore failed");
+            throw;
+        }
+
+        if (entries.Count == 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine(view == ExploreView.Search
+                ? $"No results for \"{query}\"."
+                : "No popular entries found.");
+            Console.ResetColor();
+            continue;
+        }
+
+        var browser = new ExploreBrowser(
+            entries,
+            e => $"{e.Title} [{e.ProviderName}]",
+            e => BuildExplorePreview(e, mode),
+            new ExploreBrowserOptions
+            {
+                Prompt = mode == CliMode.Manga ? "Explore Manga" : "Explore Anime",
+                ProviderLine = providerSummary,
+                ViewLine = view == ExploreView.Popular ? "Popular now" : $"Search: {query}",
+                MaxVisibleItems = 12,
+                ShowPreview = true,
+                EmptyMessage = "No entries found"
+            });
+
+        var selection = browser.Run();
+        if (selection.Cancelled || selection.Selected is null)
+        {
+            continue;
+        }
+
+        var selectedEntry = selection.Selected;
+        var actionChoice = ShowExploreActionMenu(mode, selectedEntry);
+        if (actionChoice == "back")
+        {
+            continue;
+        }
+
+        if (actionChoice == "add")
+        {
+            ItemStatus? updatedStatus = mode == CliMode.Manga
+                ? await AddMangaToListAsync(selectedEntry, services, cancellationToken)
+                : await AddAnimeToListAsync(selectedEntry, services, cancellationToken);
+
+            if (updatedStatus.HasValue)
+            {
+                var id = mode == CliMode.Manga
+                    ? selectedEntry.Manga?.Id.Value ?? ""
+                    : selectedEntry.Anime?.Id.Value ?? "";
+                statusLookup.Set(id, selectedEntry.Title, updatedStatus.Value);
+            }
+
+            WaitForContinue();
+            continue;
+        }
+
+        var providerContext = providerContexts.FirstOrDefault(p =>
+            p.Info.Slug.Equals(selectedEntry.ProviderSlug, StringComparison.OrdinalIgnoreCase));
+
+        if (actionChoice == "watch")
+        {
+            if (providerContext?.AnimeCatalog is null || selectedEntry.Anime is null)
+            {
+                Console.WriteLine("Selected entry is not available for playback.");
+                continue;
+            }
+
+            await PlaySelectedAnimeAsync(
+                providerContext.AnimeCatalog,
+                selectedEntry.Anime,
+                providerContext.Referrer,
+                providerContext.UserAgent,
+                services,
+                logger,
+                defaults,
+                cancellationToken);
+
+            WaitForContinue();
+            continue;
+        }
+
+        if (actionChoice == "read")
+        {
+            if (providerContext?.MangaCatalog is null || selectedEntry.Manga is null)
+            {
+                Console.WriteLine("Selected entry is not available for reading.");
+                continue;
+            }
+
+            await ReadSelectedMangaAsync(
+                providerContext.MangaCatalog,
+                selectedEntry.Manga,
+                providerContext.Info.Slug,
+                providerContext.Referrer,
+                providerContext.UserAgent,
+                services,
+                logger,
+                cancellationToken);
+
+            WaitForContinue();
+        }
+    }
+}
+
+static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(CliMode mode, IServiceProvider services, CancellationToken cancellationToken)
+{
+    var providerStore = services.GetRequiredService<IProviderStore>();
+    var choices = new List<ExploreProviderChoice>();
+
+    if (mode == CliMode.Manga)
+    {
+        var options = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+        if (options.IsConfigured)
+        {
+            choices.Add(new ExploreProviderChoice(
+                "AllManga",
+                "allmanga",
+                ProviderType.Manga,
+                true,
+                options.Enabled,
+                options.BaseHost ?? options.ApiBase ?? "allmanga"));
+        }
+    }
+    else
+    {
+        var options = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+        if (options.IsConfigured)
+        {
+            choices.Add(new ExploreProviderChoice(
+                "AllAnime",
+                "allanime",
+                ProviderType.Anime,
+                true,
+                options.Enabled,
+                options.BaseHost ?? options.ApiBase ?? "allanime"));
+        }
+    }
+
+    var dynamicProviders = await providerStore.ListAsync(cancellationToken);
+    foreach (var dp in dynamicProviders)
+    {
+        var matchesMode = mode == CliMode.Manga
+            ? dp.Type is ProviderType.Manga or ProviderType.Both
+            : dp.Type is ProviderType.Anime or ProviderType.Both;
+
+        if (!matchesMode)
+        {
+            continue;
+        }
+
+        choices.Add(new ExploreProviderChoice(
+            dp.Name,
+            dp.Slug,
+            dp.Type,
+            dp.IsBuiltIn,
+            dp.IsActive,
+            dp.BaseHost));
+    }
+
+    return choices;
+}
+
+static MultiSelectResult<ExploreProviderChoice> SelectExploreProviders(IReadOnlyList<ExploreProviderChoice> providers, CliMode mode)
+{
+    var selector = new InteractiveMultiSelect<ExploreProviderChoice>(
+        providers,
+        p =>
+        {
+            var statusLabel = p.IsBuiltIn
+                ? (p.IsActive ? "built-in" : "built-in/off")
+                : p.IsActive ? "active" : "available";
+            return $"{p.Name,-16} [{statusLabel}] {p.Host}";
+        },
+        new MultiSelectOptions<ExploreProviderChoice>
+        {
+            Prompt = mode == CliMode.Manga ? "Select manga providers" : "Select anime providers",
+            PreviewFunc = p =>
+            {
+                var statusText = p.IsBuiltIn
+                    ? (p.IsActive ? "Built-in (enabled)" : "Built-in (disabled)")
+                    : p.IsActive ? "Active" : "Available";
+                return $"Name: {p.Name}\nType: {p.Type}\nHost: {p.Host}\nStatus: {statusText}";
+            },
+            IsSelected = p => p.IsActive,
+            MaxVisibleItems = 10,
+            EmptyMessage = "No providers available"
+        });
+
+    return selector.Run();
+}
+
+static async Task<List<ExploreProviderContext>> BuildExploreProviderContextsAsync(
+    CliMode mode,
+    IReadOnlyList<ExploreProviderChoice> selectedProviders,
+    IServiceProvider services,
+    ILogger logger,
+    CancellationToken cancellationToken)
+{
+    var providerStore = services.GetRequiredService<IProviderStore>();
+    var transforms = services.GetRequiredService<ITransformEngine>();
+    var httpFactory = services.GetRequiredService<IHttpClientFactory>();
+    var loggerFactory = services.GetRequiredService<ILoggerFactory>();
+    var contexts = new List<ExploreProviderContext>();
+
+    foreach (var provider in selectedProviders)
+    {
+        if (provider.IsBuiltIn)
+        {
+            if (mode == CliMode.Manga)
+            {
+                var options = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+                contexts.Add(new ExploreProviderContext
+                {
+                    Info = provider,
+                    MangaCatalog = services.GetRequiredService<AllMangaCatalog>(),
+                    Referrer = options.Referer,
+                    UserAgent = options.UserAgent
+                });
+            }
+            else
+            {
+                var options = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+                contexts.Add(new ExploreProviderContext
+                {
+                    Info = provider,
+                    AnimeCatalog = services.GetRequiredService<AllAnimeCatalog>(),
+                    Referrer = options.Referer,
+                    UserAgent = options.UserAgent
+                });
+            }
+            continue;
+        }
+
+        var config = await providerStore.GetAsync(provider.Slug, cancellationToken);
+        if (config is null)
+        {
+            logger.LogWarning("Provider config missing for {Provider}", provider.Slug);
+            continue;
+        }
+
+        if (mode == CliMode.Manga)
+        {
+            contexts.Add(new ExploreProviderContext
+            {
+                Info = provider,
+                MangaCatalog = new DynamicMangaCatalog(
+                    config,
+                    httpFactory.CreateClient(),
+                    transforms,
+                    loggerFactory.CreateLogger<DynamicMangaCatalog>()),
+                Referrer = config.Hosts.Referer,
+                UserAgent = config.Hosts.UserAgent
+            });
+        }
+        else
+        {
+            contexts.Add(new ExploreProviderContext
+            {
+                Info = provider,
+                AnimeCatalog = new DynamicAnimeCatalog(
+                    config,
+                    httpFactory.CreateClient(),
+                    transforms,
+                    loggerFactory.CreateLogger<DynamicAnimeCatalog>()),
+                Referrer = config.Hosts.Referer,
+                UserAgent = config.Hosts.UserAgent
+            });
+        }
+    }
+
+    return contexts;
+}
+
+static string BuildProviderSummary(IEnumerable<string> providerNames)
+{
+    var names = providerNames.Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    if (names.Count == 0)
+    {
+        return "None";
+    }
+
+    var joined = string.Join(", ", names);
+    return joined.Length > 60 ? joined[..57] + "..." : joined;
+}
+
+static string ShowExploreMenu(CliMode mode, string providerSummary)
+{
+    var menu = new[]
+    {
+        new ExploreMenuItem("search", $"{Icons.Search} Search catalog", "Search entries by title and filter with fuzzy search"),
+        new ExploreMenuItem("popular", $"{Icons.New} Popular now", "Browse popular entries across selected providers"),
+        new ExploreMenuItem("providers", $"{Icons.Provider} Change providers", $"Current: {providerSummary}"),
+        new ExploreMenuItem("exit", $"{Icons.Back} Exit", "Return to shell")
+    };
+
+    var selector = new InteractiveSelector<ExploreMenuItem>(
+        menu,
+        m => m.Label,
+        new SelectorOptions<ExploreMenuItem>
+        {
+            Prompt = mode == CliMode.Manga ? "Explore Manga" : "Explore Anime",
+            PreviewFunc = m => m.Description,
+            ShowSearch = false,
+            ShowPreview = true,
+            MaxVisibleItems = 6,
+            EmptyMessage = "No options"
+        });
+
+    var result = selector.Run();
+    return result.Cancelled ? "exit" : result.Selected!.Id;
+}
+
+static string? PromptForSearchQuery(CliMode mode)
+{
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.Write($"Search {(mode == CliMode.Manga ? "manga" : "anime")} for: ");
+    Console.ResetColor();
+    var query = Console.ReadLine();
+    return string.IsNullOrWhiteSpace(query) ? null : query.Trim();
+}
+
+static async Task<List<ExploreEntry>> FetchExploreEntriesAsync(
+    CliMode mode,
+    ExploreView view,
+    string? query,
+    SearchFilters filters,
+    IReadOnlyList<ExploreProviderContext> providers,
+    ListStatusLookup statusLookup,
+    ILogger logger,
+    CancellationToken cancellationToken)
+{
+    var effectiveFilters = view == ExploreView.Popular && filters.Sort == SearchSort.Default
+        ? filters with { Sort = SearchSort.Popularity }
+        : filters;
+
+    var tasks = providers.Select(async provider =>
+    {
+        try
+        {
+            if (mode == CliMode.Manga && provider.MangaCatalog is not null)
+            {
+                var results = view == ExploreView.Popular
+                    ? await provider.MangaCatalog.BrowsePopularAsync(effectiveFilters, cancellationToken)
+                    : await provider.MangaCatalog.SearchAsync(query ?? string.Empty, effectiveFilters, cancellationToken);
+
+                return results.Select(manga =>
+                {
+                    var prefixed = !provider.Info.IsBuiltIn &&
+                                   !manga.Id.Value.StartsWith($"{provider.Info.Slug}:", StringComparison.OrdinalIgnoreCase);
+                    var resolved = prefixed
+                        ? new Manga(
+                            new MangaId($"{provider.Info.Slug}:{manga.Id.Value}"),
+                            manga.Title,
+                            manga.Synopsis,
+                            manga.CoverImage,
+                            manga.DetailPage,
+                            manga.Chapters)
+                        : manga;
+
+                    return new ExploreEntry
+                    {
+                        Title = resolved.Title,
+                        ProviderName = provider.Info.Name,
+                        ProviderSlug = provider.Info.Slug,
+                        Synopsis = resolved.Synopsis,
+                        DetailUrl = resolved.DetailPage.ToString(),
+                        Count = resolved.Chapters.Count > 0 ? resolved.Chapters.Count : null,
+                        Status = statusLookup.Resolve(resolved.Id.Value, resolved.Title),
+                        Manga = resolved
+                    };
+                }).ToList();
+            }
+
+            if (mode == CliMode.Anime && provider.AnimeCatalog is not null)
+            {
+                var results = view == ExploreView.Popular
+                    ? await provider.AnimeCatalog.BrowsePopularAsync(effectiveFilters, cancellationToken)
+                    : await provider.AnimeCatalog.SearchAsync(query ?? string.Empty, effectiveFilters, cancellationToken);
+
+                return results.Select(anime =>
+                {
+                    var prefixed = !provider.Info.IsBuiltIn &&
+                                   !anime.Id.Value.StartsWith($"{provider.Info.Slug}:", StringComparison.OrdinalIgnoreCase);
+                    var resolved = prefixed
+                        ? new Anime(
+                            new AnimeId($"{provider.Info.Slug}:{anime.Id.Value}"),
+                            anime.Title,
+                            anime.Synopsis,
+                            anime.CoverImage,
+                            anime.DetailPage,
+                            anime.Episodes)
+                        : anime;
+
+                    return new ExploreEntry
+                    {
+                        Title = resolved.Title,
+                        ProviderName = provider.Info.Name,
+                        ProviderSlug = provider.Info.Slug,
+                        Synopsis = resolved.Synopsis,
+                        DetailUrl = resolved.DetailPage.ToString(),
+                        Count = resolved.Episodes.Count > 0 ? resolved.Episodes.Count : null,
+                        Status = statusLookup.Resolve(resolved.Id.Value, resolved.Title),
+                        Anime = resolved
+                    };
+                }).ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Explore failed for provider {Provider}", provider.Info.Name);
+        }
+
+        return new List<ExploreEntry>();
+    });
+
+    var results = await Task.WhenAll(tasks);
+    return results.SelectMany(r => r).ToList();
+}
+
+static async Task<ListStatusLookup> BuildAnimeStatusLookupAsync(IServiceProvider services, CancellationToken cancellationToken)
+{
+    var lookup = new ListStatusLookup();
+    var listStore = services.GetRequiredService<IAnimeListStore>();
+    var entries = await listStore.GetAllAsync(null, cancellationToken);
+    foreach (var entry in entries)
+    {
+        var status = MapAnimeStatus(entry.Status);
+        lookup.Set(entry.AnimeId, entry.AnimeTitle, status);
+    }
+    return lookup;
+}
+
+static async Task<ListStatusLookup> BuildMangaStatusLookupAsync(IServiceProvider services, CancellationToken cancellationToken)
+{
+    var lookup = new ListStatusLookup();
+    var listStore = services.GetRequiredService<IMangaListStore>();
+    var entries = await listStore.GetAllAsync(null, cancellationToken);
+    foreach (var entry in entries)
+    {
+        var status = MapMangaStatus(entry.Status);
+        lookup.Set(entry.MangaId, entry.MangaTitle, status);
+    }
+    return lookup;
+}
+
+static ItemStatus MapAnimeStatus(AnimeWatchStatus status) => status switch
+{
+    AnimeWatchStatus.Watching => ItemStatus.InProgress,
+    AnimeWatchStatus.Completed => ItemStatus.Watched,
+    AnimeWatchStatus.PlanToWatch => ItemStatus.New,
+    AnimeWatchStatus.OnHold => ItemStatus.InProgress,
+    AnimeWatchStatus.Dropped => ItemStatus.None,
+    _ => ItemStatus.None
+};
+
+static ItemStatus MapMangaStatus(MangaReadStatus status) => status switch
+{
+    MangaReadStatus.Reading => ItemStatus.InProgress,
+    MangaReadStatus.Completed => ItemStatus.Watched,
+    MangaReadStatus.PlanToRead => ItemStatus.New,
+    MangaReadStatus.OnHold => ItemStatus.InProgress,
+    MangaReadStatus.Dropped => ItemStatus.None,
+    _ => ItemStatus.None
+};
+
+static string BuildExplorePreview(ExploreEntry entry, CliMode mode)
+{
+    var countLabel = entry.Count.HasValue
+        ? $"{(mode == CliMode.Manga ? "Chapters" : "Episodes")}: {entry.Count}"
+        : null;
+
+    var statusLabel = entry.Status switch
+    {
+        ItemStatus.Watched => "List: Completed",
+        ItemStatus.InProgress => "List: In Progress",
+        ItemStatus.New => "List: Planned",
+        ItemStatus.Downloaded => "List: Downloaded",
+        _ => null
+    };
+
+    var metaParts = new List<string>();
+    if (!string.IsNullOrWhiteSpace(entry.ProviderName))
+    {
+        metaParts.Add(entry.ProviderName);
+    }
+    if (!string.IsNullOrWhiteSpace(countLabel)) metaParts.Add(countLabel);
+    if (!string.IsNullOrWhiteSpace(statusLabel)) metaParts.Add(statusLabel);
+
+    var meta = string.Join(" | ", metaParts);
+    var synopsis = string.IsNullOrWhiteSpace(entry.Synopsis)
+        ? (string.IsNullOrWhiteSpace(entry.DetailUrl) ? "No synopsis available." : $"Details: {entry.DetailUrl}")
+        : entry.Synopsis.Trim();
+    return string.IsNullOrWhiteSpace(meta) ? synopsis : $"{meta}. {synopsis}";
+}
+
+static string ShowExploreActionMenu(CliMode mode, ExploreEntry entry)
+{
+    var actions = mode == CliMode.Manga
+        ? new[]
+        {
+            new ExploreActionItem("read", $"{Icons.Book} Read now", "Open the reader for this manga"),
+            new ExploreActionItem("add", $"{Icons.Add} Add to list", "Track this manga in your list"),
+            new ExploreActionItem("back", $"{Icons.Back} Back", "Return to results")
+        }
+        : new[]
+        {
+            new ExploreActionItem("watch", $"{Icons.Play} Watch now", "Resolve streams and launch player"),
+            new ExploreActionItem("add", $"{Icons.Add} Add to list", "Track this anime in your list"),
+            new ExploreActionItem("back", $"{Icons.Back} Back", "Return to results")
+        };
+
+    var selector = new InteractiveSelector<ExploreActionItem>(
+        actions,
+        a => a.Label,
+        new SelectorOptions<ExploreActionItem>
+        {
+            Prompt = $"Actions: {entry.Title}",
+            PreviewFunc = a => a.Description,
+            ShowSearch = false,
+            ShowPreview = true,
+            MaxVisibleItems = 6,
+            EmptyMessage = "No actions"
+        });
+
+    var result = selector.Run();
+    return result.Cancelled ? "back" : result.Selected!.Id;
+}
+
+static async Task<ItemStatus?> AddAnimeToListAsync(ExploreEntry entry, IServiceProvider services, CancellationToken cancellationToken)
+{
+    if (entry.Anime is null)
+    {
+        return null;
+    }
+
+    var listStore = services.GetRequiredService<IAnimeListStore>();
+    var existing = await listStore.GetByTitleAsync(entry.Anime.Title, cancellationToken);
+    if (existing is not null)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"'{entry.Anime.Title}' is already in your list as '{existing.Status.ToDisplayString()}'.");
+        Console.ResetColor();
+        return MapAnimeStatus(existing.Status);
+    }
+
+    var status = SelectAnimeStatus();
+    if (!status.HasValue)
+    {
+        return null;
+    }
+
+    try
+    {
+        await listStore.AddAsync(entry.Anime.Id.Value, entry.Anime.Title, status.Value, entry.Count, cancellationToken);
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"Added '{entry.Anime.Title}' to your list as '{status.Value.ToDisplayString()}'.");
+        Console.ResetColor();
+        return MapAnimeStatus(status.Value);
+    }
+    catch (InvalidOperationException ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        var detail = Koware.Cli.Console.ErrorClassifier.SafeDetail(ex);
+        Console.WriteLine(detail ?? "Could not add to list.");
+        Console.ResetColor();
+        return null;
+    }
+}
+
+static async Task<ItemStatus?> AddMangaToListAsync(ExploreEntry entry, IServiceProvider services, CancellationToken cancellationToken)
+{
+    if (entry.Manga is null)
+    {
+        return null;
+    }
+
+    var listStore = services.GetRequiredService<IMangaListStore>();
+    var existing = await listStore.GetByTitleAsync(entry.Manga.Title, cancellationToken);
+    if (existing is not null)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"'{entry.Manga.Title}' is already in your list as '{existing.Status.ToDisplayString()}'.");
+        Console.ResetColor();
+        return MapMangaStatus(existing.Status);
+    }
+
+    var status = SelectMangaStatus();
+    if (!status.HasValue)
+    {
+        return null;
+    }
+
+    try
+    {
+        await listStore.AddAsync(entry.Manga.Id.Value, entry.Manga.Title, status.Value, entry.Count, cancellationToken);
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"Added '{entry.Manga.Title}' to your list as '{status.Value.ToDisplayString()}'.");
+        Console.ResetColor();
+        return MapMangaStatus(status.Value);
+    }
+    catch (InvalidOperationException ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        var detail = Koware.Cli.Console.ErrorClassifier.SafeDetail(ex);
+        Console.WriteLine(detail ?? "Could not add to list.");
+        Console.ResetColor();
+        return null;
+    }
+}
+
+static AnimeWatchStatus? SelectAnimeStatus()
+{
+    var statuses = new[]
+    {
+        AnimeWatchStatus.Watching,
+        AnimeWatchStatus.Completed,
+        AnimeWatchStatus.PlanToWatch,
+        AnimeWatchStatus.OnHold,
+        AnimeWatchStatus.Dropped
+    };
+
+    var result = InteractiveSelect.Show(
+        statuses,
+        s => s.ToDisplayString(),
+        new SelectorOptions<AnimeWatchStatus>
+        {
+            Prompt = "Add anime as",
+            ShowSearch = false,
+            ShowPreview = false,
+            MaxVisibleItems = 6
+        });
+
+    return result.Cancelled ? null : result.Selected;
+}
+
+static MangaReadStatus? SelectMangaStatus()
+{
+    var statuses = new[]
+    {
+        MangaReadStatus.Reading,
+        MangaReadStatus.Completed,
+        MangaReadStatus.PlanToRead,
+        MangaReadStatus.OnHold,
+        MangaReadStatus.Dropped
+    };
+
+    var result = InteractiveSelect.Show(
+        statuses,
+        s => s.ToDisplayString(),
+        new SelectorOptions<MangaReadStatus>
+        {
+            Prompt = "Add manga as",
+            ShowSearch = false,
+            ShowPreview = false,
+            MaxVisibleItems = 6
+        });
+
+    return result.Cancelled ? null : result.Selected;
+}
+
+static async Task<int> PlaySelectedAnimeAsync(
+    IAnimeCatalog catalog,
+    Anime selectedAnime,
+    string? defaultReferrer,
+    string? defaultUserAgent,
+    IServiceProvider services,
+    ILogger logger,
+    DefaultCliOptions defaults,
+    CancellationToken cancellationToken)
+{
+    var episodeStep = ConsoleStep.Start("Fetching episodes");
+    IReadOnlyCollection<Episode> episodes;
+    try
+    {
+        episodes = await catalog.GetEpisodesAsync(selectedAnime, cancellationToken);
+        episodeStep.Succeed($"Found {episodes.Count} episode(s)");
+    }
+    catch (Exception)
+    {
+        episodeStep.Fail("Failed to fetch episodes");
+        throw;
+    }
+
+    if (episodes.Count == 0)
+    {
+        logger.LogWarning("No episodes found for {Title}.", selectedAnime.Title);
+        return 1;
+    }
+
+    var sortedEpisodes = episodes.OrderBy(e => e.Number).ToList();
+    Episode selectedEpisode;
+    if (sortedEpisodes.Count == 1)
+    {
+        selectedEpisode = sortedEpisodes[0];
+    }
+    else
+    {
+        var epResult = InteractiveSelect.Show(
+            sortedEpisodes,
+            ep => string.IsNullOrWhiteSpace(ep.Title)
+                ? $"Episode {ep.Number}"
+                : $"Episode {ep.Number}: {ep.Title}",
+            new SelectorOptions<Episode>
+            {
+                Prompt = $"Select episode for \"{selectedAnime.Title}\"",
+                MaxVisibleItems = 15,
+                ShowSearch = true,
+                ShowPreview = false,
+                DisableQuickJump = true
+            });
+
+        if (epResult.Cancelled || epResult.Selected is null)
+        {
+            logger.LogInformation("Episode selection canceled by user.");
+            return 1;
+        }
+
+        selectedEpisode = epResult.Selected;
+    }
+
+    var streamStep = ConsoleStep.Start("Resolving streams");
+    IReadOnlyCollection<StreamLink> streams;
+    try
+    {
+        streams = await catalog.GetStreamsAsync(selectedEpisode, cancellationToken);
+        streamStep.Succeed($"Found {streams.Count} stream(s)");
+    }
+    catch (Exception)
+    {
+        streamStep.Fail("Failed to resolve streams");
+        throw;
+    }
+
+    if (streams.Count == 0)
+    {
+        logger.LogWarning("No streams found for {Title} (episode {Episode}).", selectedAnime.Title, selectedEpisode.Number);
+        return 1;
+    }
+
+    var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
+    var playerResolution = ResolvePlayerExecutable(playerOptions);
+    var normalized = ApplyDefaultReferrer(streams, defaultReferrer);
+    var qualityPreferred = ApplyQualityPreference(normalized, defaults.Quality, logger);
+    var filtered = FilterStreamsForPlayer(qualityPreferred, playerResolution.Name, logger);
+
+    var stream = PickBestStream(filtered);
+    if (stream is null)
+    {
+        logger.LogWarning("No playable streams found.");
+        return 1;
+    }
+
+    var displayTitle = $"{selectedAnime.Title} - Episode {selectedEpisode.Number}";
+    var httpReferrer = stream.Referrer ?? defaultReferrer;
+    var exitCode = LaunchPlayer(playerOptions, stream, logger, httpReferrer, defaultUserAgent, displayTitle, playerResolution);
+
+    if (filtered.Count > 1)
+    {
+        exitCode = ReplayWithDifferentQuality(filtered, playerOptions, playerResolution, logger, httpReferrer, defaultUserAgent, displayTitle, exitCode);
+    }
+
+    var history = services.GetRequiredService<IWatchHistoryStore>();
+    var entry = new WatchHistoryEntry
+    {
+        Provider = stream.SourceTag ?? stream.Provider,
+        AnimeId = selectedAnime.Id.Value,
+        AnimeTitle = selectedAnime.Title,
+        EpisodeNumber = selectedEpisode.Number,
+        EpisodeTitle = selectedEpisode.Title,
+        Quality = stream.Quality,
+        WatchedAt = DateTimeOffset.UtcNow
+    };
+
+    try
+    {
+        await history.AddAsync(entry, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        logger.LogDebug(ex, "Failed to update watch history.");
+    }
+
+    try
+    {
+        var animeList = services.GetRequiredService<IAnimeListStore>();
+        await animeList.RecordEpisodeWatchedAsync(
+            selectedAnime.Id.Value,
+            selectedAnime.Title,
+            selectedEpisode.Number,
+            episodes.Count,
+            cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        logger.LogDebug(ex, "Failed to update anime list tracking.");
+    }
+
+    return exitCode;
+}
+
+static async Task<int> ReadSelectedMangaAsync(
+    IMangaCatalog catalog,
+    Manga selectedManga,
+    string providerSlug,
+    string? defaultReferrer,
+    string? defaultUserAgent,
+    IServiceProvider services,
+    ILogger logger,
+    CancellationToken cancellationToken)
+{
+    var chapterStep = ConsoleStep.Start("Fetching chapters");
+    IReadOnlyCollection<Chapter> chapters;
+    try
+    {
+        chapters = await catalog.GetChaptersAsync(selectedManga, cancellationToken);
+        chapterStep.Succeed($"Found {chapters.Count} chapter(s)");
+    }
+    catch (Exception)
+    {
+        chapterStep.Fail("Failed to fetch chapters");
+        throw;
+    }
+
+    if (chapters.Count == 0)
+    {
+        logger.LogWarning("No chapters found for {Title}.", selectedManga.Title);
+        return 1;
+    }
+
+    var orderedChapters = chapters.OrderBy(c => c.Number).ToList();
+    Chapter selectedChapter;
+    if (orderedChapters.Count == 1)
+    {
+        selectedChapter = orderedChapters[0];
+    }
+    else
+    {
+        var chapterResult = InteractiveSelect.Show(
+            orderedChapters,
+            c => $"Chapter {c.Number}" + (string.IsNullOrWhiteSpace(c.Title) ? "" : $" - {c.Title}"),
+            new SelectorOptions<Chapter>
+            {
+                Prompt = $"Select chapter ({orderedChapters.First().Number} - {orderedChapters.Last().Number})",
+                MaxVisibleItems = 15,
+                ShowSearch = true
+            });
+
+        if (chapterResult.Cancelled || chapterResult.Selected is null)
+        {
+            logger.LogInformation("Chapter selection canceled by user.");
+            return 1;
+        }
+
+        selectedChapter = chapterResult.Selected;
+    }
+
+    var pagesStep = ConsoleStep.Start("Fetching pages");
+    IReadOnlyCollection<ChapterPage> pages;
+    try
+    {
+        pages = await catalog.GetPagesAsync(selectedChapter, cancellationToken);
+        pagesStep.Succeed($"Loaded {pages.Count} page(s)");
+    }
+    catch (Exception)
+    {
+        pagesStep.Fail("Failed to fetch pages");
+        throw;
+    }
+
+    if (pages.Count == 0)
+    {
+        logger.LogWarning("No pages found for chapter {Chapter}.", selectedChapter.Number);
+        return 1;
+    }
+
+    var readerOptions = services.GetRequiredService<IOptions<ReaderOptions>>().Value;
+    var displayTitle = $"{selectedManga.Title} - Chapter {selectedChapter.Number}";
+
+    var readResult = await ReadWithNavigationAsync(
+        readerOptions,
+        selectedManga,
+        selectedChapter,
+        chapters,
+        pages,
+        catalog,
+        logger,
+        defaultReferrer,
+        defaultUserAgent,
+        displayTitle,
+        cancellationToken);
+
+    try
+    {
+        var readHistory = services.GetRequiredService<IReadHistoryStore>();
+        var entry = new ReadHistoryEntry
+        {
+            Provider = providerSlug,
+            MangaId = selectedManga.Id.Value,
+            MangaTitle = selectedManga.Title,
+            ChapterNumber = readResult.LastChapter,
+            ChapterTitle = chapters.FirstOrDefault(c => Math.Abs(c.Number - readResult.LastChapter) < 0.001f)?.Title ?? selectedChapter.Title,
+            LastPage = readResult.LastPage,
+            ReadAt = DateTimeOffset.UtcNow
+        };
+        await readHistory.AddAsync(entry, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        logger.LogDebug(ex, "Failed to update read history.");
+    }
+
+    try
+    {
+        var mangaList = services.GetRequiredService<IMangaListStore>();
+        await mangaList.RecordChapterReadAsync(
+            selectedManga.Id.Value,
+            selectedManga.Title,
+            selectedChapter.Number,
+            chapters.Count,
+            cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        logger.LogDebug(ex, "Failed to update manga list tracking.");
+    }
+
+    return readResult.ExitCode;
+}
+
+static IReadOnlyCollection<StreamLink> ApplyQualityPreference(IReadOnlyCollection<StreamLink> streams, string? preferredQuality, ILogger logger)
+{
+    if (streams.Count == 0 || string.IsNullOrWhiteSpace(preferredQuality))
+    {
+        return streams;
+    }
+
+    var preferred = streams
+        .Where(s => string.Equals(s.Quality, preferredQuality, StringComparison.OrdinalIgnoreCase))
+        .ToArray();
+
+    if (preferred.Length == 0)
+    {
+        var available = string.Join(", ", streams.Select(s => s.Quality).Where(q => !string.IsNullOrWhiteSpace(q)).Distinct());
+        logger.LogWarning("Requested quality {Quality} not found. Available: {Available}", preferredQuality, available);
+        return streams.OrderByDescending(s => ScoreStream(s)).ToArray();
+    }
+
+    return preferred.Concat(streams.Where(s => !preferred.Contains(s))).ToArray();
+}
+
+static void WaitForContinue()
+{
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine();
+    Console.Write("Press Enter to return to explore...");
+    Console.ResetColor();
+    Console.ReadLine();
 }
 
 /// <summary>
@@ -5693,6 +6828,7 @@ static void PrintFriendlyCommandHint(string command)
             WriteColoredLine("Command looks incomplete. Add a search query.", ConsoleColor.Yellow);
             WriteColoredLine("Usage:   koware search <query> [--json]", ConsoleColor.Cyan);
             WriteColoredLine("Example: koware search \"fullmetal alchemist\"", ConsoleColor.Green);
+            WriteColoredLine("Tip: try 'koware explore' for the new interactive browser.", ConsoleColor.DarkGray);
             break;
         case "provider":
             Console.WriteLine("Usage: koware provider [--enable <name> | --disable <name>]");
@@ -7009,7 +8145,8 @@ static void PrintUsage()
 {
     WriteHeader($"Koware CLI {GetVersionLabel()}");
     Console.WriteLine("Usage:");
-    WriteCommand("search <query> [--genre <g>] [--year <y>] [--status <s>] [--sort <o>]", "Find anime/manga with filters.", ConsoleColor.Cyan);
+    WriteCommand("explore", "Interactive explorer (providers, search, popular, actions).", ConsoleColor.Cyan);
+    WriteCommand("search <query> [--genre <g>] [--year <y>] [--status <s>] [--sort <o>]", "Deprecated: use explore for interactive browsing.", ConsoleColor.DarkGray);
     WriteCommand("stream <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Show plan + streams, no player.", ConsoleColor.Cyan);
     WriteCommand("watch <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Pick a stream and play (alias: play).", ConsoleColor.Green);
     WriteCommand("play <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Same as watch.", ConsoleColor.Green);
@@ -7038,11 +8175,32 @@ static List<string> GetHelpLines(string command, CliMode mode)
     
     switch (command.ToLowerInvariant())
     {
+        case "explore":
+            lines.Add("explore - Interactive catalog browser with providers, search, and popular");
+            lines.Add("");
+            lines.Add("Usage: koware explore");
+            lines.Add("Mode : explores anime or manga based on current mode");
+            lines.Add("");
+            lines.Add("Flow:");
+            lines.Add("  - Select one or more providers");
+            lines.Add("  - Choose Search or Popular");
+            lines.Add("  - View details and take actions (watch/read, add to list)");
+            lines.Add("");
+            lines.Add("Tips:");
+            lines.Add("  - Type to filter results (fzf-style)");
+            lines.Add("  - Use Esc to go back");
+            lines.Add("");
+            lines.Add("Examples:");
+            lines.Add("  koware explore");
+            break;
+
         case "search":
-            lines.Add("search - Find anime or manga with optional filters");
+            lines.Add("search - (Deprecated) Find anime or manga with optional filters");
             lines.Add("");
             lines.Add("Usage: koware search <query> [filters]");
             lines.Add("Mode : searches anime or manga based on current mode");
+            lines.Add("");
+            lines.Add("Note: 'search' is deprecated. Use 'koware explore' for the new interactive explorer.");
             lines.Add("");
             lines.Add("Options:");
             lines.Add("  --json             Output results as JSON");
@@ -7400,7 +8558,8 @@ static List<string> GetHelpLines(string command, CliMode mode)
             lines.Add("Mode is persisted in config file.");
             lines.Add("");
             lines.Add("Commands affected by mode:");
-            lines.Add("  search    Searches anime or manga catalogs");
+            lines.Add("  explore   Interactive catalog explorer");
+            lines.Add("  search    Searches anime or manga catalogs (deprecated)");
             lines.Add("  download  Downloads episodes or chapters");
             lines.Add("  history   Shows watch or read history");
             lines.Add("  last      Shows last watched or last read");
@@ -7535,7 +8694,8 @@ static int HandleHelp(string[] args, CliMode mode)
         // Show interactive command selector with back navigation
         var commands = new (string Name, string Description)[]
         {
-            ("search", "Find anime or manga with optional filters"),
+            ("explore", "Interactive explorer (providers, search, popular, actions)"),
+            ("search", "Deprecated: find anime or manga with filters"),
             ("recommend", "Get personalized recommendations based on your history"),
             ("stream", "Plan stream selection and print the resolved streams"),
             ("watch", "Pick a stream and launch the configured player"),
@@ -7594,10 +8754,25 @@ static int HandleHelp(string[] args, CliMode mode)
     var topic = args[1].ToLowerInvariant();
     switch (topic)
     {
+        case "explore":
+            PrintTopicHeader("explore", "Interactive catalog explorer with providers, search, and actions.");
+            Console.WriteLine("Usage: koware explore");
+            Console.WriteLine("Mode : explores anime or manga based on current mode (use 'koware mode' to switch).");
+            Console.WriteLine();
+            Console.WriteLine("Flow:");
+            Console.WriteLine("  • Select one or more providers");
+            Console.WriteLine("  • Choose Search or Popular");
+            Console.WriteLine("  • View details and take actions (watch/read, add to list)");
+            Console.WriteLine();
+            Console.WriteLine("Tips:");
+            Console.WriteLine("  • Type to filter results (fzf-style)");
+            Console.WriteLine("  • Esc goes back to the previous screen");
+            break;
         case "search":
             PrintTopicHeader("search", "Find anime or manga with optional filters.");
             Console.WriteLine("Usage: koware search <query> [filters]");
             Console.WriteLine("Mode : searches anime or manga based on current mode (use 'koware mode' to switch).");
+            Console.WriteLine("Note : 'search' is deprecated. Use 'koware explore' for interactive browsing.");
             Console.WriteLine();
             WriteColoredLine("Filters:", ConsoleColor.Yellow);
             WriteListOption("--genre <name>", "Filter by genre (Action, Romance, Fantasy, etc.)");
@@ -7756,7 +8931,8 @@ static int HandleHelp(string[] args, CliMode mode)
             Console.WriteLine("  • 'manga': switches to manga mode.");
             Console.WriteLine();
             Console.WriteLine("Mode affects these commands:");
-            Console.WriteLine("  • search  → searches anime or manga");
+            Console.WriteLine("  • explore → interactive catalog explorer");
+            Console.WriteLine("  • search  → searches anime or manga (deprecated)");
             Console.WriteLine("  • history → shows watch or read history");
             Console.WriteLine("  • last    → shows last watched or last read");
             Console.WriteLine("  • continue → continues anime or manga");
@@ -7829,7 +9005,7 @@ static int HandleHelp(string[] args, CliMode mode)
         default:
             PrintUsage();
             Console.WriteLine();
-            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: search, recommend, offline, stream, watch, play, download, last, continue, history, list, config, provider, doctor, update.");
+            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: explore, search, recommend, offline, stream, watch, play, download, last, continue, history, list, config, provider, doctor, update.");
             return 1;
     }
 

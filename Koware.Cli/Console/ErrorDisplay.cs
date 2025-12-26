@@ -109,7 +109,7 @@ public static class ErrorDisplay
         WriteBullet("Use the original Japanese/English title");
         Con.WriteLine();
         
-        WriteHint("koware search --help", "See search options and filters");
+        WriteHint("koware explore", "Use the interactive explorer");
     }
 
     public static void MissingArgument(string argument, string usage)
@@ -221,7 +221,7 @@ public static class ErrorDisplay
 
     private static string[] GetCommandSuggestions(string input)
     {
-        var commands = new[] { "search", "watch", "play", "stream", "download", "read", "last", "continue", "history", "list", "offline", "config", "mode", "provider", "doctor", "update", "recommend", "help", "version" };
+        var commands = new[] { "explore", "search", "watch", "play", "stream", "download", "read", "last", "continue", "history", "list", "offline", "config", "mode", "provider", "doctor", "update", "recommend", "help", "version" };
         return commands.Where(c => c.StartsWith(input, StringComparison.OrdinalIgnoreCase) || Levenshtein(input.ToLower(), c) <= 2).Take(3).ToArray();
     }
 
