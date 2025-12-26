@@ -55,22 +55,22 @@ public static class ErrorClassifier
 
         if (ex is UnauthorizedAccessException)
         {
-            return new FriendlyError(FriendlyErrorKind.Permission, "Access denied", hint: "Check file permissions for the Koware config/data directory.");
+            return new FriendlyError(FriendlyErrorKind.Permission, "Access denied", Hint: "Check file permissions for the Koware config/data directory.");
         }
 
         if (ex is FileNotFoundException || ex is DirectoryNotFoundException)
         {
-            return new FriendlyError(FriendlyErrorKind.NotFound, "File or directory not found", hint: "Verify the path or reinstall missing components.");
+            return new FriendlyError(FriendlyErrorKind.NotFound, "File or directory not found", Hint: "Verify the path or reinstall missing components.");
         }
 
         if (ex is JsonException || ex is FormatException)
         {
-            return new FriendlyError(FriendlyErrorKind.Config, "Invalid configuration", hint: "Check appsettings.user.json for invalid values.");
+            return new FriendlyError(FriendlyErrorKind.Config, "Invalid configuration", Hint: "Check appsettings.user.json for invalid values.");
         }
 
         if (ex is Win32Exception)
         {
-            return new FriendlyError(FriendlyErrorKind.ExternalTool, "Failed to launch external tool", hint: "Verify the configured command exists and is executable.");
+            return new FriendlyError(FriendlyErrorKind.ExternalTool, "Failed to launch external tool", Hint: "Verify the configured command exists and is executable.");
         }
 
         var fallbackTitle = string.IsNullOrWhiteSpace(context) ? "Something went wrong" : $"Failed to {context}";

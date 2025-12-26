@@ -206,6 +206,7 @@ public sealed class ConfigValidator : IConfigValidator
         CancellationToken ct)
     {
         var stopwatch = Stopwatch.StartNew();
+        var fallbackUri = BuildFallbackUri(config);
 
         try
         {
@@ -220,7 +221,7 @@ public sealed class ConfigValidator : IConfigValidator
                 var manga = new Koware.Domain.Models.Manga(
                     new Koware.Domain.Models.MangaId(contentId),
                     "Test",
-                    null, null, null,
+                    null, null, fallbackUri,
                     Array.Empty<Koware.Domain.Models.Chapter>());
 
                 var chapters = await catalog.GetChaptersAsync(manga, ct);
@@ -252,7 +253,7 @@ public sealed class ConfigValidator : IConfigValidator
                 var anime = new Koware.Domain.Models.Anime(
                     new Koware.Domain.Models.AnimeId(contentId),
                     "Test",
-                    null, null, null,
+                    null, null, fallbackUri,
                     Array.Empty<Koware.Domain.Models.Episode>());
 
                 var episodes = await catalog.GetEpisodesAsync(anime, ct);
@@ -290,6 +291,7 @@ public sealed class ConfigValidator : IConfigValidator
         CancellationToken ct)
     {
         var stopwatch = Stopwatch.StartNew();
+        var fallbackUri = BuildFallbackUri(config);
 
         try
         {
@@ -305,7 +307,7 @@ public sealed class ConfigValidator : IConfigValidator
                     new Koware.Domain.Models.ChapterId(contentId),
                     "Test",
                     1,
-                    null);
+                    fallbackUri);
 
                 var pages = await catalog.GetPagesAsync(chapter, ct);
                 stopwatch.Stop();
@@ -336,7 +338,7 @@ public sealed class ConfigValidator : IConfigValidator
                     new Koware.Domain.Models.EpisodeId(contentId),
                     "Test",
                     1,
-                    null);
+                    fallbackUri);
 
                 var streams = await catalog.GetStreamsAsync(episode, ct);
                 stopwatch.Stop();
@@ -364,5 +366,21 @@ public sealed class ConfigValidator : IConfigValidator
                 $"Media resolution failed: {ex.Message}",
                 duration: stopwatch.Elapsed);
         }
+    }
+
+    private static Uri BuildFallbackUri(DynamicProviderConfig config)
+    {
+        if (Uri.TryCreate(config.Hosts.Referer, UriKind.Absolute, out var referer))
+        {
+            return referer;
+        }
+
+        if (!string.IsNullOrWhiteSpace(config.Hosts.ApiBase) &&
+            Uri.TryCreate(config.Hosts.ApiBase, UriKind.Absolute, out var apiBase))
+        {
+            return apiBase;
+        }
+
+        return new Uri($"https://{config.Hosts.BaseHost}/");
     }
 }

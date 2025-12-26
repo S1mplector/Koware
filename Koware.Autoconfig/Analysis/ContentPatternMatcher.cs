@@ -20,7 +20,7 @@ public sealed class ContentPatternMatcher : IContentPatternMatcher
         _logger = logger;
     }
 
-    public async Task<ContentSchema> AnalyzeAsync(
+    public Task<ContentSchema> AnalyzeAsync(
         SiteProfile profile,
         IReadOnlyList<ApiEndpoint> endpoints,
         CancellationToken cancellationToken = default)
@@ -53,7 +53,7 @@ public sealed class ContentPatternMatcher : IContentPatternMatcher
         // Analyze ID patterns from sample responses
         var idPattern = AnalyzeIdPattern(endpoints);
 
-        return new ContentSchema
+        return Task.FromResult(new ContentSchema
         {
             SearchPattern = searchPattern,
             IdPattern = idPattern,
@@ -61,7 +61,7 @@ public sealed class ContentPatternMatcher : IContentPatternMatcher
             ChapterPattern = chapterPattern,
             MediaPattern = mediaPattern,
             Endpoints = endpoints
-        };
+        });
     }
 
     private SearchPattern? BuildSearchPattern(ApiEndpoint endpoint, SiteProfile profile)

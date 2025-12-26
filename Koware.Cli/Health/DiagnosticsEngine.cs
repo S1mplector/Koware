@@ -232,8 +232,12 @@ public sealed class DiagnosticsEngine
         });
 
         // CLI Path
-        var cliPath = Environment.ProcessPath ?? Assembly.GetEntryAssembly()?.Location;
-        var cliPathValid = !string.IsNullOrWhiteSpace(cliPath) && File.Exists(cliPath);
+        var cliPath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(cliPath))
+        {
+            cliPath = AppContext.BaseDirectory;
+        }
+        var cliPathValid = !string.IsNullOrWhiteSpace(cliPath) && (File.Exists(cliPath) || Directory.Exists(cliPath));
         results.Add(new DiagnosticResult
         {
             Name = "CLI Path",

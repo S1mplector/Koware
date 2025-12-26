@@ -110,7 +110,7 @@ public sealed class ProviderStore : IProviderStore
         _logger.LogInformation("Saved provider '{Slug}' to {Path}", normalizedSlug, path);
     }
 
-    public async Task<bool> DeleteAsync(string slug, CancellationToken ct = default)
+    public Task<bool> DeleteAsync(string slug, CancellationToken ct = default)
     {
         var normalizedSlug = NormalizeSlug(slug);
         var customPath = GetCustomProviderPath(normalizedSlug);
@@ -119,7 +119,7 @@ public sealed class ProviderStore : IProviderStore
         {
             File.Delete(customPath);
             _logger.LogInformation("Deleted provider '{Slug}'", normalizedSlug);
-            return true;
+            return Task.FromResult(true);
         }
         
         // Cannot delete built-in providers
@@ -127,10 +127,10 @@ public sealed class ProviderStore : IProviderStore
         if (File.Exists(builtInPath))
         {
             _logger.LogWarning("Cannot delete built-in provider '{Slug}'", normalizedSlug);
-            return false;
+            return Task.FromResult(false);
         }
         
-        return false;
+        return Task.FromResult(false);
     }
 
     public async Task SetActiveAsync(string slug, ProviderType type, CancellationToken ct = default)

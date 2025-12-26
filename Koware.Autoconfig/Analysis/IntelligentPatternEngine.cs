@@ -245,7 +245,7 @@ public sealed class IntelligentPatternEngine : IIntelligentPatternEngine
         return 0.3f;
     }
 
-    private async Task<SiteFingerprint> CreateFingerprintAsync(SiteProfile profile, CancellationToken ct)
+    private Task<SiteFingerprint> CreateFingerprintAsync(SiteProfile profile, CancellationToken ct)
     {
         var technologies = new List<string>();
         var apiSignatures = new List<string>();
@@ -274,13 +274,13 @@ public sealed class IntelligentPatternEngine : IIntelligentPatternEngine
         var hashInput = string.Join("|", technologies.Concat(apiSignatures));
         var hash = ComputeSimpleHash(hashInput);
         
-        return new SiteFingerprint
+        return Task.FromResult(new SiteFingerprint
         {
             Hash = hash,
             Architecture = profile.HasGraphQL ? "GraphQL-SPA" : "REST-Traditional",
             Technologies = technologies,
             ApiSignatures = apiSignatures
-        };
+        });
     }
 
     private (string? architecture, float confidence) MatchArchitecture(SiteProfile profile, SiteFingerprint fingerprint)

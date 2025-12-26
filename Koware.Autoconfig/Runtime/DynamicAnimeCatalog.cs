@@ -80,7 +80,7 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
                 GetString(r, "Title") ?? "Unknown",
                 synopsis: GetString(r, "Synopsis"),
                 coverImage: TryParseUri(GetString(r, "CoverImage")),
-                detailPage: TryParseUri(GetString(r, "DetailPage")),
+                detailPage: TryParseUri(GetString(r, "DetailPage")) ?? GetFallbackDetailPage(),
                 episodes: Array.Empty<Episode>()
             )).ToList();
         }
@@ -133,7 +133,7 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
                 var title = GetString(r, "Title") ?? $"Episode {epNum}";
                 var page = TryParseUri(GetString(r, "Page"));
                 
-                episodes.Add(new Episode(new EpisodeId(epId), title, epNum, page));
+                episodes.Add(new Episode(new EpisodeId(epId), title, epNum, page ?? anime.DetailPage));
                 number++;
             }
             
@@ -332,6 +332,17 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
         if (string.IsNullOrEmpty(url))
             return null;
         return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri : null;
+    }
+
+    private Uri GetFallbackDetailPage()
+    {
+        if (Uri.TryCreate(_config.Hosts.Referer, UriKind.Absolute, out var referer))
+        {
+            return referer;
+        }
+
+        var baseUrl = _config.Hosts.ApiBase ?? $"https://{_config.Hosts.BaseHost}";
+        return new Uri(baseUrl);
     }
 
     private void RegisterBuiltInDecoder(string name)
