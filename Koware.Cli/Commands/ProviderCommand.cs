@@ -3,6 +3,7 @@ using System.Text.Json;
 using Koware.Autoconfig.Models;
 using Koware.Autoconfig.Orchestration;
 using Koware.Autoconfig.Storage;
+using Koware.Cli.Console;
 using Spectre.Console;
 
 namespace Koware.Cli.Commands;
@@ -418,7 +419,9 @@ public sealed class ProviderCommand : ICliCommand
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine("[red]Error:[/] {0}", ex.Message);
+            var detail = ErrorClassifier.SafeDetail(ex);
+            var message = string.IsNullOrWhiteSpace(detail) ? "Failed to export provider" : $"Failed to export provider: {detail}";
+            AnsiConsole.MarkupLine("[red]Error:[/] {0}", message);
             return 1;
         }
     }
@@ -454,7 +457,9 @@ public sealed class ProviderCommand : ICliCommand
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine("[red]Error:[/] {0}", ex.Message);
+            var detail = ErrorClassifier.SafeDetail(ex);
+            var message = string.IsNullOrWhiteSpace(detail) ? "Failed to import provider" : $"Failed to import provider: {detail}";
+            AnsiConsole.MarkupLine("[red]Error:[/] {0}", message);
             return 1;
         }
     }

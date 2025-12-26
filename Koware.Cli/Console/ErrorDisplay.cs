@@ -31,10 +31,15 @@ public static class ErrorDisplay
         WriteError("Network error");
         Con.WriteLine();
         
-        if (!string.IsNullOrWhiteSpace(message))
+        var safeDetail = ErrorClassifier.SafeDetail(message);
+        if (string.Equals(safeDetail, "Network error", StringComparison.OrdinalIgnoreCase))
+        {
+            safeDetail = null;
+        }
+        if (!string.IsNullOrWhiteSpace(safeDetail))
         {
             Con.ForegroundColor = ConsoleColor.DarkGray;
-            Con.WriteLine($"  {message}");
+            Con.WriteLine($"  {safeDetail}");
             Con.ResetColor();
             Con.WriteLine();
         }
@@ -124,11 +129,12 @@ public static class ErrorDisplay
         Con.WriteLine();
         WriteError(message);
         
-        if (!string.IsNullOrWhiteSpace(details))
+        var safeDetail = ErrorClassifier.SafeDetail(details);
+        if (!string.IsNullOrWhiteSpace(safeDetail))
         {
             Con.WriteLine();
             Con.ForegroundColor = ConsoleColor.DarkGray;
-            Con.WriteLine($"  {details}");
+            Con.WriteLine($"  {safeDetail}");
             Con.ResetColor();
         }
         
@@ -157,6 +163,27 @@ public static class ErrorDisplay
         Con.ForegroundColor = ConsoleColor.DarkGray;
         Con.WriteLine("Operation cancelled.");
         Con.ResetColor();
+    }
+
+    public static void FromException(Exception ex, string? context = null, string? hint = null)
+    {
+        var friendly = ErrorClassifier.Analyze(ex, context, hint);
+
+        switch (friendly.Kind)
+        {
+            case FriendlyErrorKind.Cancelled:
+                Cancelled();
+                return;
+            case FriendlyErrorKind.Timeout:
+                Timeout(string.IsNullOrWhiteSpace(context) ? "operation" : context);
+                return;
+            case FriendlyErrorKind.Network:
+                NetworkError(friendly.Detail);
+                return;
+            default:
+                Generic(friendly.Title, friendly.Detail, friendly.Hint ?? hint);
+                return;
+        }
     }
 
     private static void WriteError(string message)

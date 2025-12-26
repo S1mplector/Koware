@@ -1,5 +1,6 @@
 // Author: Ilgaz Mehmetoğlu
 using Koware.Cli.Console;
+using Koware.Cli.Console;
 using Koware.Updater;
 
 namespace Koware.Cli.Commands;
@@ -160,7 +161,9 @@ public sealed class UpdateCommand : ICliCommand
             if (!result.Success)
             {
                 System.Console.ForegroundColor = ConsoleColor.Red;
-                System.Console.WriteLine($"Update failed: {result.Error}");
+                var detail = ErrorClassifier.SafeDetail(result.Error);
+                var message = string.IsNullOrWhiteSpace(detail) ? "Update failed." : $"Update failed: {detail}";
+                System.Console.WriteLine(message);
                 System.Console.ResetColor();
                 return 1;
             }
@@ -189,9 +192,7 @@ public sealed class UpdateCommand : ICliCommand
         }
         catch (Exception ex)
         {
-            System.Console.ForegroundColor = ConsoleColor.Red;
-            System.Console.WriteLine($"Error checking for updates: {ex.Message}");
-            System.Console.ResetColor();
+            ErrorDisplay.FromException(ex, "check for updates");
             return 1;
         }
     }

@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Koware.Cli.Console;
 using Koware.Infrastructure.Configuration;
 
 namespace Koware.Cli.Health;
@@ -53,7 +54,7 @@ internal sealed class ProviderDiagnostics
         }
         catch (Exception ex)
         {
-            result.DnsError = ex.Message;
+            result.DnsError = ErrorClassifier.SafeDetail(ex);
         }
 
         try
@@ -71,7 +72,7 @@ internal sealed class ProviderDiagnostics
         }
         catch (Exception ex)
         {
-            result.HttpError = ex.Message;
+            result.HttpError = ErrorClassifier.SafeDetail(ex);
         }
 
         result.Success = result.DnsResolved && (result.HttpSuccess || result.HttpStatus.HasValue);

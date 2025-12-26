@@ -130,6 +130,7 @@ static IHost BuildHost(string[] args)
     // Override the default catalog registrations with aggregate versions
     builder.Services.AddSingleton<IAnimeCatalog>(sp => sp.GetRequiredService<AggregateAnimeCatalog>());
     builder.Services.AddSingleton<IMangaCatalog>(sp => sp.GetRequiredService<AggregateMangaCatalog>());
+    builder.Logging.ClearProviders();
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware.cli", LogLevel.Warning);
     builder.Logging.AddFilter("Koware.Infrastructure", LogLevel.Warning);
@@ -275,22 +276,22 @@ static async Task<int> RunAsync(IHost host, string[] args)
     }
     catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
     {
-        Koware.Cli.Console.ErrorDisplay.Timeout("request");
+        Koware.Cli.Console.ErrorDisplay.FromException(ex, "request");
         return 1;
     }
-    catch (OperationCanceledException)
+    catch (OperationCanceledException ex)
     {
-        Koware.Cli.Console.ErrorDisplay.Cancelled();
+        Koware.Cli.Console.ErrorDisplay.FromException(ex);
         return 2;
     }
     catch (HttpRequestException ex)
     {
-        Koware.Cli.Console.ErrorDisplay.NetworkError(ex.Message);
+        Koware.Cli.Console.ErrorDisplay.FromException(ex, "request");
         return 1;
     }
     catch (Exception ex)
     {
-        Koware.Cli.Console.ErrorDisplay.Generic("An unexpected error occurred", ex.Message, "Run 'koware doctor' to check your setup.");
+        Koware.Cli.Console.ErrorDisplay.FromException(ex, "operation", "Run 'koware doctor' to check your setup.");
         return 1;
     }
 }
@@ -429,7 +430,7 @@ static async Task<int> ExecuteAndPlayAsync(
         try
         {
             await history.AddAsync(entry, cancellationToken);
-            if (exitCode != 0)
+            if (exitCode != 0 && !IsUserCancelledExitCode(exitCode))
             {
                 logger.LogWarning("Player exited with code {ExitCode}, but history was saved so you can retry with 'koware last --play'.", exitCode);
             }
@@ -734,9 +735,7 @@ static async Task<int> HandleDoctorAsync(string[] args, IServiceProvider service
     catch (Exception ex)
     {
         logger.LogError(ex, "Diagnostics engine failed.");
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"Diagnostics failed: {ex.Message}");
-        Console.ResetColor();
+        Koware.Cli.Console.ErrorDisplay.FromException(ex, "diagnostics");
         return 1;
     }
 
@@ -1523,9 +1522,7 @@ static int HandleProviderEdit(string configPath)
     }
     catch (Exception ex)
     {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"Failed to open editor: {ex.Message}");
-        Console.ResetColor();
+        Koware.Cli.Console.ErrorDisplay.FromException(ex, "open editor");
         Console.WriteLine($"Manually edit: {configPath}");
         return 1;
     }
@@ -1695,7 +1692,8 @@ static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOpt
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"{Icons.Error} {ex.Message}");
+            var detail = Koware.Cli.Console.ErrorClassifier.SafeDetail(ex);
+            Console.WriteLine($"{Icons.Error} {detail ?? "Request failed"}");
             Console.ResetColor();
             allPassed = false;
         }
@@ -1905,7 +1903,9 @@ static async Task<int> HandleUrlAutoconfigAsync(string urlString, string[] args,
         else
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"{Icons.Error} Autoconfig failed: {result.ErrorMessage}");
+            var detail = Koware.Cli.Console.ErrorClassifier.SafeDetail(result.ErrorMessage);
+            var suffix = string.IsNullOrWhiteSpace(detail) ? string.Empty : $": {detail}";
+            Console.WriteLine($"{Icons.Error} Autoconfig failed{suffix}");
             Console.ResetColor();
             
             if (result.Phases.Count > 0)
@@ -1924,9 +1924,7 @@ static async Task<int> HandleUrlAutoconfigAsync(string urlString, string[] args,
     }
     catch (Exception ex)
     {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"{Icons.Error} Error: {ex.Message}");
-        Console.ResetColor();
+        Koware.Cli.Console.ErrorDisplay.FromException(ex, "autoconfig");
         return 1;
     }
 }
@@ -1968,7 +1966,8 @@ static async Task<int> HandleRemoteManifestAutoconfigAsync(string? providerName,
     catch (Exception ex)
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"{Icons.Error} {ex.Message}");
+        var detail = Koware.Cli.Console.ErrorClassifier.SafeDetail(ex);
+        Console.WriteLine($"{Icons.Error} {detail ?? "Request failed"}");
         Console.ResetColor();
         Console.WriteLine();
         Console.WriteLine("Could not fetch provider manifest. Check your internet connection.");
@@ -2076,7 +2075,8 @@ static async Task<int> HandleRemoteManifestAutoconfigAsync(string? providerName,
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"{Icons.Error} {ex.Message}");
+            var detail = Koware.Cli.Console.ErrorClassifier.SafeDetail(ex);
+            Console.WriteLine($"{Icons.Error} {detail ?? "Failed"}");
             Console.ResetColor();
         }
     }
@@ -3107,7 +3107,8 @@ static async Task<int> HandleListAddAsync(string[] args, IAnimeListStore animeLi
     catch (InvalidOperationException ex)
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine(ex.Message);
+        var detail = Koware.Cli.Console.ErrorClassifier.SafeDetail(ex);
+        Console.WriteLine(detail ?? "Could not add to list.");
         Console.ResetColor();
         return 1;
     }
@@ -3516,7 +3517,9 @@ static async Task<int> HandleMangaListAddAsync(string[] args, IMangaListStore ma
     }
     catch (Exception ex)
     {
-        WriteColoredLine($"Failed to add manga: {ex.Message}", ConsoleColor.Red);
+        var detail = Koware.Cli.Console.ErrorClassifier.SafeDetail(ex);
+        var message = string.IsNullOrWhiteSpace(detail) ? "Failed to add manga." : $"Failed to add manga: {detail}";
+        WriteColoredLine(message, ConsoleColor.Red);
         return 1;
     }
 }
@@ -6965,7 +6968,7 @@ static int StartProcessAndWait(ILogger logger, ProcessStartInfo start, string co
         }
 
         proc.WaitForExit();
-        if (proc.ExitCode != 0)
+        if (proc.ExitCode != 0 && !IsUserCancelledExitCode(proc.ExitCode))
         {
             logger.LogWarning("Player exited with code {ExitCode}.", proc.ExitCode);
         }
@@ -6977,6 +6980,11 @@ static int StartProcessAndWait(ILogger logger, ProcessStartInfo start, string co
         logger.LogError(ex, "Unable to launch player {Command}", command);
         return 1;
     }
+}
+
+static bool IsUserCancelledExitCode(int exitCode)
+{
+    return exitCode is 130 or 143;
 }
 
 /// <summary>

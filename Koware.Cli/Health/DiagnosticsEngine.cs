@@ -13,6 +13,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Koware.Cli.Console;
 using Koware.Infrastructure.Configuration;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
@@ -271,7 +272,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Environment,
                 Severity = DiagnosticSeverity.Warning,
                 Message = "Could not determine disk space",
-                Detail = ex.Message
+                Detail = ErrorClassifier.SafeDetail(ex)
             });
         }
 
@@ -531,7 +532,7 @@ public sealed class DiagnosticsEngine
                     Category = DiagnosticCategory.Configuration,
                     Severity = DiagnosticSeverity.Error,
                     Message = "Invalid JSON",
-                    Detail = ex.Message
+                    Detail = ErrorClassifier.SafeDetail(ex)
                 });
             }
         }
@@ -737,7 +738,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Storage,
                 Severity = DiagnosticSeverity.Error,
                 Message = "Cannot open database",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             };
         }
@@ -848,7 +849,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Data,
                 Severity = DiagnosticSeverity.Error,
                 Message = "Check failed",
-                Detail = ex.Message
+                Detail = ErrorClassifier.SafeDetail(ex)
             });
         }
 
@@ -1180,7 +1181,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Security,
                 Severity = DiagnosticSeverity.Error,
                 Message = "Certificate error",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             };
         }
@@ -1193,7 +1194,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Security,
                 Severity = DiagnosticSeverity.Warning,
                 Message = "Check failed",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             };
         }
@@ -1512,7 +1513,7 @@ public sealed class DiagnosticsEngine
                     Category = DiagnosticCategory.Network,
                     Severity = DiagnosticSeverity.Error,
                     Message = "No connection",
-                    Detail = ex.Message,
+                    Detail = ErrorClassifier.SafeDetail(ex),
                     Duration = sw.Elapsed
                 };
             }
@@ -1546,7 +1547,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Network,
                 Severity = DiagnosticSeverity.Error,
                 Message = "Failed",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             };
         }
@@ -1581,7 +1582,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Network,
                 Severity = DiagnosticSeverity.Error,
                 Message = "Failed",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             };
         }
@@ -1674,7 +1675,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Providers,
                 Severity = DiagnosticSeverity.Error,
                 Message = "Failed",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             };
         }
@@ -1718,7 +1719,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Providers,
                 Severity = DiagnosticSeverity.Error,
                 Message = "Failed",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             };
         }
@@ -1789,7 +1790,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Providers,
                 Severity = DiagnosticSeverity.Warning,
                 Message = "API check failed",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             };
         }
@@ -1963,7 +1964,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Engine,
                 Severity = DiagnosticSeverity.Error,
                 Message = "Failed to verify assemblies",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             });
         }
@@ -1996,7 +1997,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Engine,
                 Severity = DiagnosticSeverity.Error,
                 Message = "Failed",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             });
         }
@@ -2028,7 +2029,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Engine,
                 Severity = DiagnosticSeverity.Error,
                 Message = "Failed",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             });
         }
@@ -2063,7 +2064,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Engine,
                 Severity = DiagnosticSeverity.Error,
                 Message = "Failed",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             });
         }
@@ -2104,7 +2105,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Engine,
                 Severity = DiagnosticSeverity.Warning,
                 Message = "Limited connectivity",
-                Detail = ex.Message.Length > 100 ? ex.Message[..100] + "..." : ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             });
         }
@@ -2137,7 +2138,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Engine,
                 Severity = DiagnosticSeverity.Warning,
                 Message = "Check failed",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             });
         }
@@ -2172,7 +2173,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Engine,
                 Severity = DiagnosticSeverity.Warning,
                 Message = "Check failed",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             });
         }
@@ -2206,7 +2207,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Engine,
                 Severity = DiagnosticSeverity.Warning,
                 Message = "Failed to load",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             });
         }
@@ -2297,7 +2298,7 @@ public sealed class DiagnosticsEngine
                 Category = DiagnosticCategory.Updates,
                 Severity = DiagnosticSeverity.Warning,
                 Message = "Could not check for updates",
-                Detail = ex.Message,
+                Detail = ErrorClassifier.SafeDetail(ex),
                 Duration = sw.Elapsed
             });
         }
