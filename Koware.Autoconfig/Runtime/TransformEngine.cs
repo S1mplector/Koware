@@ -1,4 +1,5 @@
 // Author: Ilgaz Mehmetoğlu
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -15,6 +16,8 @@ public sealed class TransformEngine : ITransformEngine
 {
     private readonly ILogger<TransformEngine> _logger;
     private readonly Dictionary<string, Func<string, string>> _customDecoders = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Regex PathRegex = new(@"(\w+)|\[(\d+)\]", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly ConcurrentDictionary<string, PathSegment[]> PathCache = new(StringComparer.Ordinal);
 
     public TransformEngine(ILogger<TransformEngine> logger)
     {
@@ -90,7 +93,7 @@ public sealed class TransformEngine : ITransformEngine
         // Simple JSONPath-like navigation
         // Supports: $.field, $.nested.field, $[0], $.array[0].field
         var current = element;
-        var segments = ParsePath(path);
+        var segments = GetPathSegments(path);
         
         foreach (var segment in segments)
         {
@@ -132,7 +135,7 @@ public sealed class TransformEngine : ITransformEngine
 
     private JsonElement NavigateToPath(JsonElement root, string path)
     {
-        var segments = ParsePath(path);
+        var segments = GetPathSegments(path);
         var current = root;
         
         foreach (var segment in segments)
@@ -152,27 +155,34 @@ public sealed class TransformEngine : ITransformEngine
         return current;
     }
 
-    private static List<PathSegment> ParsePath(string path)
+    private static PathSegment[] GetPathSegments(string path)
     {
-        var segments = new List<PathSegment>();
-        var cleanPath = path.TrimStart('$', '.');
-        
-        var regex = new Regex(@"(\w+)|\[(\d+)\]");
-        var matches = regex.Matches(cleanPath);
-        
-        foreach (Match match in matches)
+        if (string.IsNullOrWhiteSpace(path))
         {
-            if (match.Groups[1].Success)
-            {
-                segments.Add(new PathSegment { PropertyName = match.Groups[1].Value });
-            }
-            else if (match.Groups[2].Success)
-            {
-                segments.Add(new PathSegment { IsIndex = true, Index = int.Parse(match.Groups[2].Value) });
-            }
+            return Array.Empty<PathSegment>();
         }
-        
-        return segments;
+
+        return PathCache.GetOrAdd(path, static p =>
+        {
+            var segments = new List<PathSegment>();
+            var cleanPath = p.TrimStart('$', '.');
+
+            var matches = PathRegex.Matches(cleanPath);
+
+            foreach (Match match in matches)
+            {
+                if (match.Groups[1].Success)
+                {
+                    segments.Add(new PathSegment { PropertyName = match.Groups[1].Value });
+                }
+                else if (match.Groups[2].Success)
+                {
+                    segments.Add(new PathSegment { IsIndex = true, Index = int.Parse(match.Groups[2].Value) });
+                }
+            }
+
+            return segments.ToArray();
+        });
     }
 
     public string? ApplyTransform(string? value, TransformType type, string? parameters = null)

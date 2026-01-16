@@ -233,25 +233,9 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
         using var request = new HttpRequestMessage(HttpMethod.Post, fullUrl);
         request.Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
         
-        // Add headers
-        if (Uri.TryCreate(_config.Hosts.Referer, UriKind.Absolute, out var referer))
-        {
-            request.Headers.Referrer = referer;
-        }
-        request.Headers.UserAgent.ParseAdd(_config.Hosts.UserAgent);
-
         request.Version = HttpVersion.Version11;
         request.VersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
-        
-        foreach (var (key, value) in _config.Hosts.CustomHeaders)
-        {
-            if (key.Equals("referer", StringComparison.OrdinalIgnoreCase) ||
-                key.Equals("user-agent", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-            request.Headers.TryAddWithoutValidation(key, value);
-        }
+        ApplyRequestHeaders(request);
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -288,14 +272,9 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
             request.RequestUri = new Uri(fullUrl);
         }
 
-        // Add headers
-        request.Headers.Referrer = new Uri(_config.Hosts.Referer);
-        request.Headers.UserAgent.ParseAdd(_config.Hosts.UserAgent);
-        
-        foreach (var (key, value) in _config.Hosts.CustomHeaders)
-        {
-            request.Headers.TryAddWithoutValidation(key, value);
-        }
+        request.Version = HttpVersion.Version11;
+        request.VersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
+        ApplyRequestHeaders(request);
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -337,6 +316,32 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
     {
         var str = GetString(dict, key);
         return int.TryParse(str, out var num) ? num : null;
+    }
+
+    private void ApplyRequestHeaders(HttpRequestMessage request)
+    {
+        if (Uri.TryCreate(_config.Hosts.Referer, UriKind.Absolute, out var referer))
+        {
+            request.Headers.Referrer = referer;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_config.Hosts.UserAgent))
+        {
+            if (!request.Headers.UserAgent.TryParseAdd(_config.Hosts.UserAgent))
+            {
+                request.Headers.TryAddWithoutValidation("User-Agent", _config.Hosts.UserAgent);
+            }
+        }
+
+        foreach (var (key, value) in _config.Hosts.CustomHeaders)
+        {
+            if (key.Equals("referer", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("user-agent", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            request.Headers.TryAddWithoutValidation(key, value);
+        }
     }
 
     private static Uri? TryParseUri(string? url)
