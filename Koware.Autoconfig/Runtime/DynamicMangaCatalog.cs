@@ -1,4 +1,5 @@
 // Author: Ilgaz Mehmetoğlu
+using System.Net;
 using Koware.Application.Abstractions;
 using Koware.Autoconfig.Models;
 using Koware.Domain.Models;
@@ -327,11 +328,22 @@ public sealed class DynamicMangaCatalog : IMangaCatalog
             request.RequestUri = new Uri(fullUrl);
         }
 
-        request.Headers.Referrer = new Uri(_config.Hosts.Referer);
+        if (Uri.TryCreate(_config.Hosts.Referer, UriKind.Absolute, out var referer))
+        {
+            request.Headers.Referrer = referer;
+        }
         request.Headers.UserAgent.ParseAdd(_config.Hosts.UserAgent);
+
+        request.Version = HttpVersion.Version11;
+        request.VersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
         
         foreach (var (key, value) in _config.Hosts.CustomHeaders)
         {
+            if (key.Equals("referer", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("user-agent", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
             request.Headers.TryAddWithoutValidation(key, value);
         }
 
