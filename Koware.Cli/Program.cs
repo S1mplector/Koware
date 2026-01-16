@@ -34,6 +34,9 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
+const int ExitCodePrevEpisode = 10;
+const int ExitCodeNextEpisode = 11;
+
 using var host = BuildHost(args);
 var exitCode = await RunAsync(host, args);
 return exitCode;
@@ -371,97 +374,154 @@ static async Task<int> ExecuteAndPlayAsync(
     ILogger logger,
     CancellationToken cancellationToken)
 {
-    var step = ConsoleStep.Start("Resolving streams");
-    ScrapeResult result;
-    try
-    {
-        result = await orchestrator.ExecuteAsync(plan, cancellationToken);
-        step.Succeed("Streams ready");
-    }
-    catch (Exception)
-    {
-        step.Fail("Failed to resolve streams");
-        throw;
-    }
-    if (result.SelectedEpisode is null || result.Streams is null || result.Streams.Count == 0)
-    {
-        logger.LogWarning("No streams found for the query/episode.");
-        RenderPlan(plan, result);
-        return 1;
-    }
-
     var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
     var playerResolution = ResolvePlayerExecutable(playerOptions);
-    var defaultReferrer = services.GetService<IOptions<AllAnimeOptions>>()?.Value?.Referer;
-    var normalizedStreams = ApplyDefaultReferrer(result.Streams, defaultReferrer);
-    var filteredStreams = FilterStreamsForPlayer(normalizedStreams, playerResolution.Name, logger);
-
-    var stream = PickBestStream(filteredStreams);
-    if (stream is null)
-    {
-        logger.LogWarning("No playable streams found.");
-        return 1;
-    }
-    logger.LogDebug("Selected stream {Quality} from host {Host}", stream.Quality ?? "unknown", stream.Url.Host);
-
     var allAnimeOptions = services.GetService<IOptions<AllAnimeOptions>>()?.Value;
-    var displayTitle = BuildPlayerTitle(result, stream);
-    var httpReferrer = stream.Referrer ?? allAnimeOptions?.Referer;
-    var prettyTitle = string.IsNullOrWhiteSpace(displayTitle) ? stream.Url.ToString() : displayTitle!;
-    logger.LogInformation("Playing {Title} via {Host} [{Quality}]", prettyTitle, stream.Url.Host, stream.Quality ?? "auto");
+    var defaultReferrer = allAnimeOptions?.Referer;
+    var currentPlan = plan;
+    var exitCode = 0;
 
-    var exitCode = LaunchPlayer(playerOptions, stream, logger, httpReferrer, allAnimeOptions?.UserAgent, prettyTitle, playerResolution);
-
-    if (!plan.NonInteractive && filteredStreams.Count > 1)
+    while (true)
     {
-        exitCode = ReplayWithDifferentQuality(filteredStreams, playerOptions, playerResolution, logger, httpReferrer, allAnimeOptions?.UserAgent, prettyTitle, exitCode);
-    }
-
-    if (result.SelectedAnime is not null && result.SelectedEpisode is not null)
-    {
-        var entry = new WatchHistoryEntry
-        {
-            Provider = stream.SourceTag ?? stream.Provider,
-            AnimeId = result.SelectedAnime.Id.Value,
-            AnimeTitle = result.SelectedAnime.Title,
-            EpisodeNumber = result.SelectedEpisode.Number,
-            EpisodeTitle = result.SelectedEpisode.Title,
-            Quality = stream.Quality,
-            WatchedAt = DateTimeOffset.UtcNow
-        };
-
+        var step = ConsoleStep.Start("Resolving streams");
+        ScrapeResult result;
         try
         {
-            await history.AddAsync(entry, cancellationToken);
-            if (exitCode != 0 && !IsUserCancelledExitCode(exitCode))
+            result = await orchestrator.ExecuteAsync(currentPlan, cancellationToken);
+            step.Succeed("Streams ready");
+        }
+        catch (Exception)
+        {
+            step.Fail("Failed to resolve streams");
+            throw;
+        }
+
+        if (result.SelectedEpisode is null || result.Streams is null || result.Streams.Count == 0)
+        {
+            logger.LogWarning("No streams found for the query/episode.");
+            RenderPlan(currentPlan, result);
+            return 1;
+        }
+
+        var normalizedStreams = ApplyDefaultReferrer(result.Streams, defaultReferrer);
+        var filteredStreams = FilterStreamsForPlayer(normalizedStreams, playerResolution.Name, logger);
+
+        var stream = PickBestStream(filteredStreams);
+        if (stream is null)
+        {
+            logger.LogWarning("No playable streams found.");
+            return 1;
+        }
+        logger.LogDebug("Selected stream {Quality} from host {Host}", stream.Quality ?? "unknown", stream.Url.Host);
+
+        var displayTitle = BuildPlayerTitle(result, stream);
+        var httpReferrer = stream.Referrer ?? defaultReferrer;
+        var prettyTitle = string.IsNullOrWhiteSpace(displayTitle) ? stream.Url.ToString() : displayTitle!;
+        logger.LogInformation("Playing {Title} via {Host} [{Quality}]", prettyTitle, stream.Url.Host, stream.Quality ?? "auto");
+
+        exitCode = LaunchPlayer(playerOptions, stream, logger, httpReferrer, allAnimeOptions?.UserAgent, prettyTitle, playerResolution);
+
+        if (!currentPlan.NonInteractive && filteredStreams.Count > 1 && !IsNavigationExitCode(exitCode))
+        {
+            exitCode = ReplayWithDifferentQuality(filteredStreams, playerOptions, playerResolution, logger, httpReferrer, allAnimeOptions?.UserAgent, prettyTitle, exitCode);
+        }
+
+        if (result.SelectedAnime is not null && result.SelectedEpisode is not null)
+        {
+            var entry = new WatchHistoryEntry
             {
-                logger.LogWarning("Player exited with code {ExitCode}, but history was saved so you can retry with 'koware last --play'.", exitCode);
+                Provider = stream.SourceTag ?? stream.Provider,
+                AnimeId = result.SelectedAnime.Id.Value,
+                AnimeTitle = result.SelectedAnime.Title,
+                EpisodeNumber = result.SelectedEpisode.Number,
+                EpisodeTitle = result.SelectedEpisode.Title,
+                Quality = stream.Quality,
+                WatchedAt = DateTimeOffset.UtcNow
+            };
+
+            try
+            {
+                await history.AddAsync(entry, cancellationToken);
+                if (exitCode != 0 && !IsNonErrorExitCode(exitCode))
+                {
+                    logger.LogWarning("Player exited with code {ExitCode}, but history was saved so you can retry with 'koware last --play'.", exitCode);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to update watch history.");
+            }
+
+            // Update anime tracking list (auto-adds if not present, auto-completes if finished)
+            try
+            {
+                var animeList = services.GetRequiredService<IAnimeListStore>();
+                var totalEpisodes = result.Episodes?.Count;
+                await animeList.RecordEpisodeWatchedAsync(
+                    result.SelectedAnime.Id.Value,
+                    result.SelectedAnime.Title,
+                    result.SelectedEpisode.Number,
+                    totalEpisodes,
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Failed to update anime list tracking.");
             }
         }
-        catch (Exception ex)
+
+        if (IsNavigationExitCode(exitCode))
         {
-            logger.LogWarning(ex, "Failed to update watch history.");
+            if (result.SelectedEpisode is null)
+            {
+                return 0;
+            }
+
+            var direction = exitCode == ExitCodeNextEpisode ? 1 : -1;
+            var nextEpisode = GetAdjacentEpisode(result.Episodes, result.SelectedEpisode, direction);
+            if (nextEpisode is null)
+            {
+                logger.LogInformation("No {Direction} episode available.", direction > 0 ? "next" : "previous");
+                return 0;
+            }
+
+            currentPlan = currentPlan with { EpisodeNumber = nextEpisode.Number };
+            continue;
         }
 
-        // Update anime tracking list (auto-adds if not present, auto-completes if finished)
-        try
+        return exitCode;
+    }
+}
+
+static Episode? GetAdjacentEpisode(IReadOnlyCollection<Episode>? episodes, Episode current, int direction)
+{
+    if (episodes is null || episodes.Count == 0)
+    {
+        return null;
+    }
+
+    var ordered = episodes.OrderBy(e => e.Number).ToList();
+    var index = ordered.FindIndex(e => e.Number == current.Number);
+    if (index < 0)
+    {
+        index = ordered.FindIndex(e => string.Equals(e.Id.Value, current.Id.Value, StringComparison.OrdinalIgnoreCase));
+    }
+    if (index < 0)
+    {
+        index = ordered.FindIndex(e => e.Number >= current.Number);
+        if (index < 0)
         {
-            var animeList = services.GetRequiredService<IAnimeListStore>();
-            var totalEpisodes = result.Episodes?.Count;
-            await animeList.RecordEpisodeWatchedAsync(
-                result.SelectedAnime.Id.Value,
-                result.SelectedAnime.Title,
-                result.SelectedEpisode.Number,
-                totalEpisodes,
-                cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "Failed to update anime list tracking.");
+            index = ordered.Count - 1;
         }
     }
 
-    return exitCode;
+    var nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= ordered.Count)
+    {
+        return null;
+    }
+
+    return ordered[nextIndex];
 }
 
 /// <summary>
@@ -6131,11 +6191,16 @@ static NavigationResult ReadNavigation(string path)
         var text = File.ReadAllText(path).Trim().ToLowerInvariant();
         // Format: action:page:chapter (e.g., "none:15:1.5")
         var parts = text.Split(':');
-        if (parts.Length >= 3 && 
-            int.TryParse(parts[1], out var page) && 
-            float.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var chapter))
+        if (parts.Length >= 3)
         {
-            return new NavigationResult(parts[0], page, chapter);
+            var action = string.Join(":", parts.Take(parts.Length - 2));
+            var pagePart = parts[^2];
+            var chapterPart = parts[^1];
+            if (int.TryParse(pagePart, out var page) &&
+                float.TryParse(chapterPart, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var chapter))
+            {
+                return new NavigationResult(action, page, chapter);
+            }
         }
         // Legacy format: just action
         return new NavigationResult(text, 1, 0);
@@ -7787,7 +7852,7 @@ static int StartProcessAndWait(ILogger logger, ProcessStartInfo start, string co
         }
 
         proc.WaitForExit();
-        if (proc.ExitCode != 0 && !IsUserCancelledExitCode(proc.ExitCode))
+        if (proc.ExitCode != 0 && !IsNonErrorExitCode(proc.ExitCode))
         {
             logger.LogWarning("Player exited with code {ExitCode}.", proc.ExitCode);
         }
@@ -7804,6 +7869,16 @@ static int StartProcessAndWait(ILogger logger, ProcessStartInfo start, string co
 static bool IsUserCancelledExitCode(int exitCode)
 {
     return exitCode is 130 or 143;
+}
+
+static bool IsNavigationExitCode(int exitCode)
+{
+    return exitCode is ExitCodePrevEpisode or ExitCodeNextEpisode;
+}
+
+static bool IsNonErrorExitCode(int exitCode)
+{
+    return exitCode == 0 || IsUserCancelledExitCode(exitCode) || IsNavigationExitCode(exitCode);
 }
 
 /// <summary>
