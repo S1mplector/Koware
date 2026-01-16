@@ -1,6 +1,8 @@
 // Author: Ilgaz Mehmetoğlu
 // Reusable console progress bar for displaying download/operation progress.
 using System;
+using System.IO;
+using System.Text;
 
 namespace Koware.Cli.Console;
 
@@ -25,6 +27,11 @@ internal sealed class ConsoleProgressBar : IProgress<long>, IProgress<(int curre
     private readonly object _lock = new();
     private readonly bool _showSpeed;
     private readonly int _barWidth;
+    private readonly bool _disabled;
+    private readonly char _filledChar;
+    private readonly char _emptyChar;
+    private readonly string _successGlyph;
+    private readonly string _failGlyph;
     
     private long _current;
     private int _lastRenderedPercent = -1;
@@ -45,8 +52,14 @@ internal sealed class ConsoleProgressBar : IProgress<long>, IProgress<(int curre
         _total = total > 0 ? total : 1;
         _startTime = DateTime.UtcNow;
         _showSpeed = true;
-        _barWidth = barWidth;
+        _disabled = System.Console.IsOutputRedirected;
+        _barWidth = GetBarWidth(barWidth, _disabled);
         _originalColor = System.Console.ForegroundColor;
+        var useUnicode = !_disabled && System.Console.OutputEncoding.CodePage == Encoding.UTF8.CodePage;
+        _filledChar = useUnicode ? '█' : '#';
+        _emptyChar = useUnicode ? '░' : '-';
+        _successGlyph = useUnicode ? "✔" : "OK";
+        _failGlyph = useUnicode ? "✖" : "X";
     }
 
     /// <summary>
@@ -59,8 +72,14 @@ internal sealed class ConsoleProgressBar : IProgress<long>, IProgress<(int curre
         _total = 100;
         _startTime = DateTime.UtcNow;
         _showSpeed = false;
-        _barWidth = barWidth;
+        _disabled = System.Console.IsOutputRedirected;
+        _barWidth = GetBarWidth(barWidth, _disabled);
         _originalColor = System.Console.ForegroundColor;
+        var useUnicode = !_disabled && System.Console.OutputEncoding.CodePage == Encoding.UTF8.CodePage;
+        _filledChar = useUnicode ? '█' : '#';
+        _emptyChar = useUnicode ? '░' : '-';
+        _successGlyph = useUnicode ? "✔" : "OK";
+        _failGlyph = useUnicode ? "✖" : "X";
     }
 
     /// <summary>
@@ -68,6 +87,7 @@ internal sealed class ConsoleProgressBar : IProgress<long>, IProgress<(int curre
     /// </summary>
     public void Report(long value)
     {
+        if (_disabled) return;
         lock (_lock)
         {
             if (_completed) return;
@@ -89,6 +109,7 @@ internal sealed class ConsoleProgressBar : IProgress<long>, IProgress<(int curre
     /// </summary>
     public void Report((int current, int total, string label) value)
     {
+        if (_disabled) return;
         lock (_lock)
         {
             if (_completed) return;
@@ -109,9 +130,10 @@ internal sealed class ConsoleProgressBar : IProgress<long>, IProgress<(int curre
     /// </summary>
     private void Render(int percent, string label)
     {
+        if (_disabled) return;
         var filled = (int)(percent * _barWidth / 100.0);
         var empty = _barWidth - filled;
-        var bar = new string('█', filled) + new string('░', empty);
+        var bar = new string(_filledChar, filled) + new string(_emptyChar, empty);
 
         string line;
         if (_showSpeed && _current > 0)
@@ -151,6 +173,11 @@ internal sealed class ConsoleProgressBar : IProgress<long>, IProgress<(int curre
         {
             if (_completed) return;
             _completed = true;
+
+            if (_disabled)
+            {
+                return;
+            }
             
             // Clear progress bar
             var clear = new string(' ', _lastRenderLength + 10);
@@ -159,7 +186,7 @@ internal sealed class ConsoleProgressBar : IProgress<long>, IProgress<(int curre
             if (!string.IsNullOrWhiteSpace(message))
             {
                 System.Console.ForegroundColor = ConsoleColor.Green;
-                System.Console.WriteLine($"  ✔ {message}");
+                System.Console.WriteLine($"  {_successGlyph} {message}");
                 System.Console.ForegroundColor = _originalColor;
             }
         }
@@ -174,6 +201,11 @@ internal sealed class ConsoleProgressBar : IProgress<long>, IProgress<(int curre
         {
             if (_completed) return;
             _completed = true;
+
+            if (_disabled)
+            {
+                return;
+            }
             
             // Clear progress bar
             var clear = new string(' ', _lastRenderLength + 10);
@@ -182,7 +214,7 @@ internal sealed class ConsoleProgressBar : IProgress<long>, IProgress<(int curre
             if (!string.IsNullOrWhiteSpace(message))
             {
                 System.Console.ForegroundColor = ConsoleColor.Red;
-                System.Console.WriteLine($"  ✖ {message}");
+                System.Console.WriteLine($"  {_failGlyph} {message}");
                 System.Console.ForegroundColor = _originalColor;
             }
         }
@@ -242,6 +274,28 @@ internal sealed class ConsoleProgressBar : IProgress<long>, IProgress<(int curre
         if (!_completed)
         {
             Complete();
+        }
+    }
+
+    private static int GetBarWidth(int requested, bool outputRedirected)
+    {
+        if (outputRedirected)
+        {
+            return requested;
+        }
+
+        try
+        {
+            var available = System.Console.WindowWidth - 30;
+            if (available <= 0)
+            {
+                return Math.Max(10, requested);
+            }
+            return Math.Min(requested, Math.Max(10, available));
+        }
+        catch (IOException)
+        {
+            return requested;
         }
     }
 }

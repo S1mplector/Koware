@@ -328,24 +328,9 @@ public sealed class DynamicMangaCatalog : IMangaCatalog
             request.RequestUri = new Uri(fullUrl);
         }
 
-        if (Uri.TryCreate(_config.Hosts.Referer, UriKind.Absolute, out var referer))
-        {
-            request.Headers.Referrer = referer;
-        }
-        request.Headers.UserAgent.ParseAdd(_config.Hosts.UserAgent);
-
         request.Version = HttpVersion.Version11;
         request.VersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
-        
-        foreach (var (key, value) in _config.Hosts.CustomHeaders)
-        {
-            if (key.Equals("referer", StringComparison.OrdinalIgnoreCase) ||
-                key.Equals("user-agent", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-            request.Headers.TryAddWithoutValidation(key, value);
-        }
+        ApplyRequestHeaders(request);
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -387,6 +372,32 @@ public sealed class DynamicMangaCatalog : IMangaCatalog
     {
         var str = GetString(dict, key);
         return int.TryParse(str, out var num) ? num : null;
+    }
+
+    private void ApplyRequestHeaders(HttpRequestMessage request)
+    {
+        if (Uri.TryCreate(_config.Hosts.Referer, UriKind.Absolute, out var referer))
+        {
+            request.Headers.Referrer = referer;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_config.Hosts.UserAgent))
+        {
+            if (!request.Headers.UserAgent.TryParseAdd(_config.Hosts.UserAgent))
+            {
+                request.Headers.TryAddWithoutValidation("User-Agent", _config.Hosts.UserAgent);
+            }
+        }
+
+        foreach (var (key, value) in _config.Hosts.CustomHeaders)
+        {
+            if (key.Equals("referer", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("user-agent", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            request.Headers.TryAddWithoutValidation(key, value);
+        }
     }
 
     private static float? GetFloat(Dictionary<string, object?> dict, string key)
