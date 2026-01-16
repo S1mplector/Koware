@@ -23,8 +23,8 @@ public partial class UpdatesPage : Page
             await Terminal1.TypePromptAsync("koware update --check");
             Terminal1.AddEmptyLine();
             await Terminal1.AddColoredLineAsync("{cyan}Checking for updates...{/}", 200);
-            await Terminal1.AddColoredLineAsync("{green}✓{/} New version available: v0.9.0", 150);
-            await Terminal1.AddColoredLineAsync("{gray}  Current: v0.9.0-beta → Latest: v0.9.1{/}", 0);
+            await Terminal1.AddColoredLineAsync("{green}✓{/} New version available: v1.0.0", 150);
+            await Terminal1.AddColoredLineAsync("{gray}  Current: v1.0.0 → Latest: v1.0.0{/}", 0);
         }
         catch (TaskCanceledException) { }
     }
@@ -36,10 +36,10 @@ public partial class UpdatesPage : Page
             Terminal2.Clear();
             await Terminal2.TypePromptAsync("koware update");
             Terminal2.AddEmptyLine();
-            await Terminal2.AddColoredLineAsync("{cyan}Downloading v0.9.0...{/}", 200);
+            await Terminal2.AddColoredLineAsync("{cyan}Downloading v1.0.0...{/}", 200);
             await Terminal2.AddColoredLineAsync("{gray}  [████████████████████] 100%{/}", 300);
             await Terminal2.AddColoredLineAsync("{cyan}Installing update...{/}", 200);
-            await Terminal2.AddColoredLineAsync("{green}✓{/} Update complete! Restart Koware to use v0.9.0", 0);
+            await Terminal2.AddColoredLineAsync("{green}✓{/} Update complete! Restart Koware to use v1.0.0", 0);
         }
         catch (TaskCanceledException) { }
     }
@@ -50,7 +50,7 @@ public partial class UpdatesPage : Page
         {
             Terminal3.Clear();
             await Terminal3.TypePromptAsync("koware --version");
-            await Terminal3.AddColoredLineAsync("{cyan}Koware{/} v0.9.0-beta (net8.0)", 0);
+            await Terminal3.AddColoredLineAsync("{cyan}Koware{/} v1.0.0 (net8.0)", 0);
         }
         catch (TaskCanceledException) { }
     }

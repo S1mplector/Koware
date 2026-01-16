@@ -2,6 +2,7 @@
 // WebView2 host that configures the manga reader, proxies image requests, and bridges messages.
 using System;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -91,16 +92,65 @@ public sealed class WebViewReaderHost
             using var doc = JsonDocument.Parse(message);
             var root = doc.RootElement;
             
-            if (root.TryGetProperty("type", out var typeEl) && typeEl.GetString() == "nav")
+            if (!root.TryGetProperty("type", out var typeEl))
             {
-                var direction = root.TryGetProperty("direction", out var dirEl) ? dirEl.GetString() : null;
-                var path = root.TryGetProperty("path", out var pathEl) ? pathEl.GetString() : null;
-                
-                if (!string.IsNullOrWhiteSpace(direction) && !string.IsNullOrWhiteSpace(path))
+                return;
+            }
+
+            var type = typeEl.GetString();
+            if (type is not ("nav" or "progress"))
+            {
+                return;
+            }
+
+            var direction = root.TryGetProperty("direction", out var dirEl) ? dirEl.GetString() : null;
+            var path = root.TryGetProperty("path", out var pathEl) ? pathEl.GetString() : null;
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            var page = 1;
+            if (root.TryGetProperty("page", out var pageEl))
+            {
+                if (pageEl.ValueKind == JsonValueKind.Number && pageEl.TryGetInt32(out var pageValue))
                 {
-                    File.WriteAllText(path, direction);
-                    _dispatcher.Invoke(() => Application.Current.MainWindow?.Close());
+                    page = pageValue;
                 }
+                else if (pageEl.ValueKind == JsonValueKind.String &&
+                         int.TryParse(pageEl.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var pageParsed))
+                {
+                    page = pageParsed;
+                }
+            }
+
+            if (page < 1)
+            {
+                page = 1;
+            }
+
+            var chapter = 0d;
+            if (root.TryGetProperty("chapter", out var chapterEl))
+            {
+                if (chapterEl.ValueKind == JsonValueKind.Number && chapterEl.TryGetDouble(out var chapterValue))
+                {
+                    chapter = chapterValue;
+                }
+                else if (chapterEl.ValueKind == JsonValueKind.String &&
+                         double.TryParse(chapterEl.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var chapterParsed))
+                {
+                    chapter = chapterParsed;
+                }
+            }
+
+            var nav = string.IsNullOrWhiteSpace(direction) ? "none" : direction;
+            var payload = $"{nav}:{page}:{chapter.ToString(CultureInfo.InvariantCulture)}";
+            File.WriteAllText(path, payload);
+
+            if (type == "nav")
+            {
+                _dispatcher.Invoke(() => Application.Current.MainWindow?.Close());
             }
         }
         catch

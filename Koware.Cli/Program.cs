@@ -5179,6 +5179,8 @@ static async Task PlayOfflineChapterAsync(DownloadEntry entry, IDownloadStore do
             }
 
             var displayTitle = $"{current.Entry.ContentTitle} - Chapter {current.Entry.Number}";
+            var initialNav = $"none:1:{current.Chapter.Number.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+            File.WriteAllText(navPath, initialNav);
             exitCode = LaunchReader(
                 readerOptions,
                 pages,
@@ -6052,7 +6054,8 @@ static async Task<ReadResult> ReadWithNavigationAsync(
         var currentStartPage = startPage;
         while (true)
         {
-            File.WriteAllText(navPath, "none:1:0");
+            var initialNav = $"none:{currentStartPage}:{currentChapter.Number.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+            File.WriteAllText(navPath, initialNav);
             exitCode = LaunchReader(readerOptions, pages, chapters, currentChapter, logger, httpReferrer, httpUserAgent, displayTitle, navPath, currentStartPage);
             currentStartPage = 1; // Reset for subsequent chapter navigation
 

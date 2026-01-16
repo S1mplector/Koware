@@ -641,7 +641,7 @@
                                            Foreground="#8892b0"
                                            FontSize="13"
                                            TextWrapping="Wrap" />
-                                <TextBlock Text="Version 0.8.1-beta"
+                                <TextBlock Text="Version 1.0.0"
                                            Foreground="#4a5568"
                                            FontSize="12"
                                            Margin="0,8,0,0" />

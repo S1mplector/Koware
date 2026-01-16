@@ -792,6 +792,9 @@ internal static class ReaderHtmlBuilder
         let zenMode = false;
         let zenHideTimeout = null;
         let zenToastTimeout = null;
+        let lastProgressPage = -1;
+        let lastProgressChapter = null;
+        let lastProgressAt = 0;
 
         function init() {
             pageSlider.max = pages.length;
@@ -821,6 +824,28 @@ internal static class ReaderHtmlBuilder
         function getCurrentChapterIndex() {
             const idx = chapters.findIndex(c => c.current);
             return idx >= 0 ? idx : 0;
+        }
+
+        function getCurrentChapterNumber() {
+            if (!chapters || chapters.length === 0) return 0;
+            const chapter = chapters[getCurrentChapterIndex()];
+            const num = Number(chapter?.number);
+            return Number.isFinite(num) ? num : 0;
+        }
+
+        function reportProgress(action = "none", force = false) {
+            if (!navPath || !window.chrome?.webview?.postMessage) return;
+            const page = currentPage + 1;
+            const chapter = getCurrentChapterNumber();
+            const now = Date.now();
+            if (!force && page === lastProgressPage && chapter === lastProgressChapter && now - lastProgressAt < 800) {
+                return;
+            }
+            lastProgressPage = page;
+            lastProgressChapter = chapter;
+            lastProgressAt = now;
+            const type = action === "none" ? "progress" : "nav";
+            window.chrome.webview.postMessage({ type: type, direction: action, path: navPath, page: page, chapter: chapter });
         }
         
         function renderChaptersList() {
@@ -856,9 +881,7 @@ internal static class ReaderHtmlBuilder
         }
         
         function writeNavAndClose(direction) {
-            if (navPath && window.chrome?.webview?.postMessage) {
-                window.chrome.webview.postMessage({ type: "nav", direction: direction, path: navPath });
-            }
+            reportProgress(direction, true);
             window.__navResult = direction;
             // Window will be closed by C# after receiving the message
         }
@@ -1188,6 +1211,7 @@ internal static class ReaderHtmlBuilder
                                 updatePageInfo();
                                 updateNavButtons();
                                 preloadAhead(i);
+                                savePosition();
                             }
                             break;
                         }
@@ -1205,6 +1229,7 @@ internal static class ReaderHtmlBuilder
                     savedAt: Date.now()
                 }));
             } catch {}
+            reportProgress();
         }
 
         function restorePosition() {

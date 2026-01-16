@@ -18,6 +18,7 @@ public sealed class TransformEngine : ITransformEngine
     private readonly Dictionary<string, Func<string, string>> _customDecoders = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Regex PathRegex = new(@"(\w+)|\[(\d+)\]", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly ConcurrentDictionary<string, PathSegment[]> PathCache = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, Regex> RegexCache = new(StringComparer.Ordinal);
 
     public TransformEngine(ILogger<TransformEngine> logger)
     {
@@ -29,6 +30,11 @@ public sealed class TransformEngine : ITransformEngine
         IReadOnlyList<FieldMapping> mappings,
         string? arrayPath = null)
     {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return Array.Empty<Dictionary<string, object?>>();
+        }
+
         var results = new List<Dictionary<string, object?>>();
         
         try
@@ -44,12 +50,14 @@ public sealed class TransformEngine : ITransformEngine
             if (arrayElement.ValueKind != JsonValueKind.Array)
             {
                 // Single object, wrap in result
+                results = new List<Dictionary<string, object?>>(1);
                 var item = ExtractSingle(arrayElement, mappings);
                 if (item.Count > 0)
                     results.Add(item);
                 return results;
             }
-            
+
+            results = new List<Dictionary<string, object?>>(arrayElement.GetArrayLength());
             foreach (var element in arrayElement.EnumerateArray())
             {
                 var item = ExtractSingle(element, mappings);
@@ -68,7 +76,7 @@ public sealed class TransformEngine : ITransformEngine
 
     private Dictionary<string, object?> ExtractSingle(JsonElement element, IReadOnlyList<FieldMapping> mappings)
     {
-        var result = new Dictionary<string, object?>();
+        var result = new Dictionary<string, object?>(mappings.Count);
         
         foreach (var mapping in mappings)
         {
@@ -267,13 +275,14 @@ public sealed class TransformEngine : ITransformEngine
     {
         if (string.IsNullOrEmpty(pattern))
             return value;
-            
-        var match = Regex.Match(value, pattern);
+
+        var regex = RegexCache.GetOrAdd(pattern, static p => new Regex(p, RegexOptions.Compiled));
+        var match = regex.Match(value);
         if (!match.Success)
             return value;
             
         if (!string.IsNullOrEmpty(replacement))
-            return Regex.Replace(value, pattern, replacement);
+            return regex.Replace(value, replacement);
             
         return match.Groups.Count > 1 ? match.Groups[1].Value : match.Value;
     }
