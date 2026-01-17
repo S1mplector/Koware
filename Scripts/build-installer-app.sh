@@ -51,7 +51,7 @@ while [[ $# -gt 0 ]]; do
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
-            echo "  --runtime <rid>       Runtime identifier (osx-arm64, osx-x64). Default: osx-arm64"
+            echo "  --runtime <rid>       Runtime identifier (osx-arm64, osx-x64, universal). Default: osx-arm64"
             echo "  --copy-to-desktop     Copy the DMG to ~/Desktop after build"
             exit 0
             ;;
@@ -64,11 +64,6 @@ BUILD_DIR="$REPO_ROOT/publish/macos-app"
 OUTPUT_DIR="$REPO_ROOT/publish"
 RUNTIME_LABEL="$RUNTIME"
 DMG_NAME="Koware-Installer-${APP_VERSION}-${RUNTIME_LABEL}.dmg"
-
-# Universal builds need lipo (after runtime is finalized)
-if [[ "$RUNTIME" == "universal" ]]; then
-    ensure_cmd "lipo" "Mach-O lipo"
-fi
 
 info "Building Koware Installer App v$APP_VERSION ($RUNTIME)"
 
@@ -93,12 +88,8 @@ publish_app() {
 
     # Self-contained deployment with native libraries for SQLite support
     if [[ "$RUNTIME" == "universal" ]]; then
-        local tmp_base="$BUILD_DIR/tmp-$exe_name"
-        rm -rf "$tmp_base"
-        mkdir -p "$tmp_base"
-
         for rid in "${TARGET_RIDS[@]}"; do
-            local rid_dir="$tmp_base/$rid"
+            local rid_dir="$output_dir/$rid"
             mkdir -p "$rid_dir"
             dotnet publish "$project" \
                 -c "$CONFIGURATION" \
@@ -106,15 +97,8 @@ publish_app() {
                 -o "$rid_dir" \
                 --self-contained true \
                 $( [[ "$single_file" == "true" ]] && echo "/p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true /p:EnableCompressionInSingleFile=true" )
+            chmod +x "$rid_dir/$exe_name" 2>/dev/null || true
         done
-
-        # Use arm64 output as base, then lipo the executable
-        cp -R "$tmp_base/osx-arm64/." "$output_dir"
-        rsync -a "$tmp_base/osx-x64/" "$output_dir/" >/dev/null 2>&1 || true
-        if [[ -f "$tmp_base/osx-arm64/$exe_name" && -f "$tmp_base/osx-x64/$exe_name" ]]; then
-            lipo -create "$tmp_base/osx-arm64/$exe_name" "$tmp_base/osx-x64/$exe_name" -output "$output_dir/$exe_name"
-            chmod +x "$output_dir/$exe_name" 2>/dev/null || true
-        fi
     else
         dotnet publish "$project" \
             -c "$CONFIGURATION" \
@@ -130,8 +114,15 @@ publish_app() {
 info "Publishing Koware CLI..."
 PUBLISH_DIR="$BUILD_DIR/cli"
 publish_app "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj" "$PUBLISH_DIR" "Koware.Cli" "true"
-mv "$PUBLISH_DIR/Koware.Cli" "$PUBLISH_DIR/koware"
-chmod +x "$PUBLISH_DIR/koware"
+if [[ "$RUNTIME" == "universal" ]]; then
+    for rid in "${TARGET_RIDS[@]}"; do
+        mv "$PUBLISH_DIR/$rid/Koware.Cli" "$PUBLISH_DIR/$rid/koware"
+        chmod +x "$PUBLISH_DIR/$rid/koware"
+    done
+else
+    mv "$PUBLISH_DIR/Koware.Cli" "$PUBLISH_DIR/koware"
+    chmod +x "$PUBLISH_DIR/koware"
+fi
 
 # Step 1b: Publish Avalonia Player
 info "Publishing Koware Player (Avalonia)..."
@@ -221,23 +212,47 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
 EOF
 
 # Copy the CLI binary and config to Resources
-cp "$PUBLISH_DIR/koware" "$APP_BUNDLE/Contents/Resources/"
-if [ -f "$PUBLISH_DIR/appsettings.json" ]; then
-    cp "$PUBLISH_DIR/appsettings.json" "$APP_BUNDLE/Contents/Resources/"
+if [[ "$RUNTIME" == "universal" ]]; then
+    for rid in "${TARGET_RIDS[@]}"; do
+        mkdir -p "$APP_BUNDLE/Contents/Resources/cli/$rid"
+        cp -r "$PUBLISH_DIR/$rid/." "$APP_BUNDLE/Contents/Resources/cli/$rid/"
+    done
+else
+    cp "$PUBLISH_DIR/koware" "$APP_BUNDLE/Contents/Resources/"
+    if [ -f "$PUBLISH_DIR/appsettings.json" ]; then
+        cp "$PUBLISH_DIR/appsettings.json" "$APP_BUNDLE/Contents/Resources/"
+    fi
 fi
 
 # Copy Player and Reader to Resources
-if [ -d "$PLAYER_DIR" ]; then
-    mkdir -p "$APP_BUNDLE/Contents/Resources/player"
-    cp -r "$PLAYER_DIR/"* "$APP_BUNDLE/Contents/Resources/player/"
-fi
-if [ -d "$READER_DIR" ]; then
-    mkdir -p "$APP_BUNDLE/Contents/Resources/reader"
-    cp -r "$READER_DIR/"* "$APP_BUNDLE/Contents/Resources/reader/"
-fi
-if [ -d "$BROWSER_DIR" ]; then
-    mkdir -p "$APP_BUNDLE/Contents/Resources/browser"
-    cp -r "$BROWSER_DIR/"* "$APP_BUNDLE/Contents/Resources/browser/"
+if [[ "$RUNTIME" == "universal" ]]; then
+    for rid in "${TARGET_RIDS[@]}"; do
+        if [ -d "$PLAYER_DIR/$rid" ]; then
+            mkdir -p "$APP_BUNDLE/Contents/Resources/player/$rid"
+            cp -r "$PLAYER_DIR/$rid/"* "$APP_BUNDLE/Contents/Resources/player/$rid/"
+        fi
+        if [ -d "$READER_DIR/$rid" ]; then
+            mkdir -p "$APP_BUNDLE/Contents/Resources/reader/$rid"
+            cp -r "$READER_DIR/$rid/"* "$APP_BUNDLE/Contents/Resources/reader/$rid/"
+        fi
+        if [ -d "$BROWSER_DIR/$rid" ]; then
+            mkdir -p "$APP_BUNDLE/Contents/Resources/browser/$rid"
+            cp -r "$BROWSER_DIR/$rid/"* "$APP_BUNDLE/Contents/Resources/browser/$rid/"
+        fi
+    done
+else
+    if [ -d "$PLAYER_DIR" ]; then
+        mkdir -p "$APP_BUNDLE/Contents/Resources/player"
+        cp -r "$PLAYER_DIR/"* "$APP_BUNDLE/Contents/Resources/player/"
+    fi
+    if [ -d "$READER_DIR" ]; then
+        mkdir -p "$APP_BUNDLE/Contents/Resources/reader"
+        cp -r "$READER_DIR/"* "$APP_BUNDLE/Contents/Resources/reader/"
+    fi
+    if [ -d "$BROWSER_DIR" ]; then
+        mkdir -p "$APP_BUNDLE/Contents/Resources/browser"
+        cp -r "$BROWSER_DIR/"* "$APP_BUNDLE/Contents/Resources/browser/"
+    fi
 fi
 
 # Copy Usage Notice
@@ -267,6 +282,38 @@ resolve_install_dir() {
 }
 
 resolve_install_dir
+
+CLI_DIR="$RESOURCES_DIR"
+PLAYER_SRC="$RESOURCES_DIR/player"
+READER_SRC="$RESOURCES_DIR/reader"
+BROWSER_SRC="$RESOURCES_DIR/browser"
+
+detect_rid() {
+    local arch
+    arch="$(uname -m)"
+    case "$arch" in
+        arm64) echo "osx-arm64" ;;
+        x86_64) echo "osx-x64" ;;
+        *) echo "osx-x64" ;;
+    esac
+}
+
+resolve_payload_dirs() {
+    if [ -d "$RESOURCES_DIR/cli/osx-arm64" ] && [ -d "$RESOURCES_DIR/cli/osx-x64" ]; then
+        local rid
+        rid="$(detect_rid)"
+        CLI_DIR="$RESOURCES_DIR/cli/$rid"
+        PLAYER_SRC="$RESOURCES_DIR/player/$rid"
+        READER_SRC="$RESOURCES_DIR/reader/$rid"
+        BROWSER_SRC="$RESOURCES_DIR/browser/$rid"
+    fi
+
+    if [ ! -f "$CLI_DIR/koware" ] && [ -f "$RESOURCES_DIR/koware" ]; then
+        CLI_DIR="$RESOURCES_DIR"
+    fi
+}
+
+resolve_payload_dirs
 
 # Check if already installed
 is_installed() {
@@ -377,6 +424,38 @@ CONFIG_DIR="$3"
 BACKUP_DIR="$4"
 APP_DIR="/Applications/Koware.app"
 
+CLI_DIR="$RESOURCES_DIR"
+PLAYER_SRC="$RESOURCES_DIR/player"
+READER_SRC="$RESOURCES_DIR/reader"
+BROWSER_SRC="$RESOURCES_DIR/browser"
+
+detect_rid() {
+    local arch
+    arch="$(uname -m)"
+    case "$arch" in
+        arm64) echo "osx-arm64" ;;
+        x86_64) echo "osx-x64" ;;
+        *) echo "osx-x64" ;;
+    esac
+}
+
+resolve_payload_dirs() {
+    if [ -d "$RESOURCES_DIR/cli/osx-arm64" ] && [ -d "$RESOURCES_DIR/cli/osx-x64" ]; then
+        local rid
+        rid="$(detect_rid)"
+        CLI_DIR="$RESOURCES_DIR/cli/$rid"
+        PLAYER_SRC="$RESOURCES_DIR/player/$rid"
+        READER_SRC="$RESOURCES_DIR/reader/$rid"
+        BROWSER_SRC="$RESOURCES_DIR/browser/$rid"
+    fi
+
+    if [ ! -f "$CLI_DIR/koware" ] && [ -f "$RESOURCES_DIR/koware" ]; then
+        CLI_DIR="$RESOURCES_DIR"
+    fi
+}
+
+resolve_payload_dirs
+
 restore_config() {
     if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
         rm -rf "$CONFIG_DIR"
@@ -388,7 +467,7 @@ trap restore_config ERR
 
 # 1. Install CLI to /usr/local/bin
 mkdir -p "$INSTALL_DIR"
-cp "$RESOURCES_DIR/koware" "$INSTALL_DIR/"
+cp "$CLI_DIR/koware" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/koware"
 
 # 2. Create Koware.app bundle in /Applications
@@ -397,8 +476,8 @@ mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 
 # Copy Browser as main app
-if [ -d "$RESOURCES_DIR/browser" ]; then
-    cp -r "$RESOURCES_DIR/browser/"* "$APP_DIR/Contents/MacOS/"
+if [ -d "$BROWSER_SRC" ]; then
+    cp -r "$BROWSER_SRC/"* "$APP_DIR/Contents/MacOS/"
     chmod +x "$APP_DIR/Contents/MacOS/Koware.Browser"
     # Create launcher script
     cat > "$APP_DIR/Contents/MacOS/Koware" << 'LAUNCHER'
@@ -410,19 +489,19 @@ LAUNCHER
 fi
 
 # Copy Player and Reader into app bundle
-if [ -d "$RESOURCES_DIR/player" ]; then
+if [ -d "$PLAYER_SRC" ]; then
     mkdir -p "$APP_DIR/Contents/Resources/player"
-    cp -r "$RESOURCES_DIR/player/"* "$APP_DIR/Contents/Resources/player/"
+    cp -r "$PLAYER_SRC/"* "$APP_DIR/Contents/Resources/player/"
     chmod +x "$APP_DIR/Contents/Resources/player/Koware.Player" 2>/dev/null
 fi
-if [ -d "$RESOURCES_DIR/reader" ]; then
+if [ -d "$READER_SRC" ]; then
     mkdir -p "$APP_DIR/Contents/Resources/reader"
-    cp -r "$RESOURCES_DIR/reader/"* "$APP_DIR/Contents/Resources/reader/"
+    cp -r "$READER_SRC/"* "$APP_DIR/Contents/Resources/reader/"
     chmod +x "$APP_DIR/Contents/Resources/reader/Koware.Reader" 2>/dev/null
 fi
 
 # Copy CLI into app bundle for reference
-cp "$RESOURCES_DIR/koware" "$APP_DIR/Contents/Resources/"
+cp "$CLI_DIR/koware" "$APP_DIR/Contents/Resources/"
 
 # Copy app icon if available
 if [ -f "$RESOURCES_DIR/AppIcon.icns" ]; then

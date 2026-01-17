@@ -114,6 +114,9 @@ chmod +x Scripts/publish-macos.sh
 
 # For Intel Macs
 ./Scripts/publish-macos.sh --runtime osx-x64
+
+# Universal (Intel + Apple Silicon)
+./Scripts/publish-macos.sh --runtime universal
 ```
 
 The script creates a DMG in `publish/` that you can distribute or install from.

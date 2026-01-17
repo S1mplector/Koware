@@ -6,7 +6,7 @@ set -e
 
 # Configuration
 CONFIGURATION="${CONFIGURATION:-Release}"
-RUNTIME="${RUNTIME:-osx-arm64}"  # osx-arm64 for Apple Silicon, osx-x64 for Intel
+RUNTIME="${RUNTIME:-osx-arm64}"  # osx-arm64 for Apple Silicon, osx-x64 for Intel, universal for both
 SELF_CONTAINED="${SELF_CONTAINED:-true}"
 COPY_TO_DESKTOP="${COPY_TO_DESKTOP:-false}"
 COPY_TO_REPO_ROOT="${COPY_TO_REPO_ROOT:-false}"
@@ -18,7 +18,6 @@ DMG_OUTPUT_DIR="${DMG_OUTPUT_DIR:-$REPO_ROOT/publish}"
 # App metadata
 APP_NAME="Koware"
 APP_VERSION=$(grep -oP '(?<=<Version>)[^<]+' "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj" || echo "0.0.0")
-DMG_NAME="Koware-${APP_VERSION}-${RUNTIME}.dmg"
 VOLUME_NAME="Koware Installer"
 
 # Colors for output
@@ -38,7 +37,7 @@ while [[ $# -gt 0 ]]; do
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
-            echo "  --runtime <rid>       Runtime identifier (osx-arm64, osx-x64). Default: osx-arm64"
+            echo "  --runtime <rid>       Runtime identifier (osx-arm64, osx-x64, universal). Default: osx-arm64"
             echo "  --config <cfg>        Build configuration (Release, Debug). Default: Release"
             echo "  --output <dir>        Output directory. Default: ./publish/macos"
             echo "  --no-self-contained   Framework-dependent deployment"
@@ -56,6 +55,12 @@ info "  Configuration: $CONFIGURATION"
 info "  Self-contained: $SELF_CONTAINED"
 info "  Version: $APP_VERSION"
 
+if [[ "$RUNTIME" == "universal" ]] && ! command -v lipo >/dev/null 2>&1; then
+    err "lipo (Xcode Command Line Tools) is required for universal builds."
+fi
+
+DMG_NAME="Koware-${APP_VERSION}-${RUNTIME}.dmg"
+
 # Clean output directory
 if [ -d "$OUTPUT_DIR" ]; then
     info "Cleaning $OUTPUT_DIR"
@@ -67,34 +72,79 @@ mkdir -p "$OUTPUT_DIR"
 CLI_PROJ="$REPO_ROOT/Koware.Cli/Koware.Cli.csproj"
 info "Publishing Koware.Cli..."
 
-PUBLISH_ARGS=(
-    "publish" "$CLI_PROJ"
-    "-c" "$CONFIGURATION"
-    "-r" "$RUNTIME"
-    "-o" "$OUTPUT_DIR/cli"
-    "/p:PublishSingleFile=true"
-    "/p:IncludeNativeLibrariesForSelfExtract=true"
-    "/p:EnableCompressionInSingleFile=true"
-)
-
-if [ "$SELF_CONTAINED" = "true" ]; then
-    PUBLISH_ARGS+=("--self-contained" "true")
-else
-    PUBLISH_ARGS+=("--self-contained" "false")
+TARGET_RIDS=("$RUNTIME")
+if [[ "$RUNTIME" == "universal" ]]; then
+    TARGET_RIDS=("osx-arm64" "osx-x64")
 fi
 
-echo "dotnet ${PUBLISH_ARGS[*]}"
-dotnet "${PUBLISH_ARGS[@]}"
+if [[ "$RUNTIME" == "universal" ]]; then
+    BUILD_DIR="$OUTPUT_DIR/cli-build"
+    CLI_DIR="$OUTPUT_DIR/cli"
+    rm -rf "$BUILD_DIR" "$CLI_DIR"
+    mkdir -p "$BUILD_DIR" "$CLI_DIR"
 
-# Rename the executable to 'koware' for macOS convention
-CLI_EXE="$OUTPUT_DIR/cli/Koware.Cli"
-if [ -f "$CLI_EXE" ]; then
-    mv "$CLI_EXE" "$OUTPUT_DIR/cli/koware"
-    chmod +x "$OUTPUT_DIR/cli/koware"
-    info "CLI executable ready: $OUTPUT_DIR/cli/koware"
+    for rid in "${TARGET_RIDS[@]}"; do
+        PUBLISH_ARGS=(
+            "publish" "$CLI_PROJ"
+            "-c" "$CONFIGURATION"
+            "-r" "$rid"
+            "-o" "$BUILD_DIR/$rid"
+            "/p:PublishSingleFile=true"
+            "/p:IncludeNativeLibrariesForSelfExtract=true"
+            "/p:EnableCompressionInSingleFile=true"
+        )
+
+        if [ "$SELF_CONTAINED" = "true" ]; then
+            PUBLISH_ARGS+=("--self-contained" "true")
+        else
+            PUBLISH_ARGS+=("--self-contained" "false")
+        fi
+
+        echo "dotnet ${PUBLISH_ARGS[*]}"
+        dotnet "${PUBLISH_ARGS[@]}"
+    done
+
+    lipo -create "$BUILD_DIR/osx-arm64/Koware.Cli" "$BUILD_DIR/osx-x64/Koware.Cli" -output "$CLI_DIR/koware"
+    chmod +x "$CLI_DIR/koware"
+
+    if [ -f "$BUILD_DIR/osx-arm64/appsettings.json" ]; then
+        cp "$BUILD_DIR/osx-arm64/appsettings.json" "$CLI_DIR/"
+    elif [ -f "$BUILD_DIR/osx-x64/appsettings.json" ]; then
+        cp "$BUILD_DIR/osx-x64/appsettings.json" "$CLI_DIR/"
+    fi
+
+    rm -rf "$BUILD_DIR"
+    info "CLI executable ready: $CLI_DIR/koware"
 else
-    err "CLI executable not found at $CLI_EXE"
-    exit 1
+    PUBLISH_ARGS=(
+        "publish" "$CLI_PROJ"
+        "-c" "$CONFIGURATION"
+        "-r" "$RUNTIME"
+        "-o" "$OUTPUT_DIR/cli"
+        "/p:PublishSingleFile=true"
+        "/p:IncludeNativeLibrariesForSelfExtract=true"
+        "/p:EnableCompressionInSingleFile=true"
+    )
+
+    if [ "$SELF_CONTAINED" = "true" ]; then
+        PUBLISH_ARGS+=("--self-contained" "true")
+    else
+        PUBLISH_ARGS+=("--self-contained" "false")
+    fi
+
+    echo "dotnet ${PUBLISH_ARGS[*]}"
+    dotnet "${PUBLISH_ARGS[@]}"
+
+    # Rename the executable to 'koware' for macOS convention
+    CLI_EXE="$OUTPUT_DIR/cli/Koware.Cli"
+    if [ -f "$CLI_EXE" ]; then
+        mv "$CLI_EXE" "$OUTPUT_DIR/cli/koware"
+        chmod +x "$OUTPUT_DIR/cli/koware"
+        info "CLI executable ready: $OUTPUT_DIR/cli/koware"
+    else
+        err "CLI executable not found at $CLI_EXE"
+        exit 1
+    fi
 fi
 
 # Create DMG staging directory

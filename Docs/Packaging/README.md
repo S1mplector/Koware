@@ -142,6 +142,9 @@ dotnet publish Koware.Reader -c Release -r osx-arm64 --self-contained -o ./publi
 chmod +x Scripts/build-installer-app.sh
 ./Scripts/build-installer-app.sh
 
+# Universal (Intel + Apple Silicon)
+./Scripts/build-installer-app.sh --runtime universal
+
 # This creates:
 # - dist/Koware-Installer.app (GUI installer)
 # - dist/Koware-Installer.dmg (distributable disk image)
@@ -153,6 +156,9 @@ chmod +x Scripts/build-installer-app.sh
 # From repo root
 chmod +x Scripts/build-pkg.sh
 ./Scripts/build-pkg.sh
+
+# Universal (Intel + Apple Silicon)
+./Scripts/build-pkg.sh --runtime universal
 
 # This creates:
 # - dist/Koware-<version>.pkg
@@ -181,13 +187,18 @@ chmod +x Scripts/create-dmg.sh
 ### Intel vs Apple Silicon
 
 ```bash
+# Universal DMG/PKG/Installer (Intel + Apple Silicon)
+./Scripts/build-installer-app.sh --runtime universal
+./Scripts/publish-macos.sh --runtime universal
+./Scripts/build-pkg.sh --runtime universal
+
 # Apple Silicon (M1/M2/M3)
 dotnet publish -r osx-arm64 --self-contained
 
 # Intel Macs
 dotnet publish -r osx-x64 --self-contained
 
-# Universal binary (both architectures)
+# Universal CLI binary (manual)
 # Build both and use lipo to combine:
 lipo -create ./arm64/koware ./x64/koware -output ./universal/koware
 ```

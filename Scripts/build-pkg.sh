@@ -22,7 +22,6 @@ PKG_ROOT="$BUILD_DIR/root"
 PKG_SCRIPTS="$BUILD_DIR/scripts"
 PKG_RESOURCES="$BUILD_DIR/resources"
 OUTPUT_DIR="$REPO_ROOT/publish"
-PKG_NAME="Koware-${APP_VERSION}-${RUNTIME}.pkg"
 
 info() { echo -e "\033[36m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
@@ -36,7 +35,7 @@ while [[ $# -gt 0 ]]; do
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
-            echo "  --runtime <rid>       Runtime identifier (osx-arm64, osx-x64). Default: osx-arm64"
+            echo "  --runtime <rid>       Runtime identifier (osx-arm64, osx-x64, universal). Default: osx-arm64"
             echo "  --copy-to-desktop     Copy the PKG to ~/Desktop after build"
             exit 0
             ;;
@@ -45,6 +44,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 info "Building Koware PKG Installer v$APP_VERSION ($RUNTIME)"
+
+if [[ "$RUNTIME" == "universal" ]] && ! command -v lipo >/dev/null 2>&1; then
+    err "lipo (Xcode Command Line Tools) is required for universal builds."
+fi
+
+PKG_NAME="Koware-${APP_VERSION}-${RUNTIME}.pkg"
 
 # Clean build directory
 rm -rf "$BUILD_DIR"
@@ -58,18 +63,41 @@ info "Publishing Koware CLI..."
 CLI_PROJ="$REPO_ROOT/Koware.Cli/Koware.Cli.csproj"
 PUBLISH_DIR="$BUILD_DIR/cli-publish"
 
-dotnet publish "$CLI_PROJ" \
-    -c "$CONFIGURATION" \
-    -r "$RUNTIME" \
-    -o "$PUBLISH_DIR" \
-    /p:PublishSingleFile=true \
-    /p:IncludeNativeLibrariesForSelfExtract=true \
-    /p:EnableCompressionInSingleFile=true \
-    --self-contained true
+TARGET_RIDS=("$RUNTIME")
+if [[ "$RUNTIME" == "universal" ]]; then
+    TARGET_RIDS=("osx-arm64" "osx-x64")
+fi
 
-# Copy executable to pkg root
-cp "$PUBLISH_DIR/Koware.Cli" "$PKG_ROOT/bin/koware"
-chmod +x "$PKG_ROOT/bin/koware"
+if [[ "$RUNTIME" == "universal" ]]; then
+    rm -rf "$PUBLISH_DIR"
+    mkdir -p "$PUBLISH_DIR"
+    for rid in "${TARGET_RIDS[@]}"; do
+        dotnet publish "$CLI_PROJ" \
+            -c "$CONFIGURATION" \
+            -r "$rid" \
+            -o "$PUBLISH_DIR/$rid" \
+            /p:PublishSingleFile=true \
+            /p:IncludeNativeLibrariesForSelfExtract=true \
+            /p:EnableCompressionInSingleFile=true \
+            --self-contained true
+    done
+
+    lipo -create "$PUBLISH_DIR/osx-arm64/Koware.Cli" "$PUBLISH_DIR/osx-x64/Koware.Cli" -output "$PKG_ROOT/bin/koware"
+    chmod +x "$PKG_ROOT/bin/koware"
+else
+    dotnet publish "$CLI_PROJ" \
+        -c "$CONFIGURATION" \
+        -r "$RUNTIME" \
+        -o "$PUBLISH_DIR" \
+        /p:PublishSingleFile=true \
+        /p:IncludeNativeLibrariesForSelfExtract=true \
+        /p:EnableCompressionInSingleFile=true \
+        --self-contained true
+
+    # Copy executable to pkg root
+    cp "$PUBLISH_DIR/Koware.Cli" "$PKG_ROOT/bin/koware"
+    chmod +x "$PKG_ROOT/bin/koware"
+fi
 
 # Note: appsettings.json is bundled in the executable; user config created on first run
 
