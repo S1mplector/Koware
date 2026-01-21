@@ -483,7 +483,7 @@ public static class InteractiveBrowser
             ep => $"Episode {ep.Number}" + (string.IsNullOrWhiteSpace(ep.Title) ? "" : $" - {ep.Title}"),
             new SelectorOptions<EpisodeItem>
             {
-                Prompt = $"📺 {title}",
+                Prompt = $"{title}",
                 MaxVisibleItems = 15,
                 ShowSearch = true,
                 ShowPreview = false,

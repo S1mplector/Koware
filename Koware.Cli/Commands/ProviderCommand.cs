@@ -93,7 +93,7 @@ public sealed class ProviderCommand : ICliCommand
             ForceType = ParseProviderType(GetArgValue(args, "--type"))
         };
 
-        AnsiConsole.MarkupLine("\n[bold cyan]🔍 Analyzing[/] {0}...\n", url.Host);
+        AnsiConsole.MarkupLine("\n[bold cyan]Analyzing[/] {0}...\n", url.Host);
 
         var result = await AnsiConsole.Progress()
             .AutoClear(false)
@@ -135,7 +135,7 @@ public sealed class ProviderCommand : ICliCommand
     {
         var config = result.Config!;
 
-        AnsiConsole.Write(new Rule("[green]✓ Provider Created Successfully[/]").RuleStyle("green"));
+        AnsiConsole.Write(new Rule("[green][+] Provider Created Successfully[/]").RuleStyle("green"));
         AnsiConsole.WriteLine();
 
         var table = new Table()
@@ -161,7 +161,7 @@ public sealed class ProviderCommand : ICliCommand
 
         foreach (var phase in result.Phases)
         {
-            var status = phase.Succeeded ? "[green]✓[/]" : "[red]✗[/]";
+            var status = phase.Succeeded ? "[green][+][/]" : "[red][x][/]";
             phaseTable.AddRow(phase.Name, status, $"{phase.Duration.TotalMilliseconds:F0}ms");
         }
 
@@ -174,7 +174,7 @@ public sealed class ProviderCommand : ICliCommand
             AnsiConsole.MarkupLine("[bold]Validation Results:[/]");
             foreach (var check in result.ValidationResult.Checks)
             {
-                var icon = check.Passed ? "[green]✓[/]" : "[red]✗[/]";
+                var icon = check.Passed ? "[green][+][/]" : "[red][x][/]";
                 AnsiConsole.MarkupLine($"  {icon} {check.Name}: {check.Description ?? check.ErrorMessage ?? "OK"}");
             }
             AnsiConsole.WriteLine();
@@ -186,7 +186,7 @@ public sealed class ProviderCommand : ICliCommand
             AnsiConsole.MarkupLine("[yellow]Warnings:[/]");
             foreach (var warning in result.Warnings)
             {
-                AnsiConsole.MarkupLine($"  [yellow]⚠[/] {warning}");
+                AnsiConsole.MarkupLine($"  [yellow][!][/] {warning}");
             }
             AnsiConsole.WriteLine();
         }
@@ -197,7 +197,7 @@ public sealed class ProviderCommand : ICliCommand
 
     private static void DisplayFailureResult(AutoconfigResult result)
     {
-        AnsiConsole.Write(new Rule("[red]✗ Autoconfig Failed[/]").RuleStyle("red"));
+        AnsiConsole.Write(new Rule("[red][x] Autoconfig Failed[/]").RuleStyle("red"));
         AnsiConsole.WriteLine();
 
         AnsiConsole.MarkupLine("[red]Error:[/] {0}", result.ErrorMessage ?? "Unknown error");
@@ -208,7 +208,7 @@ public sealed class ProviderCommand : ICliCommand
             AnsiConsole.MarkupLine("[bold]Phases:[/]");
             foreach (var phase in result.Phases)
             {
-                var icon = phase.Succeeded ? "[green]✓[/]" : "[red]✗[/]";
+                var icon = phase.Succeeded ? "[green][+][/]" : "[red][x][/]";
                 AnsiConsole.MarkupLine($"  {icon} {phase.Name}: {phase.Message}");
             }
         }

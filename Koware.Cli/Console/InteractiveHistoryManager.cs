@@ -275,7 +275,7 @@ public sealed class InteractiveHistoryManager
             _buffer.SetColor(ConsoleColor.White);
             _buffer.Write(_searchText);
             _buffer.SetColor(ConsoleColor.Cyan);
-            _buffer.Write("▌");
+            _buffer.Write("|");
             _buffer.ResetColor();
             _buffer.WriteLine();
             lines++;
@@ -636,7 +636,7 @@ public sealed class InteractiveMangaHistoryManager
             _buffer.SetColor(ConsoleColor.White);
             _buffer.Write(_searchText);
             _buffer.SetColor(ConsoleColor.Magenta);
-            _buffer.Write("▌");
+            _buffer.Write("|");
             _buffer.ResetColor();
             _buffer.WriteLine();
             lines++;

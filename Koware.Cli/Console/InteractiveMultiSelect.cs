@@ -314,7 +314,7 @@ public sealed class InteractiveMultiSelect<T>
         buffer.SetColor(Theme.Text);
         buffer.Write(_searchText);
         buffer.SetColor(Theme.Primary);
-        buffer.Write("▌");
+        buffer.Write("|");
         buffer.ResetColor();
         buffer.WriteLine();
         lines++;
@@ -427,7 +427,7 @@ public sealed class InteractiveMultiSelect<T>
     private void RenderFooter(TerminalBuffer buffer, ref int lines)
     {
         buffer.SetColor(Theme.Muted);
-        buffer.Write("  ↑↓ move • Space toggle • Enter confirm • Esc cancel");
+        buffer.Write("  Up/Down move | Space toggle | Enter confirm | Esc cancel");
         buffer.ResetColor();
         buffer.ClearToEndOfLine();
         lines++;

@@ -431,18 +431,18 @@ public sealed class InteractiveListManager
             ? $"{entry.EpisodesWatched}/{entry.TotalEpisodes}"
             : $"{entry.EpisodesWatched}/?";
 
-        var score = entry.Score.HasValue ? $" ★{entry.Score}" : "";
+        var score = entry.Score.HasValue ? $" *{entry.Score}" : "";
         return progress + score;
     }
 
     private static string GetStatusIcon(AnimeWatchStatus status) => status switch
     {
-        AnimeWatchStatus.Watching => "▶",
-        AnimeWatchStatus.Completed => "✓",
-        AnimeWatchStatus.PlanToWatch => "○",
-        AnimeWatchStatus.OnHold => "⏸",
-        AnimeWatchStatus.Dropped => "✗",
-        _ => "·"
+        AnimeWatchStatus.Watching => ">",
+        AnimeWatchStatus.Completed => "[+]",
+        AnimeWatchStatus.PlanToWatch => "[ ]",
+        AnimeWatchStatus.OnHold => "[=]",
+        AnimeWatchStatus.Dropped => "[x]",
+        _ => "-"
     };
 
     /// <summary>
@@ -593,7 +593,7 @@ public sealed class InteractiveListManager
             _buffer.SetColor(ConsoleColor.White);
             _buffer.Write(_searchText);
             _buffer.SetColor(ConsoleColor.Cyan);
-            _buffer.Write("▌");
+            _buffer.Write("|");
             _buffer.ResetColor();
             _buffer.WriteLine();
             lines++;
@@ -907,11 +907,11 @@ public sealed class InteractiveMangaListManager
     {
         var statuses = new List<(MangaReadStatus Status, string Label)>
         {
-            (MangaReadStatus.Reading, "▶ Reading"),
-            (MangaReadStatus.Completed, "✓ Completed"),
-            (MangaReadStatus.PlanToRead, "○ Plan to Read"),
-            (MangaReadStatus.OnHold, "⏸ On Hold"),
-            (MangaReadStatus.Dropped, "✗ Dropped")
+            (MangaReadStatus.Reading, "> Reading"),
+            (MangaReadStatus.Completed, "[+] Completed"),
+            (MangaReadStatus.PlanToRead, "[ ] Plan to Read"),
+            (MangaReadStatus.OnHold, "[=] On Hold"),
+            (MangaReadStatus.Dropped, "[x] Dropped")
         };
 
         System.Console.WriteLine();
@@ -1049,7 +1049,7 @@ public sealed class InteractiveMangaListManager
         var progress = entry.TotalChapters.HasValue
             ? $"{entry.ChaptersRead}/{entry.TotalChapters}"
             : $"{entry.ChaptersRead}/?";
-        var score = entry.Score.HasValue ? $" ★{entry.Score}" : "";
+        var score = entry.Score.HasValue ? $" *{entry.Score}" : "";
         return progress + score;
     }
 
@@ -1168,7 +1168,7 @@ public sealed class InteractiveMangaListManager
             _buffer.SetColor(ConsoleColor.White);
             _buffer.Write(_searchText);
             _buffer.SetColor(ConsoleColor.Magenta);
-            _buffer.Write("▌");
+            _buffer.Write("|");
             _buffer.ResetColor();
             _buffer.WriteLine();
             lines++;

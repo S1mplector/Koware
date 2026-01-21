@@ -859,7 +859,7 @@ static async Task<int> HandleDoctorAsync(string[] args, IServiceProvider service
     if (errorCount > 0)
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine("✗ Some critical checks failed. Address the errors above, then rerun 'koware doctor'.");
+        Console.WriteLine("[x] Some critical checks failed. Address the errors above, then rerun 'koware doctor'.");
         Console.ResetColor();
         return 1;
     }
@@ -867,13 +867,13 @@ static async Task<int> HandleDoctorAsync(string[] args, IServiceProvider service
     if (warningCount > 0)
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("⚠ Some checks have warnings. Review the items above for potential issues.");
+        Console.WriteLine("[!] Some checks have warnings. Review the items above for potential issues.");
         Console.ResetColor();
         return 0;
     }
 
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine("✓ All systems look good!");
+    Console.WriteLine("[+] All systems look good!");
     Console.ResetColor();
     return 0;
 }
@@ -966,11 +966,11 @@ static void WriteDiagnosticResult(DiagnosticResult result, bool verbose)
 {
     var (icon, color) = result.Severity switch
     {
-        DiagnosticSeverity.Ok => ("✓", ConsoleColor.Green),
-        DiagnosticSeverity.Warning => ("⚠", ConsoleColor.Yellow),
-        DiagnosticSeverity.Error => ("✗", ConsoleColor.Red),
-        DiagnosticSeverity.Skipped => ("○", ConsoleColor.DarkGray),
-        DiagnosticSeverity.Info => ("ℹ", ConsoleColor.Blue),
+        DiagnosticSeverity.Ok => ("[+]", ConsoleColor.Green),
+        DiagnosticSeverity.Warning => ("[!]", ConsoleColor.Yellow),
+        DiagnosticSeverity.Error => ("[x]", ConsoleColor.Red),
+        DiagnosticSeverity.Skipped => ("[ ]", ConsoleColor.DarkGray),
+        DiagnosticSeverity.Info => ("[i]", ConsoleColor.Blue),
         _ => ("?", ConsoleColor.Gray)
     };
 
@@ -1359,8 +1359,8 @@ static async Task<int> HandleProviderListAsync(AllAnimeOptions allAnime, AllMang
                 var statusIcon = p.Status switch
                 {
                     "Ready" or "Active" => $"{Icons.Success}",
-                    "Available" => "○",
-                    "Disabled" => "○",
+                    "Available" => "[ ]",
+                    "Disabled" => "[ ]",
                     _ => $"{Icons.Error}"
                 };
                 var dynamicTag = p.IsDynamic ? " [dynamic]" : " [built-in]";
@@ -1393,7 +1393,7 @@ static async Task<int> HandleProviderListAsync(AllAnimeOptions allAnime, AllMang
                 // Disable by clearing active status (set empty slug)
                 await providerStore.SetActiveAsync("", providerType);
                 Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"\n○ Disabled provider: {selected.Name}");
+                Console.WriteLine($"\n[ ] Disabled provider: {selected.Name}");
                 Console.ResetColor();
             }
             else
@@ -2446,7 +2446,7 @@ static async Task<int> HandleHistoryClearAsync(string[] args, IWatchHistoryStore
     {
         var target = string.IsNullOrWhiteSpace(animeFilter) ? "ALL watch history" : $"watch history for '{animeFilter}'";
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine($"⚠ This will permanently delete {target}.");
+        Console.WriteLine($"[!] This will permanently delete {target}.");
         Console.ResetColor();
         Console.WriteLine();
         Console.Write("Are you sure? Type 'yes' to confirm: ");
@@ -2469,7 +2469,7 @@ static async Task<int> HandleHistoryClearAsync(string[] args, IWatchHistoryStore
     }
 
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.Write("✓ ");
+    Console.Write("[+] ");
     Console.ResetColor();
     Console.WriteLine($"Cleared {deleted} watch history {(deleted == 1 ? "entry" : "entries")}.");
     return 0;
@@ -2510,7 +2510,7 @@ static async Task<int> HandleMangaHistoryClearAsync(string[] args, IReadHistoryS
     {
         var target = string.IsNullOrWhiteSpace(mangaFilter) ? "ALL read history" : $"read history for '{mangaFilter}'";
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine($"⚠ This will permanently delete {target}.");
+        Console.WriteLine($"[!] This will permanently delete {target}.");
         Console.ResetColor();
         Console.WriteLine();
         Console.Write("Are you sure? Type 'yes' to confirm: ");
@@ -2533,7 +2533,7 @@ static async Task<int> HandleMangaHistoryClearAsync(string[] args, IReadHistoryS
     }
 
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.Write("✓ ");
+    Console.Write("[+] ");
     Console.ResetColor();
     Console.WriteLine($"Cleared {deleted} read history {(deleted == 1 ? "entry" : "entries")}.");
     return 0;
@@ -9244,8 +9244,8 @@ static Task<int> HandleModeAsync(string[] args, ILogger logger)
         // Show interactive mode selector
         var modes = new[]
         {
-            ("anime", "📺 Anime Mode", "Search, watch, and track anime series"),
-            ("manga", "📖 Manga Mode", "Search, read, and track manga chapters")
+            ("anime", "Anime Mode", "Search, watch, and track anime series"),
+            ("manga", "Manga Mode", "Search, read, and track manga chapters")
         };
         
         var selector = new Koware.Cli.Console.InteractiveSelector<(string Id, string Name, string Description)>(
@@ -10056,7 +10056,7 @@ static async Task<int> HandleStatsAsync(string[] args, IServiceProvider services
     var estimatedHoursWatched = totalWatchEntries * 24 / 60.0; // ~24 min per episode
 
     Console.ForegroundColor = Theme.Secondary;
-    Console.WriteLine("📺 Anime Watching");
+    Console.WriteLine("Anime Watching");
     Console.ForegroundColor = Theme.Muted;
     Console.WriteLine(new string('─', 30));
     Console.ResetColor();

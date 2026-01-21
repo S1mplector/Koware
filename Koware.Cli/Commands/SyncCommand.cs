@@ -103,7 +103,7 @@ public sealed class SyncCommand : ICliCommand
 
         SystemConsole.WriteLine();
         SystemConsole.ForegroundColor = ConsoleColor.Green;
-        SystemConsole.WriteLine($"✓ Git sync initialized at: {dataDir}");
+        SystemConsole.WriteLine($"[+] Git sync initialized at: {dataDir}");
         SystemConsole.ResetColor();
 
         if (args.Length <= 2)
@@ -300,7 +300,7 @@ public sealed class SyncCommand : ICliCommand
 
         SystemConsole.WriteLine();
         SystemConsole.ForegroundColor = ConsoleColor.Green;
-        SystemConsole.WriteLine("✓ Pushed successfully");
+        SystemConsole.WriteLine("[+] Pushed successfully");
         SystemConsole.ResetColor();
 
         return 0;
@@ -385,7 +385,7 @@ public sealed class SyncCommand : ICliCommand
 
         SystemConsole.WriteLine();
         SystemConsole.ForegroundColor = ConsoleColor.Green;
-        SystemConsole.WriteLine("✓ Pulled successfully");
+        SystemConsole.WriteLine("[+] Pulled successfully");
         SystemConsole.ResetColor();
 
         return 0;
@@ -495,7 +495,7 @@ public sealed class SyncCommand : ICliCommand
 
         SystemConsole.WriteLine();
         SystemConsole.ForegroundColor = ConsoleColor.Green;
-        SystemConsole.WriteLine("✓ Cloned successfully");
+        SystemConsole.WriteLine("[+] Cloned successfully");
         SystemConsole.ResetColor();
 
         if (backupDir != null)

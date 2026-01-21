@@ -297,7 +297,7 @@ public sealed class ExploreBrowser
         buffer.SetColor(Theme.Text);
         buffer.Write(_searchText);
         buffer.SetColor(Theme.Primary);
-        buffer.Write("▌");
+        buffer.Write("|");
         buffer.ResetColor();
         buffer.WriteLine();
         lines++;
@@ -424,7 +424,7 @@ public sealed class ExploreBrowser
     private void RenderFooter(TerminalBuffer buffer, ref int lines)
     {
         buffer.SetColor(Theme.Muted);
-        buffer.Write("  ↑↓ move • Enter select • Esc back • Type to filter");
+        buffer.Write("  Up/Down move | Enter select | Esc back | Type to filter");
         buffer.ResetColor();
         buffer.ClearToEndOfLine();
         lines++;

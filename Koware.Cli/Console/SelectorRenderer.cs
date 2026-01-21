@@ -14,30 +14,27 @@ namespace Koware.Cli.Console;
 /// </summary>
 public static class Icons
 {
-    private static readonly bool IsWindows = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
-        System.Runtime.InteropServices.OSPlatform.Windows);
-
-    // UI elements
-    public static string Prompt => IsWindows ? ">" : "❯";
-    public static string Search => IsWindows ? "[?]" : "🔍";
-    public static string Book => IsWindows ? "[#]" : "📖";
-    public static string Selection => IsWindows ? ">" : "▶";
-    public static string Scroll => IsWindows ? "^v" : "↕";
-    public static string Play => IsWindows ? "[>]" : "▶";
+    // UI elements - ASCII-only for maximum terminal compatibility
+    public static string Prompt => ">";
+    public static string Search => "[?]";
+    public static string Book => "[#]";
+    public static string Selection => ">";
+    public static string Scroll => "^v";
+    public static string Play => "[>]";
 
     // Status indicators  
-    public static string Success => IsWindows ? "[+]" : "✓";
-    public static string Warning => IsWindows ? "[!]" : "⚠";
-    public static string Error => IsWindows ? "[x]" : "✗";
-    public static string Download => IsWindows ? "[v]" : "📥";
-    public static string New => IsWindows ? "[*]" : "✨";
+    public static string Success => "[+]";
+    public static string Warning => "[!]";
+    public static string Error => "[x]";
+    public static string Download => "[v]";
+    public static string New => "[*]";
     
     // Menu/Action icons
-    public static string Provider => IsWindows ? "[P]" : "🔌";
-    public static string Add => IsWindows ? "[+]" : "➕";
-    public static string Edit => IsWindows ? "[E]" : "✏️";
-    public static string Back => IsWindows ? "<-" : "←";
-    public static string Delete => IsWindows ? "[D]" : "🗑️";
+    public static string Provider => "[P]";
+    public static string Add => "[+]";
+    public static string Edit => "[E]";
+    public static string Back => "<-";
+    public static string Delete => "[D]";
     
     // Aliases for backward compatibility
     public static string Preview => Book;
@@ -175,7 +172,7 @@ public sealed class SelectorRenderer
         _buffer.SetColor(Theme.Text);
         _buffer.Write(searchText);
         _buffer.SetColor(Theme.Primary);
-        _buffer.Write("▌");
+        _buffer.Write("|");
         _buffer.ResetColor();
         _buffer.WriteLine();
         lines++;
@@ -323,7 +320,7 @@ public sealed class SelectorRenderer
     private void RenderFooter(ref int lines)
     {
         _buffer.SetColor(Theme.Muted);
-        _buffer.Write("  ↑↓ move • ");
+        _buffer.Write("  Up/Down move | ");
         _buffer.SetColor(Theme.Secondary);
         _buffer.Write("1-9");
         _buffer.SetColor(Theme.Muted);

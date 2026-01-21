@@ -465,7 +465,7 @@ public sealed class InteractiveOfflineManager
             _buffer.SetColor(ConsoleColor.White);
             _buffer.Write(_searchText);
             _buffer.SetColor(ConsoleColor.Cyan);
-            _buffer.Write("▌");
+            _buffer.Write("|");
             _buffer.ResetColor();
             _buffer.WriteLine();
             lines++;
