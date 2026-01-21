@@ -29,6 +29,7 @@ public sealed class SyncCommand : ICliCommand
             "pull" => await PullAsync(context),
             "log" => await LogAsync(context),
             "clone" => await CloneAsync(args, context),
+            "auto" => await AutoSyncAsync(args, context),
             "help" or "--help" or "-h" => ShowHelp(),
             _ => ShowHelp()
         };
@@ -40,20 +41,52 @@ public sealed class SyncCommand : ICliCommand
         Directory.CreateDirectory(dataDir);
         
         var gitDir = Path.Combine(dataDir, ".git");
-        if (Directory.Exists(gitDir))
+        var repoAlreadyExists = Directory.Exists(gitDir);
+        
+        // Check for existing remote
+        string? existingRemote = null;
+        if (repoAlreadyExists)
+        {
+            var (_, remoteOutput, _) = await RunGitAsync(dataDir, "remote get-url origin");
+            existingRemote = string.IsNullOrWhiteSpace(remoteOutput) ? null : remoteOutput.Trim();
+        }
+
+        // Determine remote URL
+        string? remoteUrl = args.Length > 2 ? args[2] : null;
+        
+        // If no remote provided and no existing remote, try to auto-create with gh CLI
+        if (remoteUrl == null && existingRemote == null)
+        {
+            var ghAvailable = await IsGhCliAvailableAsync();
+            if (ghAvailable)
+            {
+                SystemConsole.ForegroundColor = ConsoleColor.Cyan;
+                SystemConsole.WriteLine("GitHub CLI detected. Creating private repository...");
+                SystemConsole.ResetColor();
+                
+                remoteUrl = await CreateGitHubRepoAsync();
+                if (remoteUrl != null)
+                {
+                    WriteStatus("Created", remoteUrl, ConsoleColor.Green);
+                }
+            }
+        }
+
+        if (repoAlreadyExists)
         {
             SystemConsole.ForegroundColor = ConsoleColor.Yellow;
             SystemConsole.WriteLine("Git repository already initialized.");
             SystemConsole.ResetColor();
             
-            // Check for remote
-            var (_, remoteOutput, _) = await RunGitAsync(dataDir, "remote -v");
-            if (!string.IsNullOrWhiteSpace(remoteOutput))
+            // Add remote if we have one and don't already have one
+            if (remoteUrl != null && existingRemote == null)
             {
-                SystemConsole.WriteLine("Remote:");
-                SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
-                SystemConsole.WriteLine($"  {remoteOutput.Split('\n')[0]}");
-                SystemConsole.ResetColor();
+                await RunGitAsync(dataDir, $"remote add origin {remoteUrl}");
+                WriteStatus("Remote added", remoteUrl);
+            }
+            else if (existingRemote != null)
+            {
+                WriteStatus("Remote", existingRemote);
             }
             return 0;
         }
@@ -93,12 +126,11 @@ public sealed class SyncCommand : ICliCommand
         await RunGitAsync(dataDir, "add -A");
         await RunGitAsync(dataDir, $"commit -m \"Initial koware sync\" --allow-empty");
 
-        // Add remote if provided
-        if (args.Length > 2)
+        // Add remote if we have one
+        if (remoteUrl != null)
         {
-            var remote = args[2];
-            await RunGitAsync(dataDir, $"remote add origin {remote}");
-            WriteStatus("Remote", remote);
+            await RunGitAsync(dataDir, $"remote add origin {remoteUrl}");
+            WriteStatus("Remote", remoteUrl);
         }
 
         SystemConsole.WriteLine();
@@ -106,16 +138,102 @@ public sealed class SyncCommand : ICliCommand
         SystemConsole.WriteLine($"[+] Git sync initialized at: {dataDir}");
         SystemConsole.ResetColor();
 
-        if (args.Length <= 2)
+        if (remoteUrl == null)
         {
             SystemConsole.WriteLine();
             SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
-            SystemConsole.WriteLine("To add a remote: koware sync init <git-url>");
-            SystemConsole.WriteLine("Example: koware sync init git@github.com:user/koware-sync.git");
+            SystemConsole.WriteLine("No remote configured. Options:");
+            SystemConsole.WriteLine("  - Install GitHub CLI (gh) for automatic repo creation");
+            SystemConsole.WriteLine("  - Or manually: koware sync init <git-url>");
             SystemConsole.ResetColor();
         }
 
         return 0;
+    }
+
+    private static async Task<bool> IsGhCliAvailableAsync()
+    {
+        try
+        {
+            var (code, output, _) = await RunCommandAsync("gh", "auth status");
+            return code == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static async Task<string?> CreateGitHubRepoAsync()
+    {
+        try
+        {
+            var repoName = "koware-sync";
+            
+            // Check if repo already exists
+            var (checkCode, _, _) = await RunCommandAsync("gh", $"repo view {repoName}");
+            if (checkCode == 0)
+            {
+                // Repo exists, get its URL
+                var (_, urlOutput, _) = await RunCommandAsync("gh", $"repo view {repoName} --json sshUrl -q .sshUrl");
+                if (!string.IsNullOrWhiteSpace(urlOutput))
+                {
+                    return urlOutput.Trim();
+                }
+            }
+            
+            // Create new private repo
+            var (createCode, createOutput, createError) = await RunCommandAsync(
+                "gh", 
+                $"repo create {repoName} --private --description \"Koware sync data\" --clone=false"
+            );
+            
+            if (createCode != 0)
+            {
+                SystemConsole.ForegroundColor = ConsoleColor.Yellow;
+                SystemConsole.WriteLine($"Could not create GitHub repo: {createError}");
+                SystemConsole.ResetColor();
+                return null;
+            }
+            
+            // Get the SSH URL of the created repo
+            var (_, sshUrl, _) = await RunCommandAsync("gh", $"repo view {repoName} --json sshUrl -q .sshUrl");
+            return string.IsNullOrWhiteSpace(sshUrl) ? null : sshUrl.Trim();
+        }
+        catch (Exception ex)
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.Yellow;
+            SystemConsole.WriteLine($"GitHub repo creation failed: {ex.Message}");
+            SystemConsole.ResetColor();
+            return null;
+        }
+    }
+
+    private static async Task<(int exitCode, string output, string error)> RunCommandAsync(string command, string arguments)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = command,
+            Arguments = arguments,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = new Process { StartInfo = psi };
+        var output = new StringBuilder();
+        var error = new StringBuilder();
+
+        process.OutputDataReceived += (_, e) => { if (e.Data != null) output.AppendLine(e.Data); };
+        process.ErrorDataReceived += (_, e) => { if (e.Data != null) error.AppendLine(e.Data); };
+
+        process.Start();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        await process.WaitForExitAsync();
+
+        return (process.ExitCode, output.ToString().Trim(), error.ToString().Trim());
     }
 
     private static async Task<int> StatusAsync(CommandContext context)
@@ -508,6 +626,95 @@ public sealed class SyncCommand : ICliCommand
         return 0;
     }
 
+    private static async Task<int> AutoSyncAsync(string[] args, CommandContext context)
+    {
+        var dataDir = GetDataDirectory();
+        var configPath = Path.Combine(dataDir, "sync.config");
+        
+        // Parse action: on, off, status
+        var action = args.Length > 2 ? args[2].ToLowerInvariant() : "status";
+        
+        switch (action)
+        {
+            case "on" or "enable":
+            {
+                // Check if git is configured with remote
+                var engine = new SyncEngine();
+                if (!engine.IsGitConfigured())
+                {
+                    SystemConsole.ForegroundColor = ConsoleColor.Red;
+                    SystemConsole.WriteLine("Auto-sync requires git with a remote configured.");
+                    SystemConsole.WriteLine("Run 'koware sync init' first.");
+                    SystemConsole.ResetColor();
+                    engine.Dispose();
+                    return 1;
+                }
+                engine.Dispose();
+                
+                await File.WriteAllTextAsync(configPath, "enabled", context.CancellationToken);
+                SystemConsole.ForegroundColor = ConsoleColor.Green;
+                SystemConsole.WriteLine("[+] Auto-sync enabled");
+                SystemConsole.ResetColor();
+                SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+                SystemConsole.WriteLine("Changes will be automatically synced when you watch/read content.");
+                SystemConsole.ResetColor();
+                return 0;
+            }
+            
+            case "off" or "disable":
+            {
+                if (File.Exists(configPath))
+                {
+                    File.Delete(configPath);
+                }
+                SystemConsole.ForegroundColor = ConsoleColor.Yellow;
+                SystemConsole.WriteLine("[ ] Auto-sync disabled");
+                SystemConsole.ResetColor();
+                SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+                SystemConsole.WriteLine("Use 'koware sync push' to manually sync changes.");
+                SystemConsole.ResetColor();
+                return 0;
+            }
+            
+            case "status":
+            default:
+            {
+                var enabled = File.Exists(configPath) && 
+                              (await File.ReadAllTextAsync(configPath, context.CancellationToken)).Trim() == "enabled";
+                
+                var engine = new SyncEngine();
+                var configured = engine.IsGitConfigured();
+                engine.Dispose();
+                
+                SystemConsole.ForegroundColor = ConsoleColor.Cyan;
+                SystemConsole.WriteLine("Auto-Sync Status");
+                SystemConsole.ResetColor();
+                SystemConsole.WriteLine(new string('─', 30));
+                
+                WriteField("Enabled", enabled ? "yes" : "no", enabled ? ConsoleColor.Green : ConsoleColor.Yellow);
+                WriteField("Git configured", configured ? "yes" : "no", configured ? ConsoleColor.Green : ConsoleColor.Red);
+                
+                if (enabled && !configured)
+                {
+                    SystemConsole.WriteLine();
+                    SystemConsole.ForegroundColor = ConsoleColor.Yellow;
+                    SystemConsole.WriteLine("Warning: Auto-sync is enabled but git remote is not configured.");
+                    SystemConsole.WriteLine("Run 'koware sync init' to configure.");
+                    SystemConsole.ResetColor();
+                }
+                
+                SystemConsole.WriteLine();
+                SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+                SystemConsole.WriteLine("Commands:");
+                SystemConsole.WriteLine("  koware sync auto on     Enable auto-sync");
+                SystemConsole.WriteLine("  koware sync auto off    Disable auto-sync");
+                SystemConsole.ResetColor();
+                
+                return 0;
+            }
+        }
+    }
+
     private static int ShowHelp()
     {
         SystemConsole.ForegroundColor = ConsoleColor.Cyan;
@@ -523,18 +730,19 @@ public sealed class SyncCommand : ICliCommand
         SystemConsole.WriteLine("  pull                Pull changes from remote");
         SystemConsole.WriteLine("  log                 Show sync history");
         SystemConsole.WriteLine("  clone <url>         Clone from existing sync repository");
+        SystemConsole.WriteLine("  auto [on|off]       Enable/disable automatic background sync");
         SystemConsole.WriteLine();
         SystemConsole.WriteLine("Setup (new sync):");
-        SystemConsole.WriteLine("  1. Create a private git repo (GitHub, GitLab, etc.)");
-        SystemConsole.WriteLine("  2. koware sync init git@github.com:user/koware-sync.git");
-        SystemConsole.WriteLine("  3. koware sync push");
+        SystemConsole.WriteLine("  1. koware sync init     # Auto-creates GitHub repo if gh CLI installed");
+        SystemConsole.WriteLine("  2. koware sync push");
+        SystemConsole.WriteLine("  3. koware sync auto on  # Enable automatic syncing");
         SystemConsole.WriteLine();
         SystemConsole.WriteLine("Setup (existing sync):");
         SystemConsole.WriteLine("  koware sync clone git@github.com:user/koware-sync.git");
         SystemConsole.WriteLine();
         SystemConsole.WriteLine("Daily use:");
-        SystemConsole.WriteLine("  koware sync push    # After watching/reading");
-        SystemConsole.WriteLine("  koware sync pull    # On another device");
+        SystemConsole.WriteLine("  With auto-sync ON:  Changes sync automatically");
+        SystemConsole.WriteLine("  With auto-sync OFF: koware sync push / pull manually");
         SystemConsole.WriteLine();
         SystemConsole.WriteLine("Synced Data:");
         SystemConsole.WriteLine("  - Watch/read history (history.db)");

@@ -28,6 +28,7 @@ using Koware.Autoconfig.Orchestration;
 using Koware.Autoconfig.Storage;
 using Koware.Autoconfig.Models;
 using Koware.Autoconfig.Runtime;
+using Koware.Cli.Commands;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -78,6 +79,39 @@ static string GetUserConfigFilePath()
         Directory.CreateDirectory(dir);
     }
     return Path.Combine(dir, "appsettings.user.json");
+}
+
+/// <summary>
+/// Try to start the auto-sync engine if it's enabled in config.
+/// </summary>
+static SyncEngine? TryStartAutoSync(ILogger logger)
+{
+    try
+    {
+        var configDir = GetUserConfigDirectory();
+        var syncConfigPath = Path.Combine(configDir, "sync.config");
+        
+        if (!File.Exists(syncConfigPath))
+            return null;
+            
+        var content = File.ReadAllText(syncConfigPath).Trim();
+        if (content != "enabled")
+            return null;
+        
+        var engine = new SyncEngine { Verbose = false };
+        if (engine.Start())
+        {
+            logger.LogDebug("Auto-sync engine started");
+            return engine;
+        }
+        
+        engine.Dispose();
+        return null;
+    }
+    catch
+    {
+        return null;
+    }
 }
 
 /// <summary>
@@ -163,6 +197,9 @@ static async Task<int> RunAsync(IHost host, string[] args)
     var themeOptions = services.GetService<IOptions<ThemeOptions>>()?.Value;
     Theme.Initialize(themeOptions);
     using var cts = new CancellationTokenSource();
+    
+    // Start auto-sync engine if enabled
+    using var syncEngine = TryStartAutoSync(logger);
 
     Console.CancelKeyPress += (_, e) =>
     {

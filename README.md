@@ -61,7 +61,34 @@ After that, fine-tune `appsettings.user.json` if you need custom hosts.
 
 - **Windows**: Windows 10 x64 or later, PowerShell.
 - **macOS**: macOS 11+ (Intel or Apple Silicon).
-- To run from source: **.NET 8 SDK**.
+- **Linux**: Most distributions with glibc 2.17+.
+- To run from source: **.NET 9 SDK**.
+
+### Dependencies
+
+| Dependency | Required | Purpose |
+|------------|----------|---------|
+| .NET 9 Runtime | Yes (for source builds) | Runtime for Koware CLI |
+| Git | Optional | Required for `koware sync` to sync data across devices |
+| GitHub CLI (`gh`) | Optional | Enables automatic private repo creation with `koware sync init` |
+
+**Installing optional dependencies:**
+
+```bash
+# Arch/Manjaro
+sudo pacman -S git github-cli
+
+# Ubuntu/Debian
+sudo apt install git gh
+
+# macOS
+brew install git gh
+
+# After installing gh, authenticate:
+gh auth login
+```
+
+With `gh` installed and authenticated, `koware sync init` will automatically create a private `koware-sync` repository on your GitHub account.
 
 ### Install globally from source
 
