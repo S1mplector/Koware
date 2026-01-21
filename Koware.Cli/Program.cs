@@ -267,6 +267,10 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandleModeAsync(args, logger);
             case "update":
                 return await HandleUpdateAsync(args, logger, cts.Token);
+            case "sync":
+            case "backup":
+            case "restore":
+                return await HandleSyncAsync(args, services, logger, defaults, cts.Token);
             case "version":
             case "--version":
             case "-v":
@@ -6359,6 +6363,27 @@ static string? ResolveReaderExecutable(ReaderOptions options)
         command.Equals("Koware.Reader.exe", StringComparison.OrdinalIgnoreCase) ||
         command.Equals("Koware.Reader", StringComparison.OrdinalIgnoreCase);
     
+    if (OperatingSystem.IsLinux())
+    {
+        // On Linux: try bundled Avalonia reader
+        var linuxReaderCandidates = new[]
+        {
+            "/opt/koware/reader/Koware.Reader",
+            "/usr/local/bin/koware/reader/Koware.Reader",
+            Path.Combine(AppContext.BaseDirectory, "reader", "Koware.Reader"),
+            Path.Combine(AppContext.BaseDirectory, "Koware.Reader"),
+        };
+        
+        foreach (var candidate in linuxReaderCandidates)
+        {
+            var fullPath = Path.GetFullPath(candidate);
+            if (File.Exists(fullPath))
+            {
+                return fullPath;
+            }
+        }
+    }
+    
     if (OperatingSystem.IsMacOS())
     {
         // On macOS: try bundled Avalonia reader from Koware.app bundle
@@ -10154,6 +10179,18 @@ static async Task<int> HandleStatsAsync(string[] args, IServiceProvider services
     Console.ResetColor();
 
     return 0;
+}
+
+// ===== Sync Command =====
+
+/// <summary>
+/// Handle the sync command for cross-device data synchronization.
+/// </summary>
+static async Task<int> HandleSyncAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken ct)
+{
+    var syncCommand = new Koware.Cli.Commands.SyncCommand();
+    var context = new Koware.Cli.Commands.CommandContext(services, logger, defaults, ct);
+    return await syncCommand.ExecuteAsync(args, context);
 }
 
 // ===== Record Types =====
