@@ -1,5 +1,5 @@
 // Author: Ilgaz Mehmetoğlu
-using System.IO.Compression;
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using SystemConsole = System.Console;
@@ -7,14 +7,14 @@ using SystemConsole = System.Console;
 namespace Koware.Cli.Commands;
 
 /// <summary>
-/// Implements the 'koware sync' command: sync data across devices.
-/// Supports export/import of history, lists, and configuration.
+/// Implements the 'koware sync' command: sync data across devices using git.
+/// Supports push/pull of history, lists, and configuration via git repository.
 /// </summary>
 public sealed class SyncCommand : ICliCommand
 {
     public string Name => "sync";
     public IReadOnlyList<string> Aliases => ["backup", "restore"];
-    public string Description => "Sync/backup data across devices (history, lists, config)";
+    public string Description => "Sync data across devices using git (history, lists, config)";
     public bool RequiresProvider => false;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -29,11 +29,12 @@ public sealed class SyncCommand : ICliCommand
 
         return subcommand switch
         {
-            "export" => await ExportAsync(args, context),
-            "import" => await ImportAsync(args, context),
+            "init" => await InitAsync(args, context),
             "status" => await StatusAsync(context),
             "push" => await PushAsync(args, context),
             "pull" => await PullAsync(args, context),
+            "log" => await LogAsync(context),
+            "clone" => await CloneAsync(args, context),
             "help" or "--help" or "-h" => ShowHelp(),
             _ => ShowHelp()
         };
