@@ -6403,12 +6403,14 @@ static string? ResolveReaderExecutable(ReaderOptions options)
     if (OperatingSystem.IsLinux())
     {
         // On Linux: try bundled Avalonia reader
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var linuxReaderCandidates = new[]
         {
+            Path.Combine(homeDir, ".local", "share", "koware", "Koware.Reader"),
+            Path.Combine(AppContext.BaseDirectory, "Koware.Reader"),
+            Path.Combine(AppContext.BaseDirectory, "reader", "Koware.Reader"),
             "/opt/koware/reader/Koware.Reader",
             "/usr/local/bin/koware/reader/Koware.Reader",
-            Path.Combine(AppContext.BaseDirectory, "reader", "Koware.Reader"),
-            Path.Combine(AppContext.BaseDirectory, "Koware.Reader"),
         };
         
         foreach (var candidate in linuxReaderCandidates)
