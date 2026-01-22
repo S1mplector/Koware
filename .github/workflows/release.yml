@@ -10,7 +10,7 @@ on:
       - 'v*'
 
 env:
-  DOTNET_VERSION: '8.0.x'
+  DOTNET_VERSION: '9.0.x'
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_NOLOGO: true
 
@@ -125,10 +125,64 @@ jobs:
           path: publish/*.dmg
           retention-days: 1
 
+  # Build Linux (x64)
+  build-linux-x64:
+    name: Build Linux (x64)
+    needs: test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build Linux (x64)
+        run: |
+          chmod +x Scripts/publish-linux.sh
+          ./Scripts/publish-linux.sh --runtime linux-x64
+
+      - name: Upload Linux x64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64-tarball
+          path: publish/*.tar.gz
+          retention-days: 1
+
+  # Build Linux (ARM64)
+  build-linux-arm64:
+    name: Build Linux (ARM64)
+    needs: test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build Linux (ARM64)
+        run: |
+          chmod +x Scripts/publish-linux.sh
+          ./Scripts/publish-linux.sh --runtime linux-arm64
+
+      - name: Upload Linux ARM64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-tarball
+          path: publish/*.tar.gz
+          retention-days: 1
+
   # Create GitHub Release
   create-release:
     name: Create Release
-    needs: [build-windows, build-macos-arm64, build-macos-x64]
+    needs: [build-windows, build-macos-arm64, build-macos-x64, build-linux-x64, build-linux-arm64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -149,7 +203,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          find . -type f \( -name "*.exe" -o -name "*.dmg" \) -exec sha256sum {} \; > checksums.txt
+          find . -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.tar.gz" \) -exec sha256sum {} \; > checksums.txt
           cat checksums.txt
 
       - name: Create Release
@@ -162,6 +216,7 @@ jobs:
           files: |
             artifacts/**/*.exe
             artifacts/**/*.dmg
+            artifacts/**/*.tar.gz
             artifacts/checksums.txt
           body: |
             ## Koware ${{ steps.version.outputs.VERSION }}
@@ -173,6 +228,15 @@ jobs:
             **macOS (Apple Silicon):** Download `Koware-Installer-*-osx-arm64.dmg`
             
             **macOS (Intel):** Download `Koware-Installer-*-osx-x64.dmg`
+            
+            **Linux (x64):** Download `koware-*-linux-x64.tar.gz`, extract, and run `./install.sh`
+            
+            **Linux (ARM64):** Download `koware-*-linux-arm64.tar.gz`, extract, and run `./install.sh`
+            
+            **Linux One-liner:**
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/S1mplector/Koware/main/Scripts/install-koware-linux.sh | bash
+            ```
             
             ### Verify Downloads
             

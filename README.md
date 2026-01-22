@@ -4,7 +4,7 @@
 
 # Koware
 
-Koware is a **standalone**, console-first link/stream aggregator for **Windows** and **macOS** that helps you search for anime/manga and open streams in a player from your terminal.
+Koware is a **standalone**, console-first link/stream aggregator for **Windows**, **macOS**, and **Linux** that helps you search for anime/manga and open streams in a player from your terminal.
 
 It has a text-based user interface but behaves like a regular CLI. You run a command, Koware queries your configured sources, and opens the selected stream in a video player or manga in a reader.
 
@@ -47,6 +47,7 @@ Koware does **NOT** host any media. It does **NOT** include any source URLs. It 
 
 - Install (Windows): `.\install-koware.ps1 -Publish`
 - Install (macOS): `./Scripts/publish-macos.sh` then run the app from `publish/`
+- Install (Linux): `curl -fsSL https://raw.githubusercontent.com/S1mplector/Koware/main/Scripts/install-koware-linux.sh | bash`
 - Auto-configure providers: `koware provider autoconfig`
 - Test connectivity: `koware provider test`
 - Search and play: `koware stream "haikyuu" --episode 1 --quality 720p`
@@ -122,6 +123,80 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ```
 
 If you prefer not to, koware will work perfectly fine in any command prompt shell.
+
+### Install on Linux
+
+#### Option 1: One-line installer (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/S1mplector/Koware/main/Scripts/install-koware-linux.sh | bash
+```
+
+Or with wget:
+```bash
+wget -qO- https://raw.githubusercontent.com/S1mplector/Koware/main/Scripts/install-koware-linux.sh | bash
+```
+
+This will:
+- Download the latest release for your architecture (x64/arm64)
+- Install to `~/.local/share/koware`
+- Create a symlink in `~/.local/bin`
+- Set up your PATH if needed
+
+#### Option 2: Manual tarball installation
+
+Download the latest `.tar.gz` from the [releases page](https://github.com/S1mplector/Koware/releases):
+
+```bash
+# Download and extract (replace VERSION and ARCH as needed)
+wget https://github.com/S1mplector/Koware/releases/download/vX.X.X/koware-X.X.X-linux-x64.tar.gz
+tar -xzf koware-*.tar.gz
+cd koware
+
+# Run the installer
+./install.sh
+
+# Or install system-wide
+sudo ./install.sh --system
+```
+
+#### Option 3: Build from source
+
+```bash
+# Clone the repo
+git clone https://github.com/S1mplector/Koware.git
+cd Koware
+
+# Build and package
+chmod +x Scripts/publish-linux.sh
+./Scripts/publish-linux.sh
+
+# For ARM64
+./Scripts/publish-linux.sh --runtime linux-arm64
+
+# Also create .deb package (Debian/Ubuntu)
+./Scripts/publish-linux.sh --deb
+```
+
+The build output will be in `publish/`. Run the included `install.sh` to complete installation.
+
+#### Linux paths
+
+| Item | Path |
+|------|------|
+| Executable | `~/.local/share/koware/koware` |
+| Symlink | `~/.local/bin/koware` |
+| Config | `~/.config/koware/appsettings.user.json` |
+| History DB | `~/.config/koware/history.db` |
+
+#### Updating on Linux
+
+```bash
+koware update
+```
+
+Or re-run the one-line installer to get the latest version.
+
 ### Install on macOS
 
 #### Option 1: DMG Installer

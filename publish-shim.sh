@@ -1,6 +1,6 @@
 #!/bin/bash
 # Publish Koware CLI for Linux
-# Usage: ./publish-linux.sh
+# Usage: ./publish-shim.sh
 
 set -e
 

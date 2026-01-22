@@ -1094,9 +1094,10 @@ static async Task<int> HandleUpdateAsync(string[] args, ILogger logger, Cancella
         return 0;
     }
 
-    if (!OperatingSystem.IsWindows())
+    // Update command now supports Windows, Linux, and macOS
+    if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
     {
-        Console.WriteLine("The 'update' command is only available on Windows.");
+        Console.WriteLine("The 'update' command is not supported on this platform.");
         Console.WriteLine("Please download the latest release manually from:");
         Console.WriteLine("  https://github.com/S1mplector/Koware/releases");
         return 1;
@@ -1231,12 +1232,27 @@ static async Task<int> HandleUpdateAsync(string[] args, ILogger logger, Cancella
     else
     {
         Console.WriteLine();
-        Console.WriteLine("No installer found in the release package.");
-        Console.WriteLine("The update folder has been opened in Explorer.");
-        Console.WriteLine("To complete the update manually:");
-        Console.WriteLine("  1. Close all Koware processes");
-        Console.WriteLine("  2. Copy the new files to your Koware installation folder");
-        Console.WriteLine("  3. Restart Koware");
+        Console.WriteLine("Update downloaded successfully!");
+        Console.WriteLine("The update folder has been opened for you.");
+        Console.WriteLine();
+        Console.WriteLine("To complete the update:");
+        if (OperatingSystem.IsLinux())
+        {
+            Console.WriteLine("  1. Close all Koware processes");
+            Console.WriteLine("  2. Run the install script: cd " + result.ExtractPath + " && ./install.sh");
+            Console.WriteLine("  Or manually copy 'koware' to ~/.local/share/koware/");
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            Console.WriteLine("  1. Close all Koware processes");
+            Console.WriteLine("  2. Run: ./install.sh  (or drag to Applications)");
+        }
+        else
+        {
+            Console.WriteLine("  1. Close all Koware processes");
+            Console.WriteLine("  2. Copy the new files to your Koware installation folder");
+            Console.WriteLine("  3. Restart Koware");
+        }
     }
 
     return 0;

@@ -132,11 +132,11 @@ public static class KowareUpdater
         IProgress<UpdateProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        if (!OperatingSystem.IsWindows())
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             return new KowareUpdateResult(
                 Success: false,
-                Error: "Updater currently supports Windows only.",
+                Error: "Updater is not supported on this platform.",
                 InstallerPath: null,
                 ExtractPath: null,
                 ReleaseTag: null,
@@ -152,7 +152,7 @@ public static class KowareUpdater
         {
             progress?.Report(new UpdateProgress(0, null, "Contacting GitHub releases API...", UpdatePhase.CheckingVersion));
 
-            var latest = await GetLatestInstallerAssetWithRetryAsync(httpClient, cancellationToken).ConfigureAwait(false);
+            var latest = await GetLatestInstallerAssetWithRetryAsync(httpClient, GetPlatformIdentifier(), cancellationToken).ConfigureAwait(false);
             if (latest.AssetUrl is null || string.IsNullOrWhiteSpace(latest.AssetName))
             {
                 return new KowareUpdateResult(
@@ -181,13 +181,47 @@ public static class KowareUpdater
 
             if (extension.Equals(".exe", StringComparison.OrdinalIgnoreCase))
             {
-                // Direct executable download
+                // Direct executable download (Windows)
                 installerPath = containerPath;
                 extractPath = downloadsFolder;
                 
                 progress?.Report(new UpdateProgress(latest.AssetSize ?? 0, latest.AssetSize, $"Launching {Path.GetFileName(installerPath)}...", UpdatePhase.Launching));
                 LaunchExecutable(installerPath);
                 installerLaunched = true;
+            }
+            else if (extension.Equals(".gz", StringComparison.OrdinalIgnoreCase) && containerPath.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase))
+            {
+                // Linux/macOS tarball
+                var extractFolderName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(latest.AssetName));
+                extractPath = Path.Combine(downloadsFolder, extractFolderName);
+                
+                if (Directory.Exists(extractPath))
+                {
+                    try { Directory.Delete(extractPath, true); }
+                    catch { extractPath = Path.Combine(downloadsFolder, $"{extractFolderName}-{DateTime.Now:yyyyMMdd-HHmmss}"); }
+                }
+
+                progress?.Report(new UpdateProgress(0, null, $"Extracting to: {extractPath}", UpdatePhase.Extracting));
+                ExtractTarGz(containerPath, extractPath);
+
+                // Find the koware executable in extracted files
+                installerPath = FindLinuxExecutable(extractPath);
+
+                if (installerPath != null)
+                {
+                    // For Linux, we provide instructions rather than auto-launching
+                    progress?.Report(new UpdateProgress(0, null, $"Update extracted to: {extractPath}", UpdatePhase.Complete));
+                    
+                    // Open the folder for manual installation
+                    OpenFolder(extractPath);
+                }
+                else
+                {
+                    progress?.Report(new UpdateProgress(0, null, "Extraction complete. Opening folder...", UpdatePhase.Complete));
+                    OpenFolder(extractPath);
+                }
+
+                try { File.Delete(containerPath); } catch { }
             }
             else if (extension.Equals(".zip", StringComparison.OrdinalIgnoreCase))
             {
@@ -515,17 +549,48 @@ public static class KowareUpdater
         }
     }
 
-    /// <summary>Open a folder in the system file explorer.</summary>
+    /// <summary>Open a folder in the system file manager.</summary>
     private static void OpenFolder(string folderPath)
     {
-        var startInfo = new ProcessStartInfo
+        ProcessStartInfo startInfo;
+        
+        if (OperatingSystem.IsWindows())
         {
-            FileName = "explorer.exe",
-            Arguments = $"\"{folderPath}\"",
-            UseShellExecute = true
-        };
+            startInfo = new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"\"{folderPath}\"",
+                UseShellExecute = true
+            };
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            startInfo = new ProcessStartInfo
+            {
+                FileName = "open",
+                Arguments = $"\"{folderPath}\"",
+                UseShellExecute = true
+            };
+        }
+        else // Linux
+        {
+            // Try common Linux file managers
+            startInfo = new ProcessStartInfo
+            {
+                FileName = "xdg-open",
+                Arguments = $"\"{folderPath}\"",
+                UseShellExecute = true
+            };
+        }
 
-        Process.Start(startInfo);
+        try
+        {
+            Process.Start(startInfo);
+        }
+        catch
+        {
+            // Silently fail if no file manager is available
+        }
     }
 
     /// <summary>
@@ -533,6 +598,7 @@ public static class KowareUpdater
     /// </summary>
     private static async Task<(string? Tag, string? Name, string? AssetName, Uri? AssetUrl, long? AssetSize)> GetLatestInstallerAssetWithRetryAsync(
         HttpClient client,
+        string platformId,
         CancellationToken cancellationToken)
     {
         Exception? lastException = null;
@@ -541,7 +607,7 @@ public static class KowareUpdater
         {
             try
             {
-                return await GetLatestInstallerAssetAsync(client, cancellationToken).ConfigureAwait(false);
+                return await GetLatestInstallerAssetAsync(client, platformId, cancellationToken).ConfigureAwait(false);
             }
             catch (HttpRequestException ex) when (attempt < MaxRetries)
             {
@@ -559,6 +625,7 @@ public static class KowareUpdater
     /// </summary>
     private static async Task<(string? Tag, string? Name, string? AssetName, Uri? AssetUrl, long? AssetSize)> GetLatestInstallerAssetAsync(
         HttpClient client,
+        string platformId,
         CancellationToken cancellationToken)
     {
         // Use /releases (not /releases/latest) to include prereleases like beta versions
@@ -611,7 +678,7 @@ public static class KowareUpdater
                     continue;
                 }
 
-                var score = ScoreAssetName(candidateName);
+                var score = ScoreAssetName(candidateName, platformId);
                 if (score <= 0 || score < bestScore)
                 {
                     continue;
@@ -644,38 +711,140 @@ public static class KowareUpdater
     }
 
     /// <summary>
-    /// Score an asset name to pick the best installer (prefers .exe, installer, win-x64).
+    /// Score an asset name to pick the best installer for the current platform.
     /// </summary>
-    private static int ScoreAssetName(string name)
+    private static int ScoreAssetName(string name, string platformId)
     {
         var score = 0;
+        var lowerName = name.ToLowerInvariant();
 
-        if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        // Platform-specific scoring
+        if (OperatingSystem.IsWindows())
         {
-            score += 100;
+            if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                score += 100;
+            if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                score += 80;
+            if (lowerName.Contains("win") || lowerName.Contains("windows"))
+                score += 50;
+            if (lowerName.Contains("installer"))
+                score += 40;
+            // Penalize Linux/macOS assets on Windows
+            if (lowerName.Contains("linux") || lowerName.Contains("osx") || lowerName.Contains("macos"))
+                score -= 200;
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            if (name.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase))
+                score += 100;
+            if (lowerName.Contains("linux"))
+                score += 80;
+            if (lowerName.Contains(platformId))
+                score += 60;
+            // Penalize Windows/macOS assets on Linux
+            if (lowerName.Contains("win") || lowerName.Contains(".exe") || lowerName.Contains("osx") || lowerName.Contains("macos") || lowerName.Contains(".dmg"))
+                score -= 200;
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            if (name.EndsWith(".dmg", StringComparison.OrdinalIgnoreCase))
+                score += 100;
+            if (name.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase))
+                score += 80;
+            if (lowerName.Contains("osx") || lowerName.Contains("macos") || lowerName.Contains("darwin"))
+                score += 60;
+            if (lowerName.Contains(platformId))
+                score += 40;
+            // Penalize Windows/Linux assets on macOS
+            if (lowerName.Contains("win") || lowerName.Contains(".exe") || lowerName.Contains("linux"))
+                score -= 200;
         }
 
-        if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-        {
-            score += 80;
-        }
-
-        if (name.Contains("installer", StringComparison.OrdinalIgnoreCase))
-        {
-            score += 50;
-        }
-
-        if (name.Contains("win-x64", StringComparison.OrdinalIgnoreCase))
-        {
-            score += 30;
-        }
-
-        if (name.Contains("koware", StringComparison.OrdinalIgnoreCase))
-        {
+        // Common scoring
+        if (lowerName.Contains("koware"))
             score += 10;
-        }
 
         return score;
+    }
+
+    /// <summary>
+    /// Get the platform identifier for asset selection.
+    /// </summary>
+    private static string GetPlatformIdentifier()
+    {
+        var arch = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture switch
+        {
+            System.Runtime.InteropServices.Architecture.X64 => "x64",
+            System.Runtime.InteropServices.Architecture.Arm64 => "arm64",
+            System.Runtime.InteropServices.Architecture.Arm => "arm",
+            _ => "x64"
+        };
+
+        if (OperatingSystem.IsWindows())
+            return $"win-{arch}";
+        if (OperatingSystem.IsLinux())
+            return $"linux-{arch}";
+        if (OperatingSystem.IsMacOS())
+            return $"osx-{arch}";
+        
+        return arch;
+    }
+
+    /// <summary>
+    /// Extract a .tar.gz archive to a directory.
+    /// </summary>
+    private static void ExtractTarGz(string archivePath, string destinationDir)
+    {
+        Directory.CreateDirectory(destinationDir);
+        
+        // Use system tar command for simplicity and reliability
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "tar",
+            Arguments = $"-xzf \"{archivePath}\" -C \"{destinationDir}\"",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            throw new InvalidOperationException("Failed to start tar process");
+        }
+
+        process.WaitForExit();
+        
+        if (process.ExitCode != 0)
+        {
+            var error = process.StandardError.ReadToEnd();
+            throw new InvalidOperationException($"tar extraction failed: {error}");
+        }
+    }
+
+    /// <summary>
+    /// Find the koware executable in an extracted Linux directory.
+    /// </summary>
+    private static string? FindLinuxExecutable(string directory)
+    {
+        if (!Directory.Exists(directory))
+            return null;
+
+        // Look for koware executable
+        var patterns = new[] { "koware", "Koware", "Koware.Cli" };
+        
+        foreach (var pattern in patterns)
+        {
+            var files = Directory.EnumerateFiles(directory, pattern, SearchOption.AllDirectories)
+                .Where(f => !f.EndsWith(".dll") && !f.EndsWith(".pdb") && !f.EndsWith(".json"))
+                .ToList();
+            
+            if (files.Count > 0)
+                return files[0];
+        }
+
+        return null;
     }
 
     /// <summary>Remove invalid filename characters from a string.</summary>
