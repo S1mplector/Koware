@@ -620,9 +620,43 @@ public sealed class SyncCommand : ICliCommand
         // Get current branch name
         var (_, currentBranch, _) = await RunGitAsync(dataDir, "branch --show-current");
         currentBranch = currentBranch.Trim();
+        
+        // If no branch exists (no commits yet), create an initial commit first
         if (string.IsNullOrEmpty(currentBranch))
         {
-            currentBranch = "main"; // fallback
+            // Check if there are any commits at all
+            var (revParseCode, _, _) = await RunGitAsync(dataDir, "rev-parse HEAD");
+            if (revParseCode != 0)
+            {
+                // No commits exist - create an initial commit
+                SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+                SystemConsole.WriteLine("No commits found. Creating initial commit...");
+                SystemConsole.ResetColor();
+                
+                // Set default branch to main
+                await RunGitAsync(dataDir, "config init.defaultBranch main");
+                
+                // Create initial commit (allow empty in case there are no files)
+                var (initCommitCode, _, initCommitError) = await RunGitAsync(dataDir, "commit --allow-empty -m \"Initial koware sync\"");
+                if (initCommitCode != 0)
+                {
+                    SystemConsole.ForegroundColor = ConsoleColor.Red;
+                    SystemConsole.WriteLine($"Failed to create initial commit: {initCommitError}");
+                    SystemConsole.ResetColor();
+                    return 1;
+                }
+            }
+            
+            // Try to get branch name again
+            (_, currentBranch, _) = await RunGitAsync(dataDir, "branch --show-current");
+            currentBranch = currentBranch.Trim();
+            
+            // Still empty? Force create main branch
+            if (string.IsNullOrEmpty(currentBranch))
+            {
+                await RunGitAsync(dataDir, "checkout -b main");
+                currentBranch = "main";
+            }
         }
 
         // Push to remote
@@ -637,6 +671,7 @@ public sealed class SyncCommand : ICliCommand
             if (pushError.Contains("no upstream") || pushError.Contains("does not match any") || 
                 pushError.Contains("failed to push"))
             {
+                // For first push, try to set upstream with force if needed
                 (pushCode, pushOutput, pushError) = await RunGitAsync(dataDir, $"push --set-upstream origin {currentBranch}");
             }
             
