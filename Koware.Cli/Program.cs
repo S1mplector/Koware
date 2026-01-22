@@ -263,7 +263,11 @@ static async Task<int> RunAsync(IHost host, string[] args)
         switch (command)
         {
             case "search":
-                // Redirect search to explore with the query
+                // Keep --json support for scripting, otherwise redirect to explore
+                if (args.Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return await HandleSearchAsync(orchestrator, args, services, logger, defaults, cts.Token);
+                }
                 Console.ForegroundColor = ConsoleColor.DarkGray;
                 Console.WriteLine("Note: 'search' is now part of 'explore'. Redirecting...");
                 Console.ResetColor();
@@ -3961,7 +3965,7 @@ static async Task<int> HandleExploreAsync(string[] args, IServiceProvider servic
             Console.WriteLine("No providers selected.");
             return 0;
         }
-        selectedProviders = providerSelection.Selected;
+        selectedProviders = providerSelection.Selected.ToList();
     }
 
     var providerContexts = await BuildExploreProviderContextsAsync(mode, selectedProviders, services, logger, cancellationToken);
@@ -4515,7 +4519,7 @@ static async Task ShowExploreHistoryAsync(
                     ProviderName = item.Provider,
                     ProviderSlug = item.Provider.ToLowerInvariant(),
                     Synopsis = $"Last read: Chapter {item.ChapterNumber} • {FormatTimeAgo(item.ReadAt)}",
-                    Count = item.ChapterNumber,
+                    Count = (int)item.ChapterNumber,
                     Status = statusLookup.Resolve(item.MangaId, item.MangaTitle)
                 });
             }
@@ -4701,13 +4705,16 @@ static async Task<int> HandleExploreEntryActionAsync(
             return 1;
         }
 
-        return await PlayAnimeFromExploreAsync(
+        await PlaySelectedAnimeAsync(
+            providerContext.AnimeCatalog,
             selectedEntry.Anime,
-            providerContext,
+            providerContext.Referrer,
+            providerContext.UserAgent,
             services,
             logger,
             defaults,
             cancellationToken);
+        return 0;
     }
 
     if (actionChoice == "read")
@@ -4718,13 +4725,16 @@ static async Task<int> HandleExploreEntryActionAsync(
             return 1;
         }
 
-        return await ReadMangaFromExploreAsync(
+        await ReadSelectedMangaAsync(
+            providerContext.MangaCatalog,
             selectedEntry.Manga,
-            providerContext,
+            providerContext.Info.Slug,
+            providerContext.Referrer,
+            providerContext.UserAgent,
             services,
             logger,
-            defaults,
             cancellationToken);
+        return 0;
     }
 
     if (actionChoice == "info")
