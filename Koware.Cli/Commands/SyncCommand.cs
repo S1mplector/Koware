@@ -1,6 +1,7 @@
 // Author: Ilgaz Mehmetoğlu
 using System.Diagnostics;
 using System.Text;
+using Koware.Cli.Console;
 using Microsoft.Extensions.Logging;
 using SystemConsole = System.Console;
 
@@ -19,7 +20,13 @@ public sealed class SyncCommand : ICliCommand
 
     public async Task<int> ExecuteAsync(string[] args, CommandContext context)
     {
-        var subcommand = args.Length > 1 ? args[1].ToLowerInvariant() : "status";
+        var subcommand = args.Length > 1 ? args[1].ToLowerInvariant() : null;
+
+        // If no subcommand, show interactive menu
+        if (subcommand == null)
+        {
+            return await ShowInteractiveMenuAsync(args, context);
+        }
 
         return subcommand switch
         {
@@ -35,9 +42,215 @@ public sealed class SyncCommand : ICliCommand
             "resolve" => await ResolveConflictsAsync(context),
             "abort" => await AbortMergeAsync(context),
             "help" or "--help" or "-h" => ShowHelp(),
-            _ => ShowHelp()
+            _ => await ShowInteractiveMenuAsync(args, context)
         };
     }
+
+    private static async Task<int> ShowInteractiveMenuAsync(string[] args, CommandContext context)
+    {
+        var dataDir = GetDataDirectory();
+        var gitDir = Path.Combine(dataDir, ".git");
+        var isInitialized = Directory.Exists(gitDir);
+
+        // Build menu items based on current state
+        var menuItems = new List<SyncMenuItem>();
+
+        if (!isInitialized)
+        {
+            // Not initialized - show setup options
+            menuItems.Add(new SyncMenuItem("init", $"{Icons.Add} Initialize", "Set up git sync (auto-creates GitHub repo if gh CLI available)"));
+            menuItems.Add(new SyncMenuItem("clone", $"{Icons.Download} Clone existing", "Clone from an existing sync repository URL"));
+        }
+        else
+        {
+            // Check for pending changes and remote status
+            var (_, statusOutput, _) = await RunGitAsync(dataDir, "status --porcelain");
+            var hasChanges = !string.IsNullOrWhiteSpace(statusOutput);
+            var changeCount = hasChanges ? statusOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length : 0;
+
+            var (_, remote, _) = await RunGitAsync(dataDir, "remote get-url origin");
+            var hasRemote = !string.IsNullOrWhiteSpace(remote);
+
+            // Check for merge conflicts
+            var mergeEngine = new SyncMergeEngine(dataDir);
+            var hasConflicts = await mergeEngine.HasUnmergedFilesAsync();
+
+            if (hasConflicts)
+            {
+                menuItems.Add(new SyncMenuItem("resolve", $"{Icons.Warning} Resolve conflicts", "Auto-resolve merge conflicts from previous sync"));
+                menuItems.Add(new SyncMenuItem("abort", $"{Icons.Error} Abort merge", "Cancel merge and restore previous state"));
+            }
+
+            // Primary actions
+            menuItems.Add(new SyncMenuItem("quick", $"{Icons.Play} Quick sync", hasChanges 
+                ? $"Pull → Commit {changeCount} change(s) → Push" 
+                : "Pull → Push (no local changes)"));
+
+            if (hasChanges)
+            {
+                menuItems.Add(new SyncMenuItem("diff", $"{Icons.Search} View changes", $"Preview {changeCount} pending change(s)"));
+                menuItems.Add(new SyncMenuItem("push", $"{Icons.Add} Push", $"Commit and push {changeCount} change(s)"));
+            }
+
+            menuItems.Add(new SyncMenuItem("pull", $"{Icons.Download} Pull", "Pull changes from remote (auto-merges conflicts)"));
+            menuItems.Add(new SyncMenuItem("status", $"{Icons.Info} Status", "Show detailed sync status"));
+            menuItems.Add(new SyncMenuItem("log", $"{Icons.History} History", "View recent sync history"));
+
+            // Settings
+            var configPath = Path.Combine(dataDir, "sync.config");
+            var autoEnabled = File.Exists(configPath) && File.ReadAllText(configPath).Trim() == "enabled";
+            menuItems.Add(new SyncMenuItem("auto", $"{Icons.Provider} Auto-sync", autoEnabled ? "Currently: ON" : "Currently: OFF"));
+        }
+
+        menuItems.Add(new SyncMenuItem("exit", $"{Icons.Back} Exit", "Return to shell"));
+
+        // Show the menu
+        while (true)
+        {
+            var selector = new InteractiveSelector<SyncMenuItem>(
+                menuItems,
+                m => m.Label,
+                new SelectorOptions<SyncMenuItem>
+                {
+                    Prompt = $"{Icons.Provider} Sync",
+                    PreviewFunc = m => m.Description,
+                    ShowSearch = false,
+                    ShowPreview = true,
+                    MaxVisibleItems = 10,
+                    EmptyMessage = "No options available"
+                });
+
+            var result = selector.Run();
+            if (result.Cancelled || result.Selected?.Id == "exit")
+            {
+                return 0;
+            }
+
+            var choice = result.Selected!.Id;
+            int exitCode;
+
+            switch (choice)
+            {
+                case "init":
+                    exitCode = await InitAsync(args, context);
+                    break;
+                case "clone":
+                    SystemConsole.Write("Enter repository URL: ");
+                    var url = SystemConsole.ReadLine()?.Trim();
+                    if (string.IsNullOrWhiteSpace(url))
+                    {
+                        SystemConsole.ForegroundColor = ConsoleColor.Yellow;
+                        SystemConsole.WriteLine("No URL provided.");
+                        SystemConsole.ResetColor();
+                        continue;
+                    }
+                    exitCode = await CloneAsync(new[] { "sync", "clone", url }, context);
+                    break;
+                case "quick":
+                    exitCode = await QuickSyncAsync(context);
+                    break;
+                case "push":
+                    exitCode = await PushAsync(args, context);
+                    break;
+                case "pull":
+                    exitCode = await PullAsync(context);
+                    break;
+                case "status":
+                    exitCode = await StatusAsync(context);
+                    break;
+                case "diff":
+                    exitCode = await DiffAsync(context);
+                    break;
+                case "log":
+                    exitCode = await LogAsync(context);
+                    break;
+                case "auto":
+                    exitCode = await ShowAutoSyncMenuAsync(context);
+                    break;
+                case "resolve":
+                    exitCode = await ResolveConflictsAsync(context);
+                    break;
+                case "abort":
+                    exitCode = await AbortMergeAsync(context);
+                    break;
+                default:
+                    continue;
+            }
+
+            // After action, wait for user before returning to menu
+            if (choice != "auto")
+            {
+                WaitForContinue();
+            }
+
+            // Refresh menu items after action
+            return await ShowInteractiveMenuAsync(args, context);
+        }
+    }
+
+    private static async Task<int> ShowAutoSyncMenuAsync(CommandContext context)
+    {
+        var dataDir = GetDataDirectory();
+        var configPath = Path.Combine(dataDir, "sync.config");
+        var autoEnabled = File.Exists(configPath) && File.ReadAllText(configPath).Trim() == "enabled";
+
+        var menuItems = new[]
+        {
+            new SyncMenuItem("on", $"{Icons.Success} Enable", "Sync automatically when Koware runs"),
+            new SyncMenuItem("off", $"{Icons.Error} Disable", "Only sync manually with koware sync"),
+            new SyncMenuItem("back", $"{Icons.Back} Back", "Return to sync menu")
+        };
+
+        var selector = new InteractiveSelector<SyncMenuItem>(
+            menuItems,
+            m => m.Label,
+            new SelectorOptions<SyncMenuItem>
+            {
+                Prompt = $"Auto-sync ({(autoEnabled ? "ON" : "OFF")})",
+                PreviewFunc = m => m.Description,
+                ShowSearch = false,
+                ShowPreview = true,
+                MaxVisibleItems = 5
+            });
+
+        var result = selector.Run();
+        if (result.Cancelled || result.Selected?.Id == "back")
+        {
+            return 0;
+        }
+
+        var choice = result.Selected!.Id;
+        if (choice == "on")
+        {
+            await File.WriteAllTextAsync(configPath, "enabled");
+            SystemConsole.ForegroundColor = ConsoleColor.Green;
+            SystemConsole.WriteLine("[+] Auto-sync enabled");
+            SystemConsole.ResetColor();
+        }
+        else if (choice == "off")
+        {
+            if (File.Exists(configPath))
+            {
+                File.Delete(configPath);
+            }
+            SystemConsole.ForegroundColor = ConsoleColor.Yellow;
+            SystemConsole.WriteLine("[!] Auto-sync disabled");
+            SystemConsole.ResetColor();
+        }
+
+        return 0;
+    }
+
+    private static void WaitForContinue()
+    {
+        SystemConsole.WriteLine();
+        SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+        SystemConsole.WriteLine("Press any key to continue...");
+        SystemConsole.ResetColor();
+        SystemConsole.ReadKey(true);
+    }
+
+    private sealed record SyncMenuItem(string Id, string Label, string Description);
 
     private static async Task<int> InitAsync(string[] args, CommandContext context)
     {
