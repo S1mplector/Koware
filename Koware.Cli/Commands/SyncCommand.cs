@@ -32,6 +32,8 @@ public sealed class SyncCommand : ICliCommand
             "auto" => await AutoSyncAsync(args, context),
             "now" or "quick" => await QuickSyncAsync(context),
             "diff" => await DiffAsync(context),
+            "resolve" => await ResolveConflictsAsync(context),
+            "abort" => await AbortMergeAsync(context),
             "help" or "--help" or "-h" => ShowHelp(),
             _ => ShowHelp()
         };
@@ -439,6 +441,31 @@ public sealed class SyncCommand : ICliCommand
             return 1;
         }
 
+        var mergeEngine = new SyncMergeEngine(dataDir);
+
+        // Check for existing unmerged files from a previous failed merge
+        if (await mergeEngine.HasUnmergedFilesAsync())
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.Yellow;
+            SystemConsole.WriteLine("Found unmerged files from previous sync. Attempting auto-resolve...");
+            SystemConsole.ResetColor();
+
+            var resolveResult = await mergeEngine.AutoResolveConflictsAsync(verbose: true);
+            if (!resolveResult.Success)
+            {
+                SystemConsole.ForegroundColor = ConsoleColor.Red;
+                SystemConsole.WriteLine($"Could not auto-resolve: {resolveResult.Message}");
+                SystemConsole.WriteLine("You can run 'koware sync resolve' to try again or 'koware sync abort' to cancel.");
+                SystemConsole.ResetColor();
+                return 1;
+            }
+
+            SystemConsole.ForegroundColor = ConsoleColor.Green;
+            SystemConsole.WriteLine($"[+] Auto-resolved {resolveResult.FilesResolved} conflict(s)");
+            SystemConsole.ResetColor();
+            return 0;
+        }
+
         // Check if remote exists
         var (_, remote, _) = await RunGitAsync(dataDir, "remote get-url origin");
         if (string.IsNullOrWhiteSpace(remote))
@@ -476,6 +503,47 @@ public sealed class SyncCommand : ICliCommand
             
             if (pullCode != 0)
             {
+                // Check if this is a merge conflict
+                if (pullError.Contains("unmerged") || pullError.Contains("CONFLICT") || 
+                    await mergeEngine.HasUnmergedFilesAsync())
+                {
+                    SystemConsole.ForegroundColor = ConsoleColor.Yellow;
+                    SystemConsole.WriteLine("Merge conflict detected. Attempting intelligent auto-merge...");
+                    SystemConsole.ResetColor();
+
+                    var resolveResult = await mergeEngine.AutoResolveConflictsAsync(verbose: true);
+                    if (resolveResult.Success)
+                    {
+                        // Restore stashed changes after successful merge
+                        if (hasLocalChanges)
+                        {
+                            WriteStatus("Local changes", "restoring...", ConsoleColor.Yellow);
+                            await RunGitAsync(dataDir, "stash pop");
+                        }
+
+                        SystemConsole.WriteLine();
+                        SystemConsole.ForegroundColor = ConsoleColor.Green;
+                        SystemConsole.WriteLine($"[+] Pulled and auto-merged {resolveResult.FilesResolved} conflict(s)");
+                        SystemConsole.ResetColor();
+                        return 0;
+                    }
+                    else
+                    {
+                        SystemConsole.ForegroundColor = ConsoleColor.Red;
+                        SystemConsole.WriteLine($"Auto-merge incomplete: {resolveResult.Message}");
+                        SystemConsole.WriteLine("Run 'koware sync resolve' to retry or 'koware sync abort' to cancel.");
+                        SystemConsole.ResetColor();
+                        
+                        if (hasLocalChanges)
+                        {
+                            SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+                            SystemConsole.WriteLine("Your local changes are still stashed.");
+                            SystemConsole.ResetColor();
+                        }
+                        return 1;
+                    }
+                }
+
                 SystemConsole.ForegroundColor = ConsoleColor.Red;
                 SystemConsole.WriteLine($"Failed to pull: {pullError}");
                 SystemConsole.ResetColor();
@@ -641,6 +709,30 @@ public sealed class SyncCommand : ICliCommand
             return 1;
         }
 
+        var mergeEngine = new SyncMergeEngine(dataDir);
+
+        // Check for existing unmerged files first
+        if (await mergeEngine.HasUnmergedFilesAsync())
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.Yellow;
+            SystemConsole.WriteLine("Found unmerged files. Attempting auto-resolve first...");
+            SystemConsole.ResetColor();
+
+            var resolveResult = await mergeEngine.AutoResolveConflictsAsync(verbose: true);
+            if (!resolveResult.Success)
+            {
+                SystemConsole.ForegroundColor = ConsoleColor.Red;
+                SystemConsole.WriteLine($"Could not auto-resolve: {resolveResult.Message}");
+                SystemConsole.WriteLine("Run 'koware sync resolve' to retry or 'koware sync abort' to cancel.");
+                SystemConsole.ResetColor();
+                return 1;
+            }
+            SystemConsole.ForegroundColor = ConsoleColor.Green;
+            SystemConsole.WriteLine($"[+] Resolved {resolveResult.FilesResolved} conflict(s)");
+            SystemConsole.ResetColor();
+            SystemConsole.WriteLine();
+        }
+
         // Check if remote exists
         var (_, remote, _) = await RunGitAsync(dataDir, "remote get-url origin");
         if (string.IsNullOrWhiteSpace(remote))
@@ -675,7 +767,28 @@ public sealed class SyncCommand : ICliCommand
             (pullCode, pullOutput, pullError) = await RunGitAsync(dataDir, "pull origin HEAD");
         }
         
-        if (pullCode == 0 || pullError.Contains("Couldn't find remote ref"))
+        // Check for merge conflicts after pull
+        if (pullCode != 0 && (pullError.Contains("CONFLICT") || pullError.Contains("unmerged") || 
+            await mergeEngine.HasUnmergedFilesAsync()))
+        {
+            WriteStepResult("!", "Merge conflict detected, auto-resolving...", ConsoleColor.Yellow);
+            var resolveResult = await mergeEngine.AutoResolveConflictsAsync(verbose: false);
+            if (resolveResult.Success)
+            {
+                WriteStepResult("✓", $"Auto-merged {resolveResult.FilesResolved} conflict(s)", ConsoleColor.Green);
+                pullCode = 0; // Mark as successful
+            }
+            else
+            {
+                WriteStepResult("✗", "Could not auto-merge", ConsoleColor.Red);
+                if (hasLocalChanges)
+                {
+                    await RunGitAsync(dataDir, "stash pop");
+                }
+                return 1;
+            }
+        }
+        else if (pullCode == 0 || pullError.Contains("Couldn't find remote ref"))
         {
             WriteStepResult("✓", "Up to date with remote", ConsoleColor.Green);
         }
@@ -857,6 +970,110 @@ public sealed class SyncCommand : ICliCommand
         SystemConsole.WriteLine(message);
     }
 
+    private static async Task<int> ResolveConflictsAsync(CommandContext context)
+    {
+        var dataDir = GetDataDirectory();
+        var gitDir = Path.Combine(dataDir, ".git");
+
+        if (!Directory.Exists(gitDir))
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.Red;
+            SystemConsole.WriteLine("Git sync not initialized.");
+            SystemConsole.ResetColor();
+            return 1;
+        }
+
+        var mergeEngine = new SyncMergeEngine(dataDir);
+
+        if (!await mergeEngine.HasUnmergedFilesAsync())
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+            SystemConsole.WriteLine("No merge conflicts to resolve.");
+            SystemConsole.ResetColor();
+            return 0;
+        }
+
+        SystemConsole.ForegroundColor = ConsoleColor.Cyan;
+        SystemConsole.WriteLine("Resolving merge conflicts...");
+        SystemConsole.ResetColor();
+
+        var result = await mergeEngine.AutoResolveConflictsAsync(verbose: true);
+
+        if (result.Success)
+        {
+            SystemConsole.WriteLine();
+            SystemConsole.ForegroundColor = ConsoleColor.Green;
+            SystemConsole.WriteLine($"[+] Successfully resolved {result.FilesResolved} conflict(s)");
+            SystemConsole.ResetColor();
+            return 0;
+        }
+        else
+        {
+            SystemConsole.WriteLine();
+            SystemConsole.ForegroundColor = ConsoleColor.Red;
+            SystemConsole.WriteLine($"Could not resolve all conflicts: {result.Message}");
+            SystemConsole.WriteLine("You may need to manually resolve remaining conflicts.");
+            SystemConsole.WriteLine("Run 'koware sync abort' to cancel the merge.");
+            SystemConsole.ResetColor();
+            return 1;
+        }
+    }
+
+    private static async Task<int> AbortMergeAsync(CommandContext context)
+    {
+        var dataDir = GetDataDirectory();
+        var gitDir = Path.Combine(dataDir, ".git");
+
+        if (!Directory.Exists(gitDir))
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.Red;
+            SystemConsole.WriteLine("Git sync not initialized.");
+            SystemConsole.ResetColor();
+            return 1;
+        }
+
+        var mergeEngine = new SyncMergeEngine(dataDir);
+
+        if (!mergeEngine.IsInMergeState() && !await mergeEngine.HasUnmergedFilesAsync())
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+            SystemConsole.WriteLine("No merge in progress to abort.");
+            SystemConsole.ResetColor();
+            return 0;
+        }
+
+        SystemConsole.ForegroundColor = ConsoleColor.Yellow;
+        SystemConsole.WriteLine("Aborting merge...");
+        SystemConsole.ResetColor();
+
+        var success = await mergeEngine.AbortMergeAsync();
+
+        if (success)
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.Green;
+            SystemConsole.WriteLine("[+] Merge aborted. Repository restored to previous state.");
+            SystemConsole.ResetColor();
+            return 0;
+        }
+        else
+        {
+            // Try git reset as fallback
+            var (resetCode, _, _) = await RunGitAsync(dataDir, "reset --hard HEAD");
+            if (resetCode == 0)
+            {
+                SystemConsole.ForegroundColor = ConsoleColor.Green;
+                SystemConsole.WriteLine("[+] Reset to HEAD. Any uncommitted changes were discarded.");
+                SystemConsole.ResetColor();
+                return 0;
+            }
+
+            SystemConsole.ForegroundColor = ConsoleColor.Red;
+            SystemConsole.WriteLine("Failed to abort merge. Try manually running: git merge --abort");
+            SystemConsole.ResetColor();
+            return 1;
+        }
+    }
+
     private static async Task<int> AutoSyncAsync(string[] args, CommandContext context)
     {
         var dataDir = GetDataDirectory();
@@ -960,10 +1177,12 @@ public sealed class SyncCommand : ICliCommand
         SystemConsole.WriteLine("  now / quick         Quick sync: pull → commit → push (recommended)");
         SystemConsole.WriteLine("  diff                Show pending changes before syncing");
         SystemConsole.WriteLine("  push [message]      Commit and push changes to remote");
-        SystemConsole.WriteLine("  pull                Pull changes from remote");
+        SystemConsole.WriteLine("  pull                Pull changes from remote (auto-merges conflicts)");
         SystemConsole.WriteLine("  log                 Show sync history");
         SystemConsole.WriteLine("  clone <url>         Clone from existing sync repository");
         SystemConsole.WriteLine("  auto [on|off]       Enable/disable automatic background sync");
+        SystemConsole.WriteLine("  resolve             Auto-resolve merge conflicts");
+        SystemConsole.WriteLine("  abort               Abort current merge and restore previous state");
         SystemConsole.WriteLine();
         SystemConsole.WriteLine("Setup (new sync):");
         SystemConsole.WriteLine("  1. koware sync init     # Auto-creates GitHub repo if gh CLI installed");
