@@ -490,18 +490,29 @@ public sealed class SyncMergeEngine
         }
 
         using var process = new Process { StartInfo = psi };
-        var output = new StringBuilder();
-        var error = new StringBuilder();
-
-        process.OutputDataReceived += (_, e) => { if (e.Data != null) output.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data != null) error.AppendLine(e.Data); };
-
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        await process.WaitForExitAsync();
-
-        return (process.ExitCode, output.ToString().Trim(), error.ToString().Trim());
+        
+        try
+        {
+            process.Start();
+            
+            // Read stdout and stderr concurrently to avoid deadlocks
+            // Using ReadToEndAsync is safer than event-based reading which can cause AccessViolationException
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+            
+            // Wait for both streams to complete
+            await Task.WhenAll(outputTask, errorTask);
+            
+            // Wait for process to exit
+            await process.WaitForExitAsync();
+            
+            return (process.ExitCode, outputTask.Result.Trim(), errorTask.Result.Trim());
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        {
+            // Process may have exited prematurely
+            return (-1, "", ex.Message);
+        }
     }
 
     private static void Cleanup(params string[] paths)
