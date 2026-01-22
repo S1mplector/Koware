@@ -30,6 +30,8 @@ public sealed class SyncCommand : ICliCommand
             "log" => await LogAsync(context),
             "clone" => await CloneAsync(args, context),
             "auto" => await AutoSyncAsync(args, context),
+            "now" or "quick" => await QuickSyncAsync(context),
+            "diff" => await DiffAsync(context),
             "help" or "--help" or "-h" => ShowHelp(),
             _ => ShowHelp()
         };
@@ -626,6 +628,235 @@ public sealed class SyncCommand : ICliCommand
         return 0;
     }
 
+    private static async Task<int> QuickSyncAsync(CommandContext context)
+    {
+        var dataDir = GetDataDirectory();
+        var gitDir = Path.Combine(dataDir, ".git");
+
+        if (!Directory.Exists(gitDir))
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.Red;
+            SystemConsole.WriteLine("Git sync not initialized. Run 'koware sync init' first.");
+            SystemConsole.ResetColor();
+            return 1;
+        }
+
+        // Check if remote exists
+        var (_, remote, _) = await RunGitAsync(dataDir, "remote get-url origin");
+        if (string.IsNullOrWhiteSpace(remote))
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.Red;
+            SystemConsole.WriteLine("No remote configured. Run 'koware sync init <url>' first.");
+            SystemConsole.ResetColor();
+            return 1;
+        }
+
+        SystemConsole.ForegroundColor = ConsoleColor.Cyan;
+        SystemConsole.WriteLine("╭──────────────────────────────────────╮");
+        SystemConsole.WriteLine("│           Quick Sync                 │");
+        SystemConsole.WriteLine("╰──────────────────────────────────────╯");
+        SystemConsole.ResetColor();
+        SystemConsole.WriteLine();
+
+        // Step 1: Pull first to get remote changes
+        WriteStep(1, 3, "Pulling remote changes...");
+        var (_, statusBefore, _) = await RunGitAsync(dataDir, "status --porcelain");
+        var hasLocalChanges = !string.IsNullOrWhiteSpace(statusBefore);
+        
+        if (hasLocalChanges)
+        {
+            await RunGitAsync(dataDir, "stash");
+        }
+
+        var (pullCode, pullOutput, pullError) = await RunGitAsync(dataDir, "pull --rebase origin HEAD");
+        if (pullCode != 0 && !pullError.Contains("Couldn't find remote ref"))
+        {
+            // Try without rebase
+            (pullCode, pullOutput, pullError) = await RunGitAsync(dataDir, "pull origin HEAD");
+        }
+        
+        if (pullCode == 0 || pullError.Contains("Couldn't find remote ref"))
+        {
+            WriteStepResult("✓", "Up to date with remote", ConsoleColor.Green);
+        }
+        else
+        {
+            WriteStepResult("!", "Pull had issues (continuing anyway)", ConsoleColor.Yellow);
+        }
+
+        if (hasLocalChanges)
+        {
+            await RunGitAsync(dataDir, "stash pop");
+        }
+
+        // Step 2: Stage and commit local changes
+        WriteStep(2, 3, "Committing local changes...");
+        await RunGitAsync(dataDir, "add -A");
+        var (_, statusAfter, _) = await RunGitAsync(dataDir, "status --porcelain");
+        
+        if (!string.IsNullOrWhiteSpace(statusAfter))
+        {
+            var changeCount = statusAfter.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length;
+            var message = $"Sync from {Environment.MachineName} at {DateTime.Now:g}";
+            await RunGitAsync(dataDir, $"commit -m \"{message}\"");
+            WriteStepResult("✓", $"Committed {changeCount} change(s)", ConsoleColor.Green);
+        }
+        else
+        {
+            WriteStepResult("○", "No local changes", ConsoleColor.DarkGray);
+        }
+
+        // Step 3: Push to remote
+        WriteStep(3, 3, "Pushing to remote...");
+        var (pushCode, _, pushError) = await RunGitAsync(dataDir, "push -u origin HEAD");
+        
+        if (pushCode != 0 && pushError.Contains("no upstream branch"))
+        {
+            (pushCode, _, pushError) = await RunGitAsync(dataDir, "push --set-upstream origin main");
+        }
+
+        if (pushCode == 0)
+        {
+            WriteStepResult("✓", "Pushed successfully", ConsoleColor.Green);
+        }
+        else if (pushError.Contains("Everything up-to-date"))
+        {
+            WriteStepResult("○", "Already up to date", ConsoleColor.DarkGray);
+        }
+        else
+        {
+            WriteStepResult("✗", "Push failed", ConsoleColor.Red);
+            SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+            SystemConsole.WriteLine($"     {pushError.Split('\n')[0]}");
+            SystemConsole.ResetColor();
+        }
+
+        // Summary
+        SystemConsole.WriteLine();
+        SystemConsole.ForegroundColor = ConsoleColor.Green;
+        SystemConsole.WriteLine("[+] Quick sync complete");
+        SystemConsole.ResetColor();
+
+        return 0;
+    }
+
+    private static async Task<int> DiffAsync(CommandContext context)
+    {
+        var dataDir = GetDataDirectory();
+        var gitDir = Path.Combine(dataDir, ".git");
+
+        if (!Directory.Exists(gitDir))
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.Red;
+            SystemConsole.WriteLine("Git sync not initialized.");
+            SystemConsole.ResetColor();
+            return 1;
+        }
+
+        SystemConsole.ForegroundColor = ConsoleColor.Cyan;
+        SystemConsole.WriteLine("Pending Changes");
+        SystemConsole.ResetColor();
+        SystemConsole.WriteLine(new string('─', 50));
+        SystemConsole.WriteLine();
+
+        // Get status
+        var (_, statusOutput, _) = await RunGitAsync(dataDir, "status --porcelain");
+        
+        if (string.IsNullOrWhiteSpace(statusOutput))
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+            SystemConsole.WriteLine("  No pending changes.");
+            SystemConsole.ResetColor();
+            return 0;
+        }
+
+        var lines = statusOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var added = 0;
+        var modified = 0;
+        var deleted = 0;
+
+        foreach (var line in lines)
+        {
+            if (line.Length < 3) continue;
+            
+            var status = line[0..2].Trim();
+            var file = line[3..].Trim();
+            
+            var (icon, color, label) = status switch
+            {
+                "A" or "?" => ("+", ConsoleColor.Green, "added"),
+                "M" => ("~", ConsoleColor.Yellow, "modified"),
+                "D" => ("-", ConsoleColor.Red, "deleted"),
+                "R" => ("→", ConsoleColor.Cyan, "renamed"),
+                _ => ("?", ConsoleColor.Gray, "changed")
+            };
+
+            if (status is "A" or "?") added++;
+            else if (status == "M") modified++;
+            else if (status == "D") deleted++;
+
+            SystemConsole.Write("  ");
+            SystemConsole.ForegroundColor = color;
+            SystemConsole.Write($"[{icon}] ");
+            SystemConsole.ResetColor();
+            SystemConsole.ForegroundColor = ConsoleColor.White;
+            SystemConsole.Write(file);
+            SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+            SystemConsole.WriteLine($"  ({label})");
+            SystemConsole.ResetColor();
+        }
+
+        // Summary
+        SystemConsole.WriteLine();
+        SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+        SystemConsole.WriteLine(new string('─', 50));
+        SystemConsole.ResetColor();
+        
+        SystemConsole.Write("  Summary: ");
+        if (added > 0)
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.Green;
+            SystemConsole.Write($"+{added} ");
+        }
+        if (modified > 0)
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.Yellow;
+            SystemConsole.Write($"~{modified} ");
+        }
+        if (deleted > 0)
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.Red;
+            SystemConsole.Write($"-{deleted} ");
+        }
+        SystemConsole.ResetColor();
+        SystemConsole.WriteLine();
+        
+        SystemConsole.WriteLine();
+        SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+        SystemConsole.WriteLine("  Run 'koware sync push' to commit and push these changes.");
+        SystemConsole.WriteLine("  Run 'koware sync now' for quick sync (pull + commit + push).");
+        SystemConsole.ResetColor();
+
+        return 0;
+    }
+
+    private static void WriteStep(int step, int total, string message)
+    {
+        SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+        SystemConsole.Write($"  [{step}/{total}] ");
+        SystemConsole.ResetColor();
+        SystemConsole.WriteLine(message);
+    }
+
+    private static void WriteStepResult(string icon, string message, ConsoleColor color)
+    {
+        SystemConsole.Write("       ");
+        SystemConsole.ForegroundColor = color;
+        SystemConsole.Write($"{icon} ");
+        SystemConsole.ResetColor();
+        SystemConsole.WriteLine(message);
+    }
+
     private static async Task<int> AutoSyncAsync(string[] args, CommandContext context)
     {
         var dataDir = GetDataDirectory();
@@ -726,6 +957,8 @@ public sealed class SyncCommand : ICliCommand
         SystemConsole.WriteLine("Commands:");
         SystemConsole.WriteLine("  status              Show sync status");
         SystemConsole.WriteLine("  init [url]          Initialize git sync (optionally with remote)");
+        SystemConsole.WriteLine("  now / quick         Quick sync: pull → commit → push (recommended)");
+        SystemConsole.WriteLine("  diff                Show pending changes before syncing");
         SystemConsole.WriteLine("  push [message]      Commit and push changes to remote");
         SystemConsole.WriteLine("  pull                Pull changes from remote");
         SystemConsole.WriteLine("  log                 Show sync history");

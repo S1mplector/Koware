@@ -3140,13 +3140,27 @@ static async Task<int> ShowListAsync(IAnimeListStore animeList, AnimeWatchStatus
 
     if (entries.Count == 0)
     {
+        Console.WriteLine();
         if (statusFilter.HasValue)
         {
-            Console.WriteLine($"No anime with status '{statusFilter.Value.ToDisplayString()}' in your list.");
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine($"  No anime with status '{statusFilter.Value.ToDisplayString()}' in your list.");
+            Console.ResetColor();
         }
         else
         {
-            Console.WriteLine("Your anime list is empty. Use 'koware list add \"<title>\"' to add anime.");
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("  ╭─────────────────────────────────────────╮");
+            Console.WriteLine("  │         Your anime list is empty        │");
+            Console.WriteLine("  ╰─────────────────────────────────────────╯");
+            Console.ResetColor();
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine("  Get started:");
+            Console.ResetColor();
+            Console.WriteLine("    koware list add \"<anime title>\"");
+            Console.WriteLine("    koware list add \"<title>\" --status watching");
+            Console.WriteLine();
         }
         return 0;
     }
@@ -3168,29 +3182,130 @@ static async Task<int> ShowListAsync(IAnimeListStore animeList, AnimeWatchStatus
         return 0;
     }
 
+    // Header
+    Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Cyan;
-    Console.WriteLine(statusFilter.HasValue ? $"Anime List ({statusFilter.Value.ToDisplayString()})" : "Anime List");
+    var title = statusFilter.HasValue ? $"Anime List • {statusFilter.Value.ToDisplayString()}" : "Anime List";
+    Console.WriteLine($"  {title}");
     Console.ResetColor();
-    Console.WriteLine($"{"#",3} {"Status",-14} {"Progress",-10} {"Score",-6} {"Title",-40}");
-    Console.WriteLine(new string('─', 80));
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine($"  {entries.Count} {(entries.Count == 1 ? "entry" : "entries")}");
+    Console.ResetColor();
+    Console.WriteLine();
+
+    // Table header
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine($"  {"#",-4} {"Status",-12} {"Progress",-14} {"Score",-7} Title");
+    Console.WriteLine($"  {"─",-4} {"────────────",-12} {"──────────────",-14} {"─────",-7} {"─".PadRight(40, '─')}");
+    Console.ResetColor();
 
     var index = 1;
     foreach (var e in entries)
     {
-        var progress = e.TotalEpisodes.HasValue
-            ? $"{e.EpisodesWatched}/{e.TotalEpisodes}"
-            : $"{e.EpisodesWatched}/?";
-        var scoreStr = e.Score.HasValue ? $"{e.Score}/10" : "-";
+        // Status icon and color
+        var (statusIcon, statusColor) = e.Status switch
+        {
+            AnimeWatchStatus.Watching => ("▶", ConsoleColor.Green),
+            AnimeWatchStatus.Completed => ("✓", ConsoleColor.Cyan),
+            AnimeWatchStatus.PlanToWatch => ("○", ConsoleColor.DarkGray),
+            AnimeWatchStatus.OnHold => ("‖", ConsoleColor.Yellow),
+            AnimeWatchStatus.Dropped => ("✗", ConsoleColor.Red),
+            _ => (" ", ConsoleColor.Gray)
+        };
 
-        Console.Write($"{index,3} ");
-        Console.ForegroundColor = e.Status.ToColor();
-        Console.Write($"{e.Status.ToDisplayString(),-14}");
+        // Progress bar
+        var progressBar = RenderProgressBar(e.EpisodesWatched, e.TotalEpisodes, 8);
+        var progressText = e.TotalEpisodes.HasValue
+            ? $"{e.EpisodesWatched,3}/{e.TotalEpisodes,-3}"
+            : $"{e.EpisodesWatched,3}/?  ";
+
+        // Score display
+        var scoreStr = e.Score.HasValue ? $"★{e.Score,-2}" : "  -";
+        var scoreColor = e.Score switch
+        {
+            >= 8 => ConsoleColor.Green,
+            >= 6 => ConsoleColor.Yellow,
+            >= 4 => ConsoleColor.DarkYellow,
+            > 0 => ConsoleColor.Red,
+            _ => ConsoleColor.DarkGray
+        };
+
+        // Row output
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write($"  {index,-4}");
+        
+        Console.ForegroundColor = statusColor;
+        Console.Write($"{statusIcon} {e.Status.ToDisplayString(),-10}");
+        
         Console.ResetColor();
-        Console.WriteLine($" {progress,-10} {scoreStr,-6} {Truncate(e.AnimeTitle, 40),-40}");
+        Console.Write($" {progressBar} {progressText} ");
+        
+        Console.ForegroundColor = scoreColor;
+        Console.Write($"{scoreStr,-7}");
+        
+        Console.ResetColor();
+        Console.WriteLine($" {Truncate(e.AnimeTitle, 38)}");
+        
         index++;
     }
 
+    // Summary footer
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine($"  {"─".PadRight(78, '─')}");
+    Console.ResetColor();
+    
+    // Quick stats
+    var stats = entries.GroupBy(e => e.Status).ToDictionary(g => g.Key, g => g.Count());
+    var totalEps = entries.Sum(e => e.EpisodesWatched);
+    var avgScore = entries.Where(e => e.Score.HasValue).Select(e => e.Score!.Value).DefaultIfEmpty(0).Average();
+    
+    Console.Write("  ");
+    if (stats.TryGetValue(AnimeWatchStatus.Watching, out var watching) && watching > 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($"▶ {watching} watching  ");
+    }
+    if (stats.TryGetValue(AnimeWatchStatus.Completed, out var completed) && completed > 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.Write($"✓ {completed} completed  ");
+    }
+    if (stats.TryGetValue(AnimeWatchStatus.PlanToWatch, out var planned) && planned > 0)
+    {
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write($"○ {planned} planned  ");
+    }
+    Console.ResetColor();
+    
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.Write($"│ {totalEps} eps");
+    if (avgScore > 0)
+    {
+        Console.Write($" │ avg ★{avgScore:F1}");
+    }
+    Console.WriteLine();
+    Console.ResetColor();
+    Console.WriteLine();
+
     return 0;
+}
+
+/// <summary>
+/// Render a mini progress bar for episode progress.
+/// </summary>
+static string RenderProgressBar(int current, int? total, int width)
+{
+    if (!total.HasValue || total.Value <= 0)
+    {
+        return new string('░', width);
+    }
+    
+    var percent = Math.Min(1.0, (double)current / total.Value);
+    var filled = (int)(percent * width);
+    var empty = width - filled;
+    
+    return new string('█', filled) + new string('░', empty);
 }
 
 // ===== Manga List Functions =====
