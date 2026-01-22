@@ -795,23 +795,46 @@ static async Task<int> HandleDoctorAsync(string[] args, IServiceProvider service
         {
             if (!jsonOutput)
             {
-                // Show progress bar while running diagnostics
+                // Show progress bar with debug logging while running diagnostics
                 var lastCategory = "";
                 var progress = new Progress<(int current, int total, string category)>(p =>
                 {
-                    lastCategory = p.category;
+                    // Clear the current line
+                    Console.Write("\r" + new string(' ', 80) + "\r");
+                    
+                    // If category changed, log the previous completion and new start
+                    if (lastCategory != p.category)
+                    {
+                        if (!string.IsNullOrEmpty(lastCategory))
+                        {
+                            Console.ForegroundColor = ConsoleColor.DarkGray;
+                            Console.WriteLine($"  ✓ {lastCategory}");
+                            Console.ResetColor();
+                        }
+                        lastCategory = p.category;
+                    }
+                    
+                    // Show progress bar with current category
                     var percent = (int)(p.current * 100.0 / p.total);
                     var filled = (int)(p.current * 30.0 / p.total);
                     var empty = 30 - filled;
                     var bar = new string('█', filled) + new string('░', empty);
                     
-                    Console.Write($"\r  [{bar}] {percent,3}% - {p.category,-20}");
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.Write($"  [{bar}] {percent,3}% ");
+                    Console.ResetColor();
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                    Console.Write($"Running: {p.category}...");
+                    Console.ResetColor();
                 });
                 
                 results = await engine.RunAllWithProgressAsync(progress, cancellationToken);
                 
-                // Clear progress bar and show completion
-                Console.Write("\r" + new string(' ', 70) + "\r");
+                // Clear progress bar and log final category completion
+                Console.Write("\r" + new string(' ', 80) + "\r");
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine($"  ✓ {lastCategory}");
+                Console.ResetColor();
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine($"  ✔ {results.Count} checks completed");
                 Console.ResetColor();
