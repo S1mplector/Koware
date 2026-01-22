@@ -1,4 +1,6 @@
 // Author: Ilgaz Mehmetoğlu
+using System.Net;
+using System.Net.Http;
 using System.Text.Json;
 using Koware.Autoconfig.Models;
 using Koware.Autoconfig.Orchestration;
@@ -441,7 +443,7 @@ public sealed class ProviderCommand : ICliCommand
         {
             if (source.StartsWith("http"))
             {
-                using var client = new HttpClient();
+                using var client = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) });
                 json = await client.GetStringAsync(source, ct);
             }
             else

@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -758,7 +759,7 @@ static async Task<int> HandleDoctorAsync(string[] args, IServiceProvider service
     var configPath = GetUserConfigFilePath();
 
     var engine = new DiagnosticsEngine(
-        new HttpClient(),
+        new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) }),
         animeOptions,
         mangaOptions,
         configPath);
@@ -1601,7 +1602,7 @@ static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOpt
         ? providers.Keys.ToList()
         : new List<string> { providerName.ToLowerInvariant() };
     
-    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+    using var http = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) }) { Timeout = TimeSpan.FromSeconds(10) };
     var allPassed = true;
     
     foreach (var name in toTest)
@@ -1938,7 +1939,7 @@ static async Task<int> HandleRemoteManifestAutoconfigAsync(string? providerName,
     const string repoBase = "https://raw.githubusercontent.com/S1mplector/koware-providers/main";
     const string manifestUrl = $"{repoBase}/providers.json";
     
-    using var http = new HttpClient();
+    using var http = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) });
     http.DefaultRequestHeaders.Add("User-Agent", "Koware-CLI");
     
     // Fetch manifest
@@ -6355,7 +6356,7 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
     var allAnimeOptions = services.GetService<IOptions<AllAnimeOptions>>()?.Value;
     var defaultReferrer = allAnimeOptions?.Referer;
 
-    using var httpClient = new HttpClient();
+    using var httpClient = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) });
 
     var total = targets.Count;
     var index = 0;
@@ -7421,7 +7422,7 @@ static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider 
     Directory.CreateDirectory(targetDir);
 
     var allMangaOptions = services.GetService<IOptions<AllMangaOptions>>()?.Value;
-    using var httpClient = new HttpClient();
+    using var httpClient = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) });
     if (!string.IsNullOrWhiteSpace(allMangaOptions?.UserAgent))
     {
         httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(allMangaOptions.UserAgent);

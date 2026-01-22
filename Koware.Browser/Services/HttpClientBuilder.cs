@@ -38,9 +38,10 @@ internal sealed class HttpClientBuilder
 
     public HttpClient Build()
     {
-        var handler = new HttpClientHandler
+        var handler = new SocketsHttpHandler
         {
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2)
         };
 
         var client = new HttpClient(handler)

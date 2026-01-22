@@ -42,9 +42,10 @@ public static class InfrastructureServiceCollectionExtensions
             client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
             client.DefaultRequestVersion = HttpVersion.Version11;
             client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
-        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
         {
-            AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate
+            AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2)
         });
 
         services.AddHttpClient<AllMangaCatalog>((sp, client) =>
@@ -64,9 +65,10 @@ public static class InfrastructureServiceCollectionExtensions
             client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
             client.DefaultRequestVersion = HttpVersion.Version11;
             client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
-        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
         {
-            AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate
+            AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2)
         });
 
         services.AddSingleton<AllAnimeCatalog>();
