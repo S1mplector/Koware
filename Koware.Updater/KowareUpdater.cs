@@ -90,7 +90,7 @@ public static class KowareUpdater
         CancellationToken cancellationToken = default)
     {
         using var httpClient = CreateGitHubClient();
-        var latest = await GetLatestInstallerAssetAsync(httpClient, cancellationToken).ConfigureAwait(false);
+        var latest = await GetLatestInstallerAssetAsync(httpClient, GetPlatformIdentifier(), cancellationToken).ConfigureAwait(false);
         return new KowareLatestVersion(latest.Tag, latest.Name);
     }
 

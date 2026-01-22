@@ -94,10 +94,10 @@ public sealed class UpdateCommand : ICliCommand
             System.Console.WriteLine();
 
             // Check platform support
-            if (!OperatingSystem.IsWindows())
+            if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
             {
                 System.Console.ForegroundColor = ConsoleColor.Yellow;
-                System.Console.WriteLine("Auto-update is currently only supported on Windows.");
+                System.Console.WriteLine("Auto-update is not supported on this platform.");
                 System.Console.WriteLine("Please download the latest release manually from:");
                 System.Console.WriteLine("  https://github.com/S1mplector/Koware/releases");
                 System.Console.ResetColor();

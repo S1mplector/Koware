@@ -991,7 +991,14 @@ public sealed class SyncCommand : ICliCommand
         {
             return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "koware");
         }
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "koware");
+        
+        // Linux/macOS: respect XDG_CONFIG_HOME
+        var configHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        if (string.IsNullOrEmpty(configHome))
+        {
+            configHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
+        }
+        return Path.Combine(configHome, "koware");
     }
 
     private static async Task<(int exitCode, string output, string error)> RunGitAsync(string workingDir, string arguments)

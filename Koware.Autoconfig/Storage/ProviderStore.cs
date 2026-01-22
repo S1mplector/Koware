@@ -271,8 +271,13 @@ public sealed class ProviderStore : IProviderStore
             return Path.Combine(appData, "koware");
         }
         
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(home, ".config", "koware");
+        // Linux/macOS: respect XDG_CONFIG_HOME
+        var configHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        if (string.IsNullOrEmpty(configHome))
+        {
+            configHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
+        }
+        return Path.Combine(configHome, "koware");
     }
 
     private void EnsureDirectoriesExist()

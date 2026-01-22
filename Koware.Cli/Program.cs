@@ -1504,9 +1504,29 @@ static int HandleProviderEdit(string configPath)
         }
         else
         {
-            // Linux - try common editors
-            var editor = Environment.GetEnvironmentVariable("EDITOR") ?? "nano";
-            Process.Start(editor, configPath);
+            // Linux - try $VISUAL, $EDITOR, then common editors, finally xdg-open
+            var editor = Environment.GetEnvironmentVariable("VISUAL") 
+                      ?? Environment.GetEnvironmentVariable("EDITOR");
+            
+            if (!string.IsNullOrWhiteSpace(editor))
+            {
+                Process.Start(new ProcessStartInfo 
+                { 
+                    FileName = editor, 
+                    Arguments = $"\"{configPath}\"",
+                    UseShellExecute = false 
+                });
+            }
+            else
+            {
+                // Try xdg-open which respects desktop environment preferences
+                Process.Start(new ProcessStartInfo 
+                { 
+                    FileName = "xdg-open", 
+                    Arguments = $"\"{configPath}\"",
+                    UseShellExecute = false 
+                });
+            }
         }
         return 0;
     }
@@ -1514,6 +1534,10 @@ static int HandleProviderEdit(string configPath)
     {
         Koware.Cli.Console.ErrorDisplay.FromException(ex, "open editor");
         Console.WriteLine($"Manually edit: {configPath}");
+        if (OperatingSystem.IsLinux())
+        {
+            Console.WriteLine("Tip: Set $EDITOR or $VISUAL environment variable to your preferred editor.");
+        }
         return 1;
     }
 }
@@ -7785,7 +7809,21 @@ static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
         candidates.Add(options.Command);
     }
     
-    if (OperatingSystem.IsMacOS())
+    if (OperatingSystem.IsLinux())
+    {
+        // Linux: prefer mpv (most common), then vlc, then bundled Avalonia player
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        candidates.AddRange(new[] { 
+            "mpv",
+            "vlc",
+            "celluloid",  // GTK frontend for mpv
+            Path.Combine(homeDir, ".local", "share", "koware", "Koware.Player"),
+            Path.Combine(AppContext.BaseDirectory, "Koware.Player"),
+            "/opt/koware/player/Koware.Player",
+            "/usr/local/bin/koware/player/Koware.Player"
+        });
+    }
+    else if (OperatingSystem.IsMacOS())
     {
         // macOS: prefer IINA/mpv (native, works best), bundled Avalonia player requires LibVLC which has ARM64 issues
         candidates.AddRange(new[] { 
@@ -7838,9 +7876,19 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
 
     if (resolution.Path is null)
     {
-        var hint = OperatingSystem.IsMacOS() 
-            ? "Install IINA (brew install --cask iina) or mpv (brew install mpv), or set Player:Command in config."
-            : "Build Koware.Player.Win or set Player:Command in appsettings.json.";
+        string hint;
+        if (OperatingSystem.IsLinux())
+        {
+            hint = "Install mpv (sudo apt install mpv) or vlc (sudo apt install vlc), or set Player:Command in config.";
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            hint = "Install IINA (brew install --cask iina) or mpv (brew install mpv), or set Player:Command in config.";
+        }
+        else
+        {
+            hint = "Build Koware.Player.Win or set Player:Command in appsettings.json.";
+        }
         logger.LogError("No supported player found (tried {Candidates}). {Hint}", string.Join(", ", resolution.Candidates), hint);
         return 1;
     }
