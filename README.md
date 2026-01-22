@@ -4,7 +4,7 @@
 
 # Koware
 
-Koware is a **standalone**, console-first link/stream aggregator for **Windows**, **macOS**, and **Linux** that helps you search for anime/manga and open streams in a player from your terminal.
+Koware is a **standalone** link/stream aggregator for **Windows**, **macOS**, and **Linux** that helps you search for anime/manga and open streams in a player from your terminal.
 
 It has a text-based user interface but behaves like a regular CLI. You run a command, Koware queries your configured sources, and opens the selected stream in a video player or manga in a reader.
 

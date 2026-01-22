@@ -3357,13 +3357,22 @@ static async Task<int> HandleMangaListAsync(string[] args, IServiceProvider serv
         
         Func<MangaListEntry, Task> onRead = async entry =>
         {
-            var nextChapter = entry.ChaptersRead + 1;
-            await HandleReadAsync(
-                new[] { "read", entry.MangaTitle, "--chapter", nextChapter.ToString() },
-                svc,
-                log,
-                defaults,
-                ct);
+            var (chapterNum, startPage) = await ResolveNextChapterAsync(entry, svc, log, ct);
+            
+            var readArgs = new List<string> { "read", entry.MangaTitle };
+            if (chapterNum.HasValue)
+            {
+                readArgs.AddRange(new[] { "--chapter", chapterNum.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+            }
+            if (startPage > 1)
+            {
+                readArgs.AddRange(new[] { "--start-page", startPage.ToString() });
+            }
+            readArgs.Add("--index");
+            readArgs.Add("1");
+            readArgs.Add("--non-interactive");
+            
+            await HandleReadAsync(readArgs.ToArray(), svc, log, defaults, ct);
         };
 
         var listManager = new Koware.Cli.Console.InteractiveMangaListManager(
@@ -8027,6 +8036,125 @@ static async Task<ReadHistoryEntry?> ResolveReadHistoryAsync(IReadHistoryStore h
     }
 
     return entry;
+}
+
+/// <summary>
+/// Robustly resolve the next chapter to read for a manga list entry.
+/// Uses read history and chapter list to find the actual next chapter, handling non-sequential chapter numbers.
+/// </summary>
+/// <param name="entry">The manga list entry to continue reading.</param>
+/// <param name="services">Service provider for dependencies.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>Tuple of (nextChapterNumber, startPage). ChapterNumber is null to let interactive selection happen.</returns>
+static async Task<(float? ChapterNumber, int StartPage)> ResolveNextChapterAsync(
+    MangaListEntry entry,
+    IServiceProvider services,
+    ILogger logger,
+    CancellationToken cancellationToken)
+{
+    var readHistory = services.GetRequiredService<IReadHistoryStore>();
+    var catalog = services.GetRequiredService<IMangaCatalog>();
+    
+    // Step 1: Check read history for the actual last chapter read
+    var historyEntry = await readHistory.GetLastForMangaAsync(entry.MangaTitle, cancellationToken);
+    historyEntry ??= await readHistory.SearchLastAsync(entry.MangaTitle, cancellationToken);
+    
+    float lastReadChapter = historyEntry?.ChapterNumber ?? 0;
+    int lastPage = historyEntry?.LastPage ?? 0;
+    
+    // Step 2: Try to fetch the chapter list to find the next chapter
+    try
+    {
+        var searchResults = await catalog.SearchAsync(entry.MangaTitle, cancellationToken);
+        var manga = searchResults.FirstOrDefault(m => 
+            m.Title.Equals(entry.MangaTitle, StringComparison.OrdinalIgnoreCase)) 
+            ?? searchResults.FirstOrDefault();
+        
+        if (manga is null)
+        {
+            logger.LogDebug("Could not find manga '{Title}' in catalog, falling back to chapter {Chapter}", 
+                entry.MangaTitle, entry.ChaptersRead + 1);
+            return (entry.ChaptersRead + 1, 1);
+        }
+        
+        var chapters = await catalog.GetChaptersAsync(manga, cancellationToken);
+        if (chapters.Count == 0)
+        {
+            logger.LogDebug("No chapters found for '{Title}', falling back to chapter {Chapter}", 
+                entry.MangaTitle, entry.ChaptersRead + 1);
+            return (entry.ChaptersRead + 1, 1);
+        }
+        
+        var sortedChapters = chapters.OrderBy(c => c.Number).ToList();
+        
+        // Step 3: Find the next chapter after the last read one
+        if (lastReadChapter > 0)
+        {
+            // Find the chapter after lastReadChapter
+            var nextChapter = sortedChapters.FirstOrDefault(c => c.Number > lastReadChapter);
+            
+            if (nextChapter is not null)
+            {
+                logger.LogInformation("Continuing '{Title}' from chapter {Chapter} (after last read: {LastRead})", 
+                    entry.MangaTitle, nextChapter.Number, lastReadChapter);
+                return (nextChapter.Number, 1);
+            }
+            
+            // Check if we're still in the middle of the last chapter (resume with page)
+            var currentChapter = sortedChapters.FirstOrDefault(c => Math.Abs(c.Number - lastReadChapter) < 0.001f);
+            if (currentChapter is not null && lastPage > 1)
+            {
+                logger.LogInformation("Resuming '{Title}' chapter {Chapter} from page {Page}", 
+                    entry.MangaTitle, lastReadChapter, lastPage);
+                return (lastReadChapter, lastPage);
+            }
+            
+            // Already read the latest chapter, re-read it
+            logger.LogInformation("Already at latest chapter for '{Title}', starting from chapter {Chapter}", 
+                entry.MangaTitle, lastReadChapter);
+            return (lastReadChapter, 1);
+        }
+        
+        // Step 4: No history - use ChaptersRead from list entry to estimate
+        if (entry.ChaptersRead > 0)
+        {
+            // Find the chapter after the estimated position
+            // First try to find a chapter with number > ChaptersRead
+            var estimatedNext = sortedChapters.FirstOrDefault(c => c.Number > entry.ChaptersRead);
+            if (estimatedNext is not null)
+            {
+                logger.LogInformation("Starting '{Title}' from chapter {Chapter} (based on {Read} chapters read)", 
+                    entry.MangaTitle, estimatedNext.Number, entry.ChaptersRead);
+                return (estimatedNext.Number, 1);
+            }
+            
+            // If ChaptersRead exceeds all chapters, start from the last available
+            var lastChapter = sortedChapters.Last();
+            logger.LogInformation("ChaptersRead ({Read}) exceeds available chapters, starting '{Title}' from chapter {Chapter}", 
+                entry.ChaptersRead, entry.MangaTitle, lastChapter.Number);
+            return (lastChapter.Number, 1);
+        }
+        
+        // Step 5: No history and no progress - start from first chapter
+        var firstChapter = sortedChapters.First();
+        logger.LogInformation("Starting '{Title}' from first chapter {Chapter}", entry.MangaTitle, firstChapter.Number);
+        return (firstChapter.Number, 1);
+    }
+    catch (Exception ex)
+    {
+        // Fallback if catalog fails
+        logger.LogWarning(ex, "Failed to fetch chapters for '{Title}', falling back to chapter {Chapter}", 
+            entry.MangaTitle, Math.Max(1, entry.ChaptersRead + 1));
+        
+        // If we have history, use that
+        if (lastReadChapter > 0)
+        {
+            return (lastReadChapter + 1, 1);
+        }
+        
+        return (Math.Max(1, entry.ChaptersRead + 1), 1);
+    }
 }
 
 /// <summary>
