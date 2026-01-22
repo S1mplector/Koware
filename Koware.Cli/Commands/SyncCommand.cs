@@ -617,22 +617,41 @@ public sealed class SyncCommand : ICliCommand
             return 0;
         }
 
+        // Get current branch name
+        var (_, currentBranch, _) = await RunGitAsync(dataDir, "branch --show-current");
+        currentBranch = currentBranch.Trim();
+        if (string.IsNullOrEmpty(currentBranch))
+        {
+            currentBranch = "main"; // fallback
+        }
+
         // Push to remote
         SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
         SystemConsole.WriteLine($"Pushing to {remote.Trim()}...");
         SystemConsole.ResetColor();
 
-        var (pushCode, pushOutput, pushError) = await RunGitAsync(dataDir, "push -u origin HEAD");
+        var (pushCode, pushOutput, pushError) = await RunGitAsync(dataDir, $"push -u origin {currentBranch}");
         if (pushCode != 0)
         {
             // Try setting upstream if first push
-            if (pushError.Contains("no upstream branch"))
+            if (pushError.Contains("no upstream") || pushError.Contains("does not match any") || 
+                pushError.Contains("failed to push"))
             {
-                (pushCode, pushOutput, pushError) = await RunGitAsync(dataDir, "push --set-upstream origin main");
+                (pushCode, pushOutput, pushError) = await RunGitAsync(dataDir, $"push --set-upstream origin {currentBranch}");
             }
             
             if (pushCode != 0)
             {
+                // Check if actually up-to-date (message can be in stdout)
+                if (pushOutput.Contains("Everything up-to-date"))
+                {
+                    SystemConsole.WriteLine();
+                    SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
+                    SystemConsole.WriteLine("Already up to date with remote.");
+                    SystemConsole.ResetColor();
+                    return 0;
+                }
+                
                 SystemConsole.ForegroundColor = ConsoleColor.Red;
                 SystemConsole.WriteLine($"Failed to push: {pushError}");
                 SystemConsole.ResetColor();
@@ -1041,36 +1060,74 @@ public sealed class SyncCommand : ICliCommand
 
         // Step 3: Push to remote
         WriteStep(3, 3, "Pushing to remote...");
-        var (pushCode, _, pushError) = await RunGitAsync(dataDir, "push -u origin HEAD");
         
-        if (pushCode != 0 && pushError.Contains("no upstream branch"))
+        // Get current branch name
+        var (_, currentBranch, _) = await RunGitAsync(dataDir, "branch --show-current");
+        currentBranch = currentBranch.Trim();
+        if (string.IsNullOrEmpty(currentBranch))
         {
-            (pushCode, _, pushError) = await RunGitAsync(dataDir, "push --set-upstream origin main");
+            currentBranch = "main"; // fallback
+        }
+        
+        // Try push with current branch
+        var (pushCode, pushOutput, pushError) = await RunGitAsync(dataDir, $"push -u origin {currentBranch}");
+        
+        // Handle various push failure scenarios
+        if (pushCode != 0)
+        {
+            // Try setting upstream if needed
+            if (pushError.Contains("no upstream") || pushError.Contains("does not match any") || 
+                pushError.Contains("failed to push"))
+            {
+                // Try with --set-upstream
+                (pushCode, pushOutput, pushError) = await RunGitAsync(dataDir, $"push --set-upstream origin {currentBranch}");
+            }
+            
+            // If still failing, try force pushing (for empty remotes or diverged branches)
+            if (pushCode != 0 && (pushError.Contains("rejected") || pushError.Contains("non-fast-forward")))
+            {
+                // Ask if we should force push? For now, just report error
+            }
         }
 
+        var pushSucceeded = false;
         if (pushCode == 0)
         {
             WriteStepResult("✓", "Pushed successfully", ConsoleColor.Green);
+            pushSucceeded = true;
         }
-        else if (pushError.Contains("Everything up-to-date"))
+        else if (pushOutput.Contains("Everything up-to-date") || pushError.Contains("Everything up-to-date"))
         {
             WriteStepResult("○", "Already up to date", ConsoleColor.DarkGray);
+            pushSucceeded = true;
         }
         else
         {
             WriteStepResult("✗", "Push failed", ConsoleColor.Red);
+            var errorLine = !string.IsNullOrWhiteSpace(pushError) 
+                ? pushError.Split('\n')[0] 
+                : pushOutput.Split('\n').FirstOrDefault(l => l.Contains("error") || l.Contains("fatal")) ?? "Unknown error";
             SystemConsole.ForegroundColor = ConsoleColor.DarkGray;
-            SystemConsole.WriteLine($"     {pushError.Split('\n')[0]}");
+            SystemConsole.WriteLine($"     {errorLine}");
             SystemConsole.ResetColor();
         }
 
         // Summary
         SystemConsole.WriteLine();
-        SystemConsole.ForegroundColor = ConsoleColor.Green;
-        SystemConsole.WriteLine("[+] Quick sync complete");
+        if (pushSucceeded)
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.Green;
+            SystemConsole.WriteLine("[+] Quick sync complete");
+        }
+        else
+        {
+            SystemConsole.ForegroundColor = ConsoleColor.Yellow;
+            SystemConsole.WriteLine("[!] Quick sync completed with push errors");
+            SystemConsole.WriteLine("    Try 'koware sync push' for detailed error info");
+        }
         SystemConsole.ResetColor();
 
-        return 0;
+        return pushSucceeded ? 0 : 1;
     }
 
     private static async Task<int> DiffAsync(CommandContext context)
