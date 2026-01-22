@@ -2832,8 +2832,22 @@ static async Task<int> HandleListAsync(string[] args, IServiceProvider services,
 
     if (args.Length < 2)
     {
-        // Default: interactive list manager
-        var listManager = new Koware.Cli.Console.InteractiveListManager(animeList, cancellationToken: cancellationToken);
+        // Default: interactive list manager with play callback
+        var svc = services;
+        var log = logger;
+        var ct = cancellationToken;
+        var defs = defaults;
+        
+        Func<AnimeListEntry, Task> onPlay = async entry =>
+        {
+            var nextEpisode = await ResolveNextEpisodeAsync(entry, svc, log, ct);
+            var history = svc.GetRequiredService<IWatchHistoryStore>();
+            var quality = defs.Quality;
+            var plan = new ScrapePlan(entry.AnimeTitle, nextEpisode, quality);
+            await ExecuteAndPlayAsync(orchestrator, plan, svc, history, log, ct);
+        };
+        
+        var listManager = new Koware.Cli.Console.InteractiveListManager(animeList, onPlay: onPlay, cancellationToken: cancellationToken);
         return await listManager.RunAsync();
     }
 
@@ -8036,6 +8050,114 @@ static async Task<ReadHistoryEntry?> ResolveReadHistoryAsync(IReadHistoryStore h
     }
 
     return entry;
+}
+
+/// <summary>
+/// Robustly resolve the next episode to watch for an anime list entry.
+/// Uses watch history and episode list to find the actual next episode.
+/// </summary>
+/// <param name="entry">The anime list entry to continue watching.</param>
+/// <param name="services">Service provider for dependencies.</param>
+/// <param name="logger">Logger instance.</param>
+/// <param name="cancellationToken">Cancellation token.</param>
+/// <returns>The next episode number to watch.</returns>
+static async Task<int> ResolveNextEpisodeAsync(
+    AnimeListEntry entry,
+    IServiceProvider services,
+    ILogger logger,
+    CancellationToken cancellationToken)
+{
+    var watchHistory = services.GetRequiredService<IWatchHistoryStore>();
+    var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
+    
+    // Step 1: Check watch history for the actual last episode watched
+    var historyEntry = await watchHistory.GetLastForAnimeAsync(entry.AnimeTitle, cancellationToken);
+    historyEntry ??= await watchHistory.SearchLastAsync(entry.AnimeTitle, cancellationToken);
+    
+    int lastWatchedEpisode = historyEntry?.EpisodeNumber ?? 0;
+    
+    // Step 2: Try to fetch the episode list to validate and find the next episode
+    try
+    {
+        var searchResults = await orchestrator.SearchAsync(entry.AnimeTitle, cancellationToken);
+        var anime = searchResults.FirstOrDefault(a => 
+            a.Title.Equals(entry.AnimeTitle, StringComparison.OrdinalIgnoreCase)) 
+            ?? searchResults.FirstOrDefault();
+        
+        if (anime is null)
+        {
+            logger.LogDebug("Could not find anime '{Title}' in catalog, falling back to episode {Episode}", 
+                entry.AnimeTitle, Math.Max(1, entry.EpisodesWatched + 1));
+            return Math.Max(1, lastWatchedEpisode > 0 ? lastWatchedEpisode + 1 : entry.EpisodesWatched + 1);
+        }
+        
+        var episodes = await orchestrator.GetEpisodesAsync(anime, cancellationToken);
+        if (episodes.Count == 0)
+        {
+            logger.LogDebug("No episodes found for '{Title}', falling back to episode {Episode}", 
+                entry.AnimeTitle, Math.Max(1, entry.EpisodesWatched + 1));
+            return Math.Max(1, lastWatchedEpisode > 0 ? lastWatchedEpisode + 1 : entry.EpisodesWatched + 1);
+        }
+        
+        var sortedEpisodes = episodes.OrderBy(e => e.Number).ToList();
+        var maxEpisode = sortedEpisodes.Max(e => e.Number);
+        var minEpisode = sortedEpisodes.Min(e => e.Number);
+        
+        // Step 3: Find the next episode after the last watched one
+        if (lastWatchedEpisode > 0)
+        {
+            // Find the episode after lastWatchedEpisode
+            var nextEpisode = sortedEpisodes.FirstOrDefault(e => e.Number > lastWatchedEpisode);
+            
+            if (nextEpisode is not null)
+            {
+                logger.LogInformation("Continuing '{Title}' from episode {Episode} (after last watched: {LastWatched})", 
+                    entry.AnimeTitle, nextEpisode.Number, lastWatchedEpisode);
+                return nextEpisode.Number;
+            }
+            
+            // Already watched the latest episode, re-watch it
+            logger.LogInformation("Already at latest episode for '{Title}', starting from episode {Episode}", 
+                entry.AnimeTitle, lastWatchedEpisode);
+            return lastWatchedEpisode;
+        }
+        
+        // Step 4: No history - use EpisodesWatched from list entry to estimate
+        if (entry.EpisodesWatched > 0)
+        {
+            // Find the episode after the estimated position
+            var estimatedNext = sortedEpisodes.FirstOrDefault(e => e.Number > entry.EpisodesWatched);
+            if (estimatedNext is not null)
+            {
+                logger.LogInformation("Starting '{Title}' from episode {Episode} (based on {Watched} episodes watched)", 
+                    entry.AnimeTitle, estimatedNext.Number, entry.EpisodesWatched);
+                return estimatedNext.Number;
+            }
+            
+            // If EpisodesWatched exceeds all episodes, start from the last available
+            logger.LogInformation("EpisodesWatched ({Watched}) exceeds available episodes, starting '{Title}' from episode {Episode}", 
+                entry.EpisodesWatched, entry.AnimeTitle, maxEpisode);
+            return maxEpisode;
+        }
+        
+        // Step 5: No history and no progress - start from first episode
+        logger.LogInformation("Starting '{Title}' from first episode {Episode}", entry.AnimeTitle, minEpisode);
+        return minEpisode;
+    }
+    catch (Exception ex)
+    {
+        // Fallback if orchestrator fails
+        logger.LogWarning(ex, "Failed to fetch episodes for '{Title}', falling back to episode {Episode}", 
+            entry.AnimeTitle, Math.Max(1, entry.EpisodesWatched + 1));
+        
+        // If we have history, use that
+        if (lastWatchedEpisode > 0)
+        {
+            return lastWatchedEpisode + 1;
+        }
+        
+        return Math.Max(1, entry.EpisodesWatched + 1);
+    }
 }
 
 /// <summary>

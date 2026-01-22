@@ -326,7 +326,7 @@ Then edit the copy with your own host/API URLs.
 
 ### Auto-configure providers (recommended)
 
-Koware can pull working provider configs from the public `koware-providers` repo and merge them into your `appsettings.user.json`:
+Koware can pull working provider configs from the public `koware-providers` repo and merge them into your `appsettings.user.json`. This is the recommended way to configure providers. This repository is public, anyone can contribute to it, but it is not guaranteed to be up-to-date or always perfectly working. 
 
 ```bash
 koware provider autoconfig            # configure all available providers
