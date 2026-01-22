@@ -35,6 +35,10 @@ public static class Icons
     public static string Edit => "[E]";
     public static string Back => "<-";
     public static string Delete => "[D]";
+    public static string Info => "[i]";
+    public static string History => "[H]";
+    public static string Anime => "[A]";
+    public static string Manga => "[M]";
     
     // Aliases for backward compatibility
     public static string Preview => Book;

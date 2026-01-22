@@ -263,7 +263,11 @@ static async Task<int> RunAsync(IHost host, string[] args)
         switch (command)
         {
             case "search":
-                return await HandleSearchAsync(orchestrator, args, services, logger, defaults, cts.Token);
+                // Redirect search to explore with the query
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine("Note: 'search' is now part of 'explore'. Redirecting...");
+                Console.ResetColor();
+                return await HandleExploreAsync(args, services, logger, defaults, cts.Token);
             case "explore":
                 return await HandleExploreAsync(args, services, logger, defaults, cts.Token);
             case "plan":
@@ -3912,11 +3916,19 @@ static async Task<int> HandleSearchAsync(ScrapeOrchestrator orchestrator, string
 
 /// <summary>
 /// Implement the <c>koware explore</c> command: interactive catalog browser with provider selection.
+/// Supports direct query: koware explore "naruto" or koware explore --popular
 /// </summary>
 static async Task<int> HandleExploreAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
     var mode = defaults.GetMode();
     var filters = SearchFilters.Parse(args);
+
+    // Parse command-line options for direct access
+    var directQuery = ParseExploreQuery(args);
+    var popularMode = args.Any(a => a.Equals("--popular", StringComparison.OrdinalIgnoreCase) || 
+                                    a.Equals("-p", StringComparison.OrdinalIgnoreCase));
+    var skipProviderSelect = args.Any(a => a.Equals("--quick", StringComparison.OrdinalIgnoreCase) ||
+                                           a.Equals("-q", StringComparison.OrdinalIgnoreCase));
 
     var providerChoices = await BuildExploreProviderChoicesAsync(mode, services, cancellationToken);
     if (providerChoices.Count == 0)
@@ -3926,19 +3938,33 @@ static async Task<int> HandleExploreAsync(string[] args, IServiceProvider servic
         return 1;
     }
 
-    var providerSelection = SelectExploreProviders(providerChoices, mode);
-    if (providerSelection.Cancelled)
+    // Auto-select all active providers if --quick or direct query provided
+    List<ExploreProviderChoice> selectedProviders;
+    if (skipProviderSelect || !string.IsNullOrWhiteSpace(directQuery) || popularMode)
     {
-        return 0;
+        selectedProviders = providerChoices.Where(p => p.IsActive).ToList();
+        if (selectedProviders.Count == 0)
+        {
+            selectedProviders = providerChoices.Take(1).ToList();
+        }
+    }
+    else
+    {
+        var providerSelection = SelectExploreProviders(providerChoices, mode);
+        if (providerSelection.Cancelled)
+        {
+            return 0;
+        }
+
+        if (providerSelection.Selected.Count == 0)
+        {
+            Console.WriteLine("No providers selected.");
+            return 0;
+        }
+        selectedProviders = providerSelection.Selected;
     }
 
-    if (providerSelection.Selected.Count == 0)
-    {
-        Console.WriteLine("No providers selected.");
-        return 0;
-    }
-
-    var providerContexts = await BuildExploreProviderContextsAsync(mode, providerSelection.Selected, services, logger, cancellationToken);
+    var providerContexts = await BuildExploreProviderContextsAsync(mode, selectedProviders, services, logger, cancellationToken);
     if (providerContexts.Count == 0)
     {
         Console.WriteLine("No providers are ready for explore.");
@@ -3951,6 +3977,16 @@ static async Task<int> HandleExploreAsync(string[] args, IServiceProvider servic
 
     var providerSummary = BuildProviderSummary(providerContexts.Select(p => p.Info.Name));
 
+    // If direct query or popular mode provided, skip the menu
+    if (!string.IsNullOrWhiteSpace(directQuery) || popularMode)
+    {
+        var view = popularMode ? ExploreView.Popular : ExploreView.Search;
+        return await RunExploreSessionAsync(
+            mode, view, directQuery, filters, providerContexts, providerSummary, 
+            statusLookup, services, logger, defaults, cancellationToken);
+    }
+
+    // Interactive menu loop
     while (true)
     {
         var menuChoice = ShowExploreMenu(mode, providerSummary);
@@ -3962,7 +3998,7 @@ static async Task<int> HandleExploreAsync(string[] args, IServiceProvider servic
         if (menuChoice == "providers")
         {
             providerChoices = await BuildExploreProviderChoicesAsync(mode, services, cancellationToken);
-            providerSelection = SelectExploreProviders(providerChoices, mode);
+            var providerSelection = SelectExploreProviders(providerChoices, mode);
             if (providerSelection.Cancelled)
             {
                 return 0;
@@ -3981,6 +4017,12 @@ static async Task<int> HandleExploreAsync(string[] args, IServiceProvider servic
                 continue;
             }
             providerSummary = BuildProviderSummary(providerContexts.Select(p => p.Info.Name));
+            continue;
+        }
+
+        if (menuChoice == "history")
+        {
+            await ShowExploreHistoryAsync(mode, providerContexts, statusLookup, filters, services, logger, defaults, cancellationToken);
             continue;
         }
 
@@ -4306,9 +4348,10 @@ static string ShowExploreMenu(CliMode mode, string providerSummary)
 {
     var menu = new[]
     {
-        new ExploreMenuItem("search", $"{Icons.Search} Search catalog", "Search entries by title and filter with fuzzy search"),
-        new ExploreMenuItem("popular", $"{Icons.New} Popular now", "Browse popular entries across selected providers"),
-        new ExploreMenuItem("providers", $"{Icons.Provider} Change providers", $"Current: {providerSummary}"),
+        new ExploreMenuItem("search", $"{Icons.Search} Search", "Search by title with fuzzy filtering"),
+        new ExploreMenuItem("popular", $"{Icons.New} Popular", "Browse trending entries"),
+        new ExploreMenuItem("history", $"{Icons.History} Continue", "Resume from watch/read history"),
+        new ExploreMenuItem("providers", $"{Icons.Provider} Providers", $"Current: {providerSummary}"),
         new ExploreMenuItem("exit", $"{Icons.Back} Exit", "Return to shell")
     };
 
@@ -4317,7 +4360,7 @@ static string ShowExploreMenu(CliMode mode, string providerSummary)
         m => m.Label,
         new SelectorOptions<ExploreMenuItem>
         {
-            Prompt = mode == CliMode.Manga ? "Explore Manga" : "Explore Anime",
+            Prompt = mode == CliMode.Manga ? $"{Icons.Manga} Explore Manga" : $"{Icons.Anime} Explore Anime",
             PreviewFunc = m => m.Description,
             ShowSearch = false,
             ShowPreview = true,
@@ -4327,6 +4370,461 @@ static string ShowExploreMenu(CliMode mode, string providerSummary)
 
     var result = selector.Run();
     return result.Cancelled ? "exit" : result.Selected!.Id;
+}
+
+/// <summary>
+/// Parse a direct search query from explore args (non-flag arguments after "explore").
+/// </summary>
+static string? ParseExploreQuery(string[] args)
+{
+    var flagsWithValues = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "--genre", "--year", "--status", "--sort", "--score", "--country"
+    };
+    var standaloneFlags = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "--popular", "-p", "--quick", "-q", "--json"
+    };
+
+    var queryParts = new List<string>();
+    for (int i = 1; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if (flagsWithValues.Contains(arg))
+        {
+            i++; // Skip the flag value
+            continue;
+        }
+        if (standaloneFlags.Contains(arg) || arg.StartsWith("--"))
+        {
+            continue;
+        }
+        queryParts.Add(arg);
+    }
+
+    var query = string.Join(' ', queryParts).Trim();
+    return string.IsNullOrWhiteSpace(query) ? null : query;
+}
+
+/// <summary>
+/// Run a single explore session (search or popular view) and return to caller.
+/// </summary>
+static async Task<int> RunExploreSessionAsync(
+    CliMode mode,
+    ExploreView view,
+    string? query,
+    SearchFilters filters,
+    IReadOnlyList<ExploreProviderContext> providerContexts,
+    string providerSummary,
+    ListStatusLookup statusLookup,
+    IServiceProvider services,
+    ILogger logger,
+    DefaultCliOptions defaults,
+    CancellationToken cancellationToken)
+{
+    var fetchStep = ConsoleStep.Start(view == ExploreView.Popular ? "Fetching popular entries" : $"Searching \"{query}\"");
+    List<ExploreEntry> entries;
+    try
+    {
+        entries = await FetchExploreEntriesAsync(
+            mode,
+            view,
+            query,
+            filters,
+            providerContexts,
+            statusLookup,
+            logger,
+            cancellationToken);
+        fetchStep.Succeed($"Found {entries.Count} entry(s)");
+    }
+    catch (Exception ex)
+    {
+        fetchStep.Fail($"Failed: {ex.Message}");
+        return 1;
+    }
+
+    if (entries.Count == 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine(view == ExploreView.Search
+            ? $"No results for \"{query}\"."
+            : "No popular entries found.");
+        Console.ResetColor();
+        return 0;
+    }
+
+    var browser = new ExploreBrowser(
+        entries,
+        e => $"{e.Title} [{e.ProviderName}]",
+        e => BuildExplorePreview(e, mode),
+        new ExploreBrowserOptions
+        {
+            Prompt = mode == CliMode.Manga ? "Explore Manga" : "Explore Anime",
+            ProviderLine = providerSummary,
+            ViewLine = view == ExploreView.Popular ? "Popular now" : $"Search: {query}",
+            MaxVisibleItems = 12,
+            ShowPreview = true,
+            EmptyMessage = "No entries found"
+        });
+
+    var selection = browser.Run();
+    if (selection.Cancelled || selection.Selected is null)
+    {
+        return 0;
+    }
+
+    var selectedEntry = selection.Selected;
+    return await HandleExploreEntryActionAsync(mode, selectedEntry, providerContexts, statusLookup, services, logger, defaults, cancellationToken);
+}
+
+/// <summary>
+/// Show explore history (continue watching/reading).
+/// </summary>
+static async Task ShowExploreHistoryAsync(
+    CliMode mode,
+    IReadOnlyList<ExploreProviderContext> providerContexts,
+    ListStatusLookup statusLookup,
+    SearchFilters filters,
+    IServiceProvider services,
+    ILogger logger,
+    DefaultCliOptions defaults,
+    CancellationToken cancellationToken)
+{
+    var fetchStep = ConsoleStep.Start("Loading history");
+    
+    List<ExploreEntry> entries = new();
+    try
+    {
+        if (mode == CliMode.Manga)
+        {
+            var readStore = services.GetRequiredService<IReadHistoryStore>();
+            var history = await readStore.QueryAsync(new ReadHistoryQuery(null, null, null, null, null, 20), cancellationToken);
+            
+            // Group by manga and get most recent per title
+            var grouped = history
+                .GroupBy(h => h.MangaTitle, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.OrderByDescending(h => h.ReadAt).First())
+                .Take(15)
+                .ToList();
+
+            foreach (var item in grouped)
+            {
+                entries.Add(new ExploreEntry
+                {
+                    Title = item.MangaTitle,
+                    ProviderName = item.Provider,
+                    ProviderSlug = item.Provider.ToLowerInvariant(),
+                    Synopsis = $"Last read: Chapter {item.ChapterNumber} • {FormatTimeAgo(item.ReadAt)}",
+                    Count = item.ChapterNumber,
+                    Status = statusLookup.Resolve(item.MangaId, item.MangaTitle)
+                });
+            }
+        }
+        else
+        {
+            var watchStore = services.GetRequiredService<IWatchHistoryStore>();
+            var history = await watchStore.QueryAsync(new HistoryQuery(null, null, null, null, null, 20), cancellationToken);
+            
+            // Group by anime and get most recent per title
+            var grouped = history
+                .GroupBy(h => h.AnimeTitle, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.OrderByDescending(h => h.WatchedAt).First())
+                .Take(15)
+                .ToList();
+
+            foreach (var item in grouped)
+            {
+                entries.Add(new ExploreEntry
+                {
+                    Title = item.AnimeTitle,
+                    ProviderName = item.Provider,
+                    ProviderSlug = item.Provider.ToLowerInvariant(),
+                    Synopsis = $"Last watched: Episode {item.EpisodeNumber} • {FormatTimeAgo(item.WatchedAt)}",
+                    Count = item.EpisodeNumber,
+                    Status = statusLookup.Resolve(item.AnimeId, item.AnimeTitle)
+                });
+            }
+        }
+        fetchStep.Succeed($"Found {entries.Count} entry(s)");
+    }
+    catch (Exception ex)
+    {
+        fetchStep.Fail($"Failed: {ex.Message}");
+        return;
+    }
+
+    if (entries.Count == 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine(mode == CliMode.Manga 
+            ? "No read history yet. Start reading to build your history!"
+            : "No watch history yet. Start watching to build your history!");
+        Console.ResetColor();
+        WaitForContinue();
+        return;
+    }
+
+    var browser = new ExploreBrowser(
+        entries,
+        e => e.Title,
+        e => e.Synopsis ?? "",
+        new ExploreBrowserOptions
+        {
+            Prompt = mode == CliMode.Manga ? "Continue Reading" : "Continue Watching",
+            ProviderLine = "From your history",
+            ViewLine = "Recent activity",
+            MaxVisibleItems = 12,
+            ShowPreview = true,
+            EmptyMessage = "No history"
+        });
+
+    var selection = browser.Run();
+    if (selection.Cancelled || selection.Selected is null)
+    {
+        return;
+    }
+
+    // Search for the selected entry to get full details
+    var selectedEntry = selection.Selected;
+    var searchStep = ConsoleStep.Start($"Loading \"{selectedEntry.Title}\"");
+    
+    try
+    {
+        var searchEntries = await FetchExploreEntriesAsync(
+            mode,
+            ExploreView.Search,
+            selectedEntry.Title,
+            filters,
+            providerContexts,
+            statusLookup,
+            logger,
+            cancellationToken);
+        
+        var match = searchEntries.FirstOrDefault(e => 
+            e.Title.Equals(selectedEntry.Title, StringComparison.OrdinalIgnoreCase));
+        
+        if (match is not null)
+        {
+            searchStep.Succeed("Found");
+            await HandleExploreEntryActionAsync(mode, match, providerContexts, statusLookup, services, logger, defaults, cancellationToken);
+        }
+        else if (searchEntries.Count > 0)
+        {
+            searchStep.Succeed($"Found {searchEntries.Count} similar");
+            // Show the search results for user to pick
+            var resultBrowser = new ExploreBrowser(
+                searchEntries,
+                e => $"{e.Title} [{e.ProviderName}]",
+                e => BuildExplorePreview(e, mode),
+                new ExploreBrowserOptions
+                {
+                    Prompt = $"Results for \"{selectedEntry.Title}\"",
+                    ProviderLine = BuildProviderSummary(providerContexts.Select(p => p.Info.Name)),
+                    ViewLine = "Select to continue",
+                    MaxVisibleItems = 12,
+                    ShowPreview = true
+                });
+            
+            var resultSelection = resultBrowser.Run();
+            if (resultSelection.Selected is not null)
+            {
+                await HandleExploreEntryActionAsync(mode, resultSelection.Selected, providerContexts, statusLookup, services, logger, defaults, cancellationToken);
+            }
+        }
+        else
+        {
+            searchStep.Fail("Not found in current providers");
+        }
+    }
+    catch
+    {
+        searchStep.Fail("Search failed");
+    }
+}
+
+static string FormatTimeAgo(DateTimeOffset time)
+{
+    var diff = DateTimeOffset.Now - time;
+    if (diff.TotalMinutes < 1) return "just now";
+    if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes}m ago";
+    if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
+    if (diff.TotalDays < 7) return $"{(int)diff.TotalDays}d ago";
+    if (diff.TotalDays < 30) return $"{(int)(diff.TotalDays / 7)}w ago";
+    return time.ToString("MMM d");
+}
+
+/// <summary>
+/// Handle action selection for a selected explore entry.
+/// </summary>
+static async Task<int> HandleExploreEntryActionAsync(
+    CliMode mode,
+    ExploreEntry selectedEntry,
+    IReadOnlyList<ExploreProviderContext> providerContexts,
+    ListStatusLookup statusLookup,
+    IServiceProvider services,
+    ILogger logger,
+    DefaultCliOptions defaults,
+    CancellationToken cancellationToken)
+{
+    var actionChoice = ShowExploreActionMenu(mode, selectedEntry);
+    if (actionChoice == "back")
+    {
+        return 0;
+    }
+
+    if (actionChoice == "add")
+    {
+        ItemStatus? updatedStatus = mode == CliMode.Manga
+            ? await AddMangaToListAsync(selectedEntry, services, cancellationToken)
+            : await AddAnimeToListAsync(selectedEntry, services, cancellationToken);
+
+        if (updatedStatus.HasValue)
+        {
+            var id = mode == CliMode.Manga
+                ? selectedEntry.Manga?.Id.Value ?? ""
+                : selectedEntry.Anime?.Id.Value ?? "";
+            statusLookup.Set(id, selectedEntry.Title, updatedStatus.Value);
+        }
+
+        WaitForContinue();
+        return 0;
+    }
+
+    var providerContext = providerContexts.FirstOrDefault(p =>
+        p.Info.Slug.Equals(selectedEntry.ProviderSlug, StringComparison.OrdinalIgnoreCase));
+
+    if (actionChoice == "watch")
+    {
+        if (providerContext?.AnimeCatalog is null || selectedEntry.Anime is null)
+        {
+            Console.WriteLine("Selected entry is not available for playback.");
+            return 1;
+        }
+
+        return await PlayAnimeFromExploreAsync(
+            selectedEntry.Anime,
+            providerContext,
+            services,
+            logger,
+            defaults,
+            cancellationToken);
+    }
+
+    if (actionChoice == "read")
+    {
+        if (providerContext?.MangaCatalog is null || selectedEntry.Manga is null)
+        {
+            Console.WriteLine("Selected entry is not available for reading.");
+            return 1;
+        }
+
+        return await ReadMangaFromExploreAsync(
+            selectedEntry.Manga,
+            providerContext,
+            services,
+            logger,
+            defaults,
+            cancellationToken);
+    }
+
+    if (actionChoice == "info")
+    {
+        ShowEntryInfo(selectedEntry, mode);
+        WaitForContinue();
+        return 0;
+    }
+
+    return 0;
+}
+
+static void ShowEntryInfo(ExploreEntry entry, CliMode mode)
+{
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine($"  {entry.Title}");
+    Console.ResetColor();
+    Console.WriteLine(new string('─', Math.Min(60, Console.WindowWidth - 4)));
+    
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.Write("  Provider: ");
+    Console.ForegroundColor = ConsoleColor.White;
+    Console.WriteLine(entry.ProviderName);
+    
+    if (entry.Count.HasValue)
+    {
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write(mode == CliMode.Manga ? "  Chapters: " : "  Episodes: ");
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.WriteLine(entry.Count);
+    }
+    
+    if (entry.Status != ItemStatus.None)
+    {
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write("  Status:   ");
+        Console.ForegroundColor = entry.Status switch
+        {
+            ItemStatus.Watched => ConsoleColor.Green,
+            ItemStatus.InProgress => ConsoleColor.Yellow,
+            ItemStatus.New => ConsoleColor.Cyan,
+            _ => ConsoleColor.White
+        };
+        Console.WriteLine(entry.Status switch
+        {
+            ItemStatus.Watched => "Completed",
+            ItemStatus.InProgress => "In Progress",
+            ItemStatus.New => "Planned",
+            ItemStatus.Downloaded => "Downloaded",
+            _ => "None"
+        });
+    }
+    
+    if (!string.IsNullOrWhiteSpace(entry.Synopsis))
+    {
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine("  Synopsis:");
+        Console.ForegroundColor = ConsoleColor.White;
+        var lines = WordWrapText(entry.Synopsis, Console.WindowWidth - 6);
+        foreach (var line in lines.Take(6))
+        {
+            Console.WriteLine($"  {line}");
+        }
+        if (lines.Count > 6)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine("  ...");
+        }
+    }
+    
+    Console.ResetColor();
+    Console.WriteLine();
+}
+
+static List<string> WordWrapText(string text, int maxWidth)
+{
+    var lines = new List<string>();
+    if (string.IsNullOrWhiteSpace(text) || maxWidth <= 0) return lines;
+    
+    text = text.Replace("\n", " ").Replace("\r", "");
+    var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+    var currentLine = new System.Text.StringBuilder();
+    
+    foreach (var word in words)
+    {
+        if (currentLine.Length + word.Length + 1 > maxWidth)
+        {
+            if (currentLine.Length > 0)
+            {
+                lines.Add(currentLine.ToString());
+                currentLine.Clear();
+            }
+        }
+        if (currentLine.Length > 0) currentLine.Append(' ');
+        currentLine.Append(word);
+    }
+    if (currentLine.Length > 0) lines.Add(currentLine.ToString());
+    return lines;
 }
 
 static string? PromptForSearchQuery(CliMode mode)
@@ -4518,12 +5016,14 @@ static string ShowExploreActionMenu(CliMode mode, ExploreEntry entry)
         ? new[]
         {
             new ExploreActionItem("read", $"{Icons.Book} Read now", "Open the reader for this manga"),
+            new ExploreActionItem("info", $"{Icons.Info} View info", "Show details and synopsis"),
             new ExploreActionItem("add", $"{Icons.Add} Add to list", "Track this manga in your list"),
             new ExploreActionItem("back", $"{Icons.Back} Back", "Return to results")
         }
         : new[]
         {
             new ExploreActionItem("watch", $"{Icons.Play} Watch now", "Resolve streams and launch player"),
+            new ExploreActionItem("info", $"{Icons.Info} View info", "Show details and synopsis"),
             new ExploreActionItem("add", $"{Icons.Add} Add to list", "Track this anime in your list"),
             new ExploreActionItem("back", $"{Icons.Back} Back", "Return to results")
         };
@@ -4533,7 +5033,7 @@ static string ShowExploreActionMenu(CliMode mode, ExploreEntry entry)
         a => a.Label,
         new SelectorOptions<ExploreActionItem>
         {
-            Prompt = $"Actions: {entry.Title}",
+            Prompt = $"{entry.Title}",
             PreviewFunc = a => a.Description,
             ShowSearch = false,
             ShowPreview = true,
@@ -8407,8 +8907,7 @@ static void PrintUsage()
 {
     WriteHeader($"Koware CLI {GetVersionLabel()}");
     Console.WriteLine("Usage:");
-    WriteCommand("explore", "Interactive explorer (providers, search, popular, actions).", ConsoleColor.Cyan);
-    WriteCommand("search <query> [--genre <g>] [--year <y>] [--status <s>] [--sort <o>]", "Deprecated: use explore for interactive browsing.", ConsoleColor.DarkGray);
+    WriteCommand("explore [query] [--popular] [-q]", "Interactive explorer with search, popular, and history.", ConsoleColor.Cyan);
     WriteCommand("stream <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Show plan + streams, no player.", ConsoleColor.Cyan);
     WriteCommand("watch <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Pick a stream and play (alias: play).", ConsoleColor.Green);
     WriteCommand("play <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Same as watch.", ConsoleColor.Green);
@@ -8438,51 +8937,51 @@ static List<string> GetHelpLines(string command, CliMode mode)
     switch (command.ToLowerInvariant())
     {
         case "explore":
-            lines.Add("explore - Interactive catalog browser with providers, search, and popular");
+            lines.Add("explore - Interactive catalog browser with search, popular, and history");
             lines.Add("");
-            lines.Add("Usage: koware explore");
+            lines.Add("Usage: koware explore [query] [options]");
             lines.Add("Mode : explores anime or manga based on current mode");
             lines.Add("");
-            lines.Add("Flow:");
-            lines.Add("  - Select one or more providers");
-            lines.Add("  - Choose Search or Popular");
-            lines.Add("  - View details and take actions (watch/read, add to list)");
+            lines.Add("Options:");
+            lines.Add("  <query>        Direct search (skips menu): koware explore \"naruto\"");
+            lines.Add("  --popular, -p  Go straight to popular/trending entries");
+            lines.Add("  --quick, -q    Skip provider selection (use all active)");
+            lines.Add("  --genre <g>    Filter by genre");
+            lines.Add("  --year <y>     Filter by year");
+            lines.Add("");
+            lines.Add("Menu options:");
+            lines.Add("  Search     - Search by title with fuzzy filtering");
+            lines.Add("  Popular    - Browse trending entries");
+            lines.Add("  Continue   - Resume from your watch/read history");
+            lines.Add("  Providers  - Change which providers to search");
+            lines.Add("");
+            lines.Add("Actions (after selecting an entry):");
+            lines.Add("  Watch/Read - Start playback or reading");
+            lines.Add("  View info  - Show synopsis and details");
+            lines.Add("  Add to list - Track in your anime/manga list");
             lines.Add("");
             lines.Add("Tips:");
-            lines.Add("  - Type to filter results (fzf-style)");
+            lines.Add("  - Type to filter results (fzf-style fuzzy search)");
+            lines.Add("  - Press 1-9 to quick-select visible items");
             lines.Add("  - Use Esc to go back");
             lines.Add("");
             lines.Add("Examples:");
-            lines.Add("  koware explore");
+            lines.Add("  koware explore                    # Interactive menu");
+            lines.Add("  koware explore \"demon slayer\"     # Direct search");
+            lines.Add("  koware explore --popular          # Browse trending");
+            lines.Add("  koware explore -q \"bleach\"        # Quick search (skip provider select)");
             break;
 
         case "search":
-            lines.Add("search - (Deprecated) Find anime or manga with optional filters");
+            lines.Add("search - Now redirects to 'explore'");
             lines.Add("");
-            lines.Add("Usage: koware search <query> [filters]");
-            lines.Add("Mode : searches anime or manga based on current mode");
-            lines.Add("");
-            lines.Add("Note: 'search' is deprecated. Use 'koware explore' for the new interactive explorer.");
-            lines.Add("");
-            lines.Add("Options:");
-            lines.Add("  --json             Output results as JSON");
-            lines.Add("");
-            lines.Add("Filters:");
-            lines.Add("  --genre <name>     Filter by genre (Action, Romance, Fantasy, etc.)");
-            lines.Add("  --year <year>      Filter by release year (e.g., 2024)");
-            lines.Add("  --status <status>  Filter by status: ongoing, completed, upcoming");
-            lines.Add("  --sort <order>     Sort by: popular, score, recent, title");
-            lines.Add("  --score <min>      Minimum score filter");
-            lines.Add("  --country <code>   Country: JP (Japan), KR (Korea), CN (China)");
-            lines.Add("");
-            lines.Add("Browse mode:");
-            lines.Add("  Use filters without a query to browse (e.g., koware search --sort popular)");
+            lines.Add("The search command has been merged into explore.");
+            lines.Add("Use 'koware explore <query>' for direct search.");
             lines.Add("");
             lines.Add("Examples:");
-            lines.Add("  koware search \"demon slayer\"");
-            lines.Add("  koware search --genre action --status ongoing");
-            lines.Add("  koware search \"romance\" --year 2024 --sort popular");
-            lines.Add("  koware search --sort popular --json");
+            lines.Add("  koware explore \"demon slayer\"     # Direct search");
+            lines.Add("  koware explore --popular          # Browse trending");
+            lines.Add("  koware explore -q \"naruto\"        # Quick search");
             break;
             
         case "recommend":
@@ -8956,8 +9455,7 @@ static int HandleHelp(string[] args, CliMode mode)
         // Show interactive command selector with back navigation
         var commands = new (string Name, string Description)[]
         {
-            ("explore", "Interactive explorer (providers, search, popular, actions)"),
-            ("search", "Deprecated: find anime or manga with filters"),
+            ("explore", "Interactive explorer with search, popular, history, and actions"),
             ("recommend", "Get personalized recommendations based on your history"),
             ("stream", "Plan stream selection and print the resolved streams"),
             ("watch", "Pick a stream and launch the configured player"),
