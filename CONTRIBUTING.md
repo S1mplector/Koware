@@ -6,11 +6,11 @@ Thank you for your interest in contributing to Koware! This document outlines gu
 
 Koware is licensed under **Creative Commons Attribution-NoDerivatives 4.0 International (CC BY-ND 4.0)**. This means:
 
-- ✅ You may view and study the source code
-- ✅ You may submit contributions (issues, pull requests) to this repository
-- ✅ Accepted contributions become part of the original project
-- ❌ You may NOT distribute modified versions independently
-- ❌ You may NOT create derivative works for redistribution
+- You may view and study the source code
+- You may submit contributions (issues, pull requests) to this repository
+- Accepted contributions become part of the original project
+- You may NOT distribute modified versions independently
+- You may NOT create derivative works for redistribution
 
 By submitting a contribution, you agree that your contribution will be licensed under the same terms and that the project maintainer has the right to include, modify, or reject your contribution.
 

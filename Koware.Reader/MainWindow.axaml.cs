@@ -9,10 +9,12 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
@@ -87,7 +89,18 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         
-        _httpClient = new HttpClient();
+        // Use SocketsHttpHandler for better cross-platform compatibility and connection pooling
+        var handler = new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+            MaxConnectionsPerServer = 6,
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+        };
+        _httpClient = new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromSeconds(30)
+        };
         _httpClient.DefaultRequestHeaders.Add("Accept", "image/*,*/*");
         
         Opened += OnWindowOpened;
@@ -425,12 +438,12 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task<Bitmap?> LoadImageAsync(string url, CancellationToken cancellationToken)
+    private async Task<Bitmap?> LoadImageAsync(string url, CancellationToken cancellationToken, int maxRetries = 3)
     {
-        try
+        // Handle local file paths (file:// URIs) for offline/downloaded manga
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.IsFile)
         {
-            // Handle local file paths (file:// URIs) for offline/downloaded manga
-            if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.IsFile)
+            try
             {
                 var localPath = uri.LocalPath;
                 if (File.Exists(localPath))
@@ -441,24 +454,45 @@ public partial class MainWindow : Window
                     memoryStream.Position = 0;
                     return new Bitmap(memoryStream);
                 }
-                return null;
             }
-            
-            // Handle HTTP/HTTPS URLs for online manga
-            using var response = await _httpClient.GetAsync(url, cancellationToken);
-            response.EnsureSuccessStatusCode();
-            
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var memoryStream2 = new MemoryStream();
-            await stream.CopyToAsync(memoryStream2, cancellationToken);
-            memoryStream2.Position = 0;
-            
-            return new Bitmap(memoryStream2);
-        }
-        catch
-        {
+            catch
+            {
+                // Fall through to return null
+            }
             return null;
         }
+        
+        // Handle HTTP/HTTPS URLs for online manga with retry logic
+        for (int attempt = 0; attempt < maxRetries; attempt++)
+        {
+            try
+            {
+                using var response = await _httpClient.GetAsync(url, cancellationToken);
+                response.EnsureSuccessStatusCode();
+                
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                using var memoryStream = new MemoryStream();
+                await stream.CopyToAsync(memoryStream, cancellationToken);
+                memoryStream.Position = 0;
+                
+                return new Bitmap(memoryStream);
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // Don't retry on cancellation
+            }
+            catch when (attempt < maxRetries - 1)
+            {
+                // Exponential backoff: 500ms, 1s, 2s
+                await Task.Delay(TimeSpan.FromMilliseconds(500 * Math.Pow(2, attempt)), cancellationToken);
+            }
+            catch
+            {
+                // Final attempt failed
+            }
+        }
+        
+        return null;
     }
 
     private void ShowRetryPlaceholder(int pageNumber, string url)
@@ -821,18 +855,20 @@ public partial class MainWindow : Window
         }
     }
     
+    private static readonly int[] ZoomLevels = { 50, 75, 100, 125, 150, 175, 200, 250, 300 };
+    
     private void ZoomIn()
     {
-        var levels = new[] { 100, 125, 150, 175, 200 };
-        var idx = Array.IndexOf(levels, _zoomLevel);
-        if (idx < levels.Length - 1) SetZoom(levels[idx + 1]);
+        var idx = Array.IndexOf(ZoomLevels, _zoomLevel);
+        if (idx < 0) idx = Array.FindIndex(ZoomLevels, z => z > _zoomLevel) - 1;
+        if (idx < ZoomLevels.Length - 1) SetZoom(ZoomLevels[idx + 1]);
     }
     
     private void ZoomOut()
     {
-        var levels = new[] { 100, 125, 150, 175, 200 };
-        var idx = Array.IndexOf(levels, _zoomLevel);
-        if (idx > 0) SetZoom(levels[idx - 1]);
+        var idx = Array.IndexOf(ZoomLevels, _zoomLevel);
+        if (idx < 0) idx = Array.FindIndex(ZoomLevels, z => z >= _zoomLevel);
+        if (idx > 0) SetZoom(ZoomLevels[idx - 1]);
     }
     
     private void SetZoom(int zoom)
@@ -1270,7 +1306,215 @@ public partial class MainWindow : Window
         PageToast.Background = new SolidColorBrush(Color.Parse(toastBg));
         PageToastText.Foreground = new SolidColorBrush(Color.Parse(toastText));
         
+        // Loading overlay - theme sensitive
+        var loadingOverlayBg = theme switch
+        {
+            "sepia" => "#ccf4ecd8",
+            "light" => "#ccf8fafc",
+            "contrast" => "#cc000000",
+            _ => "#cc1a1a2e"
+        };
+        LoadingOverlay.Background = new SolidColorBrush(Color.Parse(loadingOverlayBg));
+        LoadingProgress.Foreground = new SolidColorBrush(Color.Parse(muted));
+        
+        // Help overlay - theme sensitive
+        var overlayBg = theme switch
+        {
+            "sepia" => "#f0f4ecd8",
+            "light" => "#f0f8fafc",
+            "contrast" => "#f0000000",
+            _ => "#f00d0d1a"
+        };
+        var helpPanelBg = theme switch
+        {
+            "sepia" => "#e8dfc9",
+            "light" => "#ffffff",
+            "contrast" => "#0a0a0a",
+            _ => "#202442"
+        };
+        HelpOverlay.Background = new SolidColorBrush(Color.Parse(overlayBg));
+        if (HelpOverlay.Child is Border helpPanel)
+        {
+            helpPanel.Background = new SolidColorBrush(Color.Parse(helpPanelBg));
+            ApplyThemeToHelpPanel(helpPanel, text, muted, accent, theme);
+        }
+        
+        // Error overlay - theme sensitive
+        ErrorOverlay.Background = new SolidColorBrush(Color.Parse(overlayBg));
+        if (ErrorOverlay.Child is Border errorPanel)
+        {
+            errorPanel.Background = new SolidColorBrush(Color.Parse(helpPanelBg));
+        }
+        
+        // Chapters panel header and content
+        if (ChaptersPanel.Child is Grid chaptersGrid)
+        {
+            // Header
+            if (chaptersGrid.Children.Count > 0 && chaptersGrid.Children[0] is Border headerBorder)
+            {
+                headerBorder.BorderBrush = new SolidColorBrush(Color.Parse(borderColor));
+                foreach (var child in headerBorder.GetVisualDescendants())
+                {
+                    if (child is TextBlock tb && tb.Text == "Chapters")
+                    {
+                        tb.Foreground = textBrush;
+                    }
+                    else if (child is Button closeBtn)
+                    {
+                        closeBtn.Foreground = new SolidColorBrush(Color.Parse(muted));
+                    }
+                }
+            }
+            
+            // Update chapter items
+            UpdateChapterItemsTheme(text, muted, accent, theme);
+        }
+        
+        // Chapters overlay background
+        ChaptersOverlay.Background = new SolidColorBrush(Color.Parse(theme switch
+        {
+            "sepia" => "#80f4ecd8",
+            "light" => "#80f8fafc",
+            "contrast" => "#80000000",
+            _ => "#80000000"
+        }));
+        
+        // Slider track colors
+        var sliderTrackBg = theme switch
+        {
+            "sepia" => "#d4c5a9",
+            "light" => "#cbd5e1",
+            "contrast" => "#333333",
+            _ => "#334155"
+        };
+        PageSlider.Background = new SolidColorBrush(Color.Parse(sliderTrackBg));
+        PageSlider.Foreground = accentBrush;
+        
         PersistPrefs();
+    }
+    
+    private void ApplyThemeToHelpPanel(Border helpPanel, string text, string muted, string accent, string theme)
+    {
+        var textBrush = new SolidColorBrush(Color.Parse(text));
+        var mutedBrush = new SolidColorBrush(Color.Parse(muted));
+        var accentBrush = new SolidColorBrush(Color.Parse(accent));
+        
+        var shortcutRowBg = theme switch
+        {
+            "sepia" => "#ddd4c0",
+            "light" => "#f1f5f9",
+            "contrast" => "#1a1a1a",
+            _ => "#0a1220"
+        };
+        var shortcutRowAltBg = theme switch
+        {
+            "sepia" => "#e8dfc9",
+            "light" => "#e2e8f0",
+            "contrast" => "#0f0f0f",
+            _ => "#0f1a2a"
+        };
+        var helpBtnBg = theme switch
+        {
+            "sepia" => "#c9bda0",
+            "light" => "#e2e8f0",
+            "contrast" => "#333333",
+            _ => "#3a3a5a"
+        };
+        
+        foreach (var descendant in helpPanel.GetVisualDescendants())
+        {
+            switch (descendant)
+            {
+                case TextBlock tb:
+                    if (tb.FontWeight == FontWeight.SemiBold && tb.FontSize >= 18)
+                    {
+                        // Title
+                        tb.Foreground = textBrush;
+                    }
+                    else if (tb.FontFamily?.Name == "Consolas")
+                    {
+                        // Shortcut keys
+                        tb.Foreground = accentBrush;
+                    }
+                    else if (tb.Foreground is SolidColorBrush brush && 
+                             (brush.Color.ToString().Contains("888") || brush.Color.ToString().Contains("ccc")))
+                    {
+                        // Muted text or description
+                        tb.Foreground = mutedBrush;
+                    }
+                    break;
+                    
+                case Border border when border.Classes.Contains("shortcut-row"):
+                    border.Background = new SolidColorBrush(Color.Parse(
+                        border.Classes.Contains("alt") ? shortcutRowAltBg : shortcutRowBg));
+                    break;
+                    
+                case Button btn when btn.Content is StackPanel:
+                    // Got it button
+                    btn.Background = new SolidColorBrush(Color.Parse(helpBtnBg));
+                    btn.Foreground = textBrush;
+                    break;
+            }
+        }
+    }
+    
+    private void UpdateChapterItemsTheme(string text, string muted, string accent, string theme)
+    {
+        var chapterBg = theme switch
+        {
+            "sepia" => "#ddd4c0",
+            "light" => "#f1f5f9",
+            "contrast" => "#1a1a1a",
+            _ => "#1a2438"
+        };
+        var chapterCurrentBg = theme switch
+        {
+            "sepia" => "#c9b896",
+            "light" => "#dbeafe",
+            "contrast" => "#333300",
+            _ => "#1e3a5f"
+        };
+        
+        foreach (var child in ChaptersList.Children)
+        {
+            if (child is Border border)
+            {
+                var isCurrent = border.Classes.Contains("current");
+                if (isCurrent)
+                {
+                    border.Background = new SolidColorBrush(Color.Parse(chapterCurrentBg));
+                    border.BorderBrush = new SolidColorBrush(Color.Parse(accent));
+                }
+                
+                // Update text colors within chapter items
+                foreach (var descendant in border.GetVisualDescendants())
+                {
+                    if (descendant is TextBlock tb)
+                    {
+                        if (tb.FontWeight == FontWeight.Bold)
+                        {
+                            // Chapter number
+                            tb.Foreground = new SolidColorBrush(Color.Parse(accent));
+                        }
+                        else if (tb.FontSize == 13)
+                        {
+                            // Chapter title
+                            tb.Foreground = new SolidColorBrush(Color.Parse(text));
+                        }
+                        else if (tb.FontSize == 10)
+                        {
+                            // "Read" badge text
+                            tb.Foreground = new SolidColorBrush(Color.Parse(accent));
+                        }
+                    }
+                    else if (descendant is Border badge && badge.CornerRadius.TopLeft == 4)
+                    {
+                        // "Read" badge background
+                        badge.Background = new SolidColorBrush(Color.Parse(chapterCurrentBg));
+                    }
+                }
+            }
+        }
     }
 
     private void OnWindowPointerMoved(object? sender, PointerEventArgs e)

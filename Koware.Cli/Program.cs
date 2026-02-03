@@ -8545,20 +8545,46 @@ static string? ResolveExecutablePath(string command)
         }
     }
 
-    var wellKnown = new[]
+    // macOS: Check for .app bundles in /Applications and ~/Applications
+    if (OperatingSystem.IsMacOS())
     {
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "VideoLAN", "VLC", "vlc.exe"),
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "VideoLAN", "VLC", "vlc.exe")
-    };
-
-    foreach (var path in wellKnown)
-    {
-        if (File.Exists(path) && trimmed.Equals("vlc", StringComparison.OrdinalIgnoreCase))
+        var macOsAppPaths = GetMacOsAppPaths(trimmed);
+        foreach (var appPath in macOsAppPaths)
         {
-            return path;
+            if (File.Exists(appPath))
+            {
+                return appPath;
+            }
         }
     }
 
+    // Windows: Check well-known installation paths
+    if (OperatingSystem.IsWindows())
+    {
+        var windowsPaths = GetWindowsWellKnownPaths(trimmed);
+        foreach (var path in windowsPaths)
+        {
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
+    }
+
+    // Linux: Check flatpak and snap installations
+    if (OperatingSystem.IsLinux())
+    {
+        var linuxPaths = GetLinuxWellKnownPaths(trimmed);
+        foreach (var path in linuxPaths)
+        {
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
+    }
+
+    // Search PATH environment variable
     var paths = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
         .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
@@ -8575,6 +8601,161 @@ static string? ResolveExecutablePath(string command)
     }
 
     return null;
+}
+
+/// <summary>
+/// Get macOS .app bundle executable paths for common media players.
+/// </summary>
+static IEnumerable<string> GetMacOsAppPaths(string command)
+{
+    var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    var appDirs = new[] { "/Applications", Path.Combine(homeDir, "Applications") };
+    
+    // Map command names to .app bundle paths
+    var appMappings = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["iina"] = new[] { "IINA.app/Contents/MacOS/iina-cli", "IINA.app/Contents/MacOS/IINA" },
+        ["mpv"] = new[] { "mpv.app/Contents/MacOS/mpv" },
+        ["vlc"] = new[] { "VLC.app/Contents/MacOS/VLC" },
+        ["mplayer"] = new[] { "MPlayer OSX Extended.app/Contents/Resources/Binaries/mpextended.mpBinaries/Contents/MacOS/mplayer" },
+        ["elmedia"] = new[] { "Elmedia Video Player.app/Contents/MacOS/Elmedia Video Player" },
+        ["infuse"] = new[] { "Infuse 7.app/Contents/MacOS/Infuse 7", "Infuse.app/Contents/MacOS/Infuse" }
+    };
+    
+    if (appMappings.TryGetValue(command, out var relativePaths))
+    {
+        foreach (var appDir in appDirs)
+        {
+            foreach (var relativePath in relativePaths)
+            {
+                yield return Path.Combine(appDir, relativePath);
+            }
+        }
+    }
+    
+    // Also check Homebrew paths
+    var brewPaths = new[]
+    {
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        Path.Combine(homeDir, ".local", "bin")
+    };
+    
+    foreach (var brewPath in brewPaths)
+    {
+        yield return Path.Combine(brewPath, command);
+    }
+}
+
+/// <summary>
+/// Get Windows well-known installation paths for common media players.
+/// </summary>
+static IEnumerable<string> GetWindowsWellKnownPaths(string command)
+{
+    var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+    var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+    var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+    
+    var pathMappings = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["vlc"] = new[]
+        {
+            Path.Combine(programFiles, "VideoLAN", "VLC", "vlc.exe"),
+            Path.Combine(programFilesX86, "VideoLAN", "VLC", "vlc.exe")
+        },
+        ["mpv"] = new[]
+        {
+            Path.Combine(programFiles, "mpv", "mpv.exe"),
+            Path.Combine(localAppData, "Programs", "mpv", "mpv.exe"),
+            Path.Combine(appData, "mpv", "mpv.exe"),
+            @"C:\mpv\mpv.exe"
+        },
+        ["mpc-hc"] = new[]
+        {
+            Path.Combine(programFiles, "MPC-HC", "mpc-hc64.exe"),
+            Path.Combine(programFilesX86, "MPC-HC", "mpc-hc.exe")
+        },
+        ["mpc-be"] = new[]
+        {
+            Path.Combine(programFiles, "MPC-BE x64", "mpc-be64.exe"),
+            Path.Combine(programFilesX86, "MPC-BE", "mpc-be.exe")
+        },
+        ["potplayer"] = new[]
+        {
+            Path.Combine(programFiles, "DAUM", "PotPlayer", "PotPlayerMini64.exe"),
+            Path.Combine(programFilesX86, "DAUM", "PotPlayer", "PotPlayerMini.exe")
+        }
+    };
+    
+    if (pathMappings.TryGetValue(command, out var paths))
+    {
+        foreach (var path in paths)
+        {
+            yield return path;
+        }
+    }
+}
+
+/// <summary>
+/// Get Linux well-known paths including flatpak and snap installations.
+/// </summary>
+static IEnumerable<string> GetLinuxWellKnownPaths(string command)
+{
+    var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    
+    // Standard binary paths
+    var standardPaths = new[]
+    {
+        $"/usr/bin/{command}",
+        $"/usr/local/bin/{command}",
+        Path.Combine(homeDir, ".local", "bin", command)
+    };
+    
+    foreach (var path in standardPaths)
+    {
+        yield return path;
+    }
+    
+    // Flatpak apps
+    var flatpakMappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["mpv"] = "io.mpv.Mpv",
+        ["vlc"] = "org.videolan.VLC",
+        ["celluloid"] = "io.github.celluloid_player.Celluloid",
+        ["haruna"] = "org.kde.haruna"
+    };
+    
+    if (flatpakMappings.TryGetValue(command, out var flatpakId))
+    {
+        // Check if flatpak run wrapper exists
+        var flatpakRun = "/usr/bin/flatpak";
+        if (File.Exists(flatpakRun))
+        {
+            // Return the flatpak binary - we'll handle the run command separately
+            yield return flatpakRun;
+        }
+    }
+    
+    // Snap apps
+    var snapPath = $"/snap/bin/{command}";
+    yield return snapPath;
+    
+    // AppImage in common locations
+    var appImagePaths = new[]
+    {
+        Path.Combine(homeDir, "Applications", $"{command}.AppImage"),
+        Path.Combine(homeDir, "Applications", $"{command}-*.AppImage"),
+        Path.Combine(homeDir, ".local", "bin", $"{command}.AppImage")
+    };
+    
+    foreach (var appImagePath in appImagePaths)
+    {
+        if (!appImagePath.Contains('*'))
+        {
+            yield return appImagePath;
+        }
+    }
 }
 
 /// <summary>
@@ -8595,12 +8776,17 @@ static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
     
     if (OperatingSystem.IsLinux())
     {
-        // Linux: prefer mpv (most common), then vlc, then bundled Avalonia player
+        // Linux: prefer mpv (most common), then vlc, then other players, then bundled Avalonia player
         var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         candidates.AddRange(new[] { 
             "mpv",
+            "celluloid",      // GTK frontend for mpv (GNOME)
+            "haruna",         // Qt/KDE frontend for mpv
             "vlc",
-            "celluloid",  // GTK frontend for mpv
+            "cvlc",           // VLC command-line
+            "totem",          // GNOME Videos
+            "dragon",         // KDE video player
+            "parole",         // Xfce video player
             Path.Combine(homeDir, ".local", "share", "koware", "Koware.Player"),
             Path.Combine(AppContext.BaseDirectory, "Koware.Player"),
             "/opt/koware/player/Koware.Player",
@@ -8609,19 +8795,37 @@ static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
     }
     else if (OperatingSystem.IsMacOS())
     {
-        // macOS: prefer IINA/mpv (native, works best), bundled Avalonia player requires LibVLC which has ARM64 issues
+        // macOS: prefer IINA/mpv (native, works best), then VLC
+        // IINA is the best macOS-native player with mpv backend
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         candidates.AddRange(new[] { 
-            "iina", 
-            "mpv", 
+            "iina",
+            "/Applications/IINA.app/Contents/MacOS/iina-cli",
+            Path.Combine(homeDir, "Applications", "IINA.app", "Contents", "MacOS", "iina-cli"),
+            "mpv",
+            "/opt/homebrew/bin/mpv",
+            "/usr/local/bin/mpv",
+            "vlc",
+            "/Applications/VLC.app/Contents/MacOS/VLC",
+            Path.Combine(homeDir, "Applications", "VLC.app", "Contents", "MacOS", "VLC"),
             "/Applications/Koware.app/Contents/Resources/player/Koware.Player",
-            "/usr/local/bin/koware/player/Koware.Player",
-            "vlc" 
+            "/usr/local/bin/koware/player/Koware.Player"
         });
     }
     else
     {
-        // Windows: prefer bundled WPF player, then Avalonia, then VLC, then mpv
-        candidates.AddRange(new[] { "Koware.Player.Win", "Koware.Player.Win.exe", "Koware.Player", "Koware.Player.exe", "vlc", "mpv" });
+        // Windows: prefer bundled WPF player, then Avalonia, then popular players
+        candidates.AddRange(new[] { 
+            "Koware.Player.Win", 
+            "Koware.Player.Win.exe", 
+            "Koware.Player", 
+            "Koware.Player.exe", 
+            "mpv",
+            "vlc",
+            "mpc-hc",         // Media Player Classic - Home Cinema
+            "mpc-be",         // Media Player Classic - Black Edition
+            "potplayer"       // PotPlayer
+        });
     }
     
     candidates = candidates
