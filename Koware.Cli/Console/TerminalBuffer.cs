@@ -114,6 +114,14 @@ public sealed class TerminalBuffer : IDisposable
     }
 
     /// <summary>
+    /// Write a single character to the buffer.
+    /// </summary>
+    public void Write(char ch)
+    {
+        _buffer.Append(ch);
+    }
+
+    /// <summary>
     /// Write text with a specific color.
     /// </summary>
     public void Write(string text, ConsoleColor color)
@@ -221,21 +229,14 @@ public sealed class TerminalBuffer : IDisposable
     {
         // Move to start position
         System.Console.SetCursorPosition(0, startRow);
-        
-        // Clear any extra lines from previous render
-        if (_lastRenderedHeight > totalLines)
+
+        System.Console.Write(_buffer.ToString());
+
+        // Clear any extra lines from previous render.
+        for (var i = totalLines; i < _lastRenderedHeight; i++)
         {
-            var output = new StringBuilder(_buffer.ToString());
-            for (var i = totalLines; i < _lastRenderedHeight; i++)
-            {
-                output.Append(ClearLine);
-                output.AppendLine();
-            }
-            System.Console.Write(output.ToString());
-        }
-        else
-        {
-            System.Console.Write(_buffer.ToString());
+            System.Console.Write(ClearLine);
+            System.Console.WriteLine();
         }
         
         System.Console.Out.Flush();

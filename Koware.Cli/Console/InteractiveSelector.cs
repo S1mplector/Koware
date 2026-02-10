@@ -2,8 +2,6 @@
 // Interactive TUI selector with arrow-key navigation and fuzzy search.
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using Koware.Cli.Config;
 
 namespace Koware.Cli.Console;
@@ -49,9 +47,11 @@ public sealed class InteractiveSelector<T>
     private readonly Func<T, ItemStatus>? _statusFunc;
     private readonly RenderConfig _renderConfig;
     private readonly string _emptyMessage;
+    private readonly string[] _displayTextCache;
+    private readonly List<(string Display, int OriginalIndex, ItemStatus Status, string? Preview)> _renderItems;
 
     // State
-    private List<(T Item, int OriginalIndex, int Score)> _filtered = new();
+    private readonly List<(T Item, int OriginalIndex, int Score)> _filtered;
     private string _searchText = "";
     private int _selectedIndex;
     private int _scrollOffset;
@@ -69,6 +69,11 @@ public sealed class InteractiveSelector<T>
         _previewFunc = options?.PreviewFunc ?? options?.SecondaryDisplayFunc;
         _statusFunc = options?.StatusFunc;
         _emptyMessage = options?.EmptyMessage ?? "No items found";
+        _displayTextCache = new string[_items.Count];
+        for (var i = 0; i < _items.Count; i++)
+        {
+            _displayTextCache[i] = _displayFunc(_items[i]) ?? string.Empty;
+        }
 
         _renderConfig = new RenderConfig
         {
@@ -81,6 +86,9 @@ public sealed class InteractiveSelector<T>
             SelectionColor = options?.GetSelectionColor() ?? Theme.Selection,
             DisableQuickJump = options?.DisableQuickJump ?? false
         };
+
+        _filtered = new List<(T Item, int OriginalIndex, int Score)>(_items.Count);
+        _renderItems = new List<(string Display, int OriginalIndex, ItemStatus Status, string? Preview)>(_renderConfig.MaxVisibleItems);
     }
 
     private static int GetTerminalHeight()
@@ -230,26 +238,29 @@ public sealed class InteractiveSelector<T>
 
     private void RenderFrame(SelectorRenderer renderer, int startLine)
     {
-        var renderItems = _filtered
-            .Skip(_scrollOffset)
-            .Take(_renderConfig.MaxVisibleItems)
-            .Select(f => (
-                Display: _displayFunc(f.Item),
-                OriginalIndex: f.OriginalIndex,
-                Status: _statusFunc?.Invoke(f.Item) ?? ItemStatus.None,
-                Preview: _previewFunc?.Invoke(f.Item)
-            ))
-            .ToList();
-
-        // Pad to max visible if we have fewer items
-        while (renderItems.Count < _renderConfig.MaxVisibleItems)
+        _renderItems.Clear();
+        for (var i = 0; i < _renderConfig.MaxVisibleItems; i++)
         {
-            renderItems.Add(("", -1, ItemStatus.None, null));
+            var filteredIndex = _scrollOffset + i;
+            if (filteredIndex < _filtered.Count)
+            {
+                var filteredItem = _filtered[filteredIndex];
+                _renderItems.Add((
+                    Display: _displayTextCache[filteredItem.OriginalIndex],
+                    OriginalIndex: filteredItem.OriginalIndex,
+                    Status: _statusFunc?.Invoke(filteredItem.Item) ?? ItemStatus.None,
+                    Preview: _previewFunc?.Invoke(filteredItem.Item)
+                ));
+            }
+            else
+            {
+                _renderItems.Add(("", -1, ItemStatus.None, null));
+            }
         }
 
         var state = new RenderState
         {
-            Items = renderItems!,
+            Items = _renderItems,
             TotalCount = _items.Count,
             FilteredCount = _filtered.Count,  // Actual filtered count, not padded
             SelectedIndex = _selectedIndex - _scrollOffset,
@@ -262,6 +273,13 @@ public sealed class InteractiveSelector<T>
 
     private void MoveUp(int count = 1)
     {
+        if (_filtered.Count == 0)
+        {
+            _selectedIndex = 0;
+            _scrollOffset = 0;
+            return;
+        }
+
         _selectedIndex = Math.Max(0, _selectedIndex - count);
         if (_selectedIndex < _scrollOffset)
         {
@@ -271,6 +289,13 @@ public sealed class InteractiveSelector<T>
 
     private void MoveDown(int count = 1)
     {
+        if (_filtered.Count == 0)
+        {
+            _selectedIndex = 0;
+            _scrollOffset = 0;
+            return;
+        }
+
         _selectedIndex = Math.Min(_filtered.Count - 1, _selectedIndex + count);
         if (_selectedIndex >= _scrollOffset + _renderConfig.MaxVisibleItems)
         {
@@ -280,8 +305,28 @@ public sealed class InteractiveSelector<T>
 
     private void UpdateFilter()
     {
-        // Use FuzzyMatcher for filtering
-        _filtered = FuzzyMatcher.Filter(_items, _displayFunc, _searchText).ToList();
+        _filtered.Clear();
+
+        if (string.IsNullOrWhiteSpace(_searchText))
+        {
+            for (var i = 0; i < _items.Count; i++)
+            {
+                _filtered.Add((_items[i], i, 0));
+            }
+        }
+        else
+        {
+            for (var i = 0; i < _items.Count; i++)
+            {
+                var score = FuzzyMatcher.Score(_displayTextCache[i], _searchText);
+                if (score > 0)
+                {
+                    _filtered.Add((_items[i], i, score));
+                }
+            }
+
+            _filtered.Sort((a, b) => b.Score.CompareTo(a.Score));
+        }
 
         // Reset selection if needed
         if (_selectedIndex >= _filtered.Count)

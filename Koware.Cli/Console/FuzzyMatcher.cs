@@ -26,8 +26,8 @@ public static class FuzzyMatcher
         var textSpan = text.AsSpan();
         var patternSpan = pattern.AsSpan();
 
-        // Check for substring match (combines Contains + StartsWith in single pass)
-        var substringIndex = IndexOfIgnoreCase(textSpan, patternSpan);
+        // Fast vectorized case-insensitive substring search provided by runtime.
+        var substringIndex = textSpan.IndexOf(patternSpan, StringComparison.OrdinalIgnoreCase);
         if (substringIndex >= 0)
         {
             // Bonus for match at start
@@ -36,32 +36,6 @@ public static class FuzzyMatcher
 
         // Fuzzy match: all pattern characters must appear in order
         return ScoreFuzzy(textSpan, patternSpan);
-    }
-
-    /// <summary>
-    /// Find index of pattern in text using case-insensitive comparison.
-    /// Returns -1 if not found.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int IndexOfIgnoreCase(ReadOnlySpan<char> text, ReadOnlySpan<char> pattern)
-    {
-        var patternLen = pattern.Length;
-        var maxStart = text.Length - patternLen;
-
-        for (var i = 0; i <= maxStart; i++)
-        {
-            var matched = true;
-            for (var j = 0; j < patternLen; j++)
-            {
-                if (char.ToLowerInvariant(text[i + j]) != char.ToLowerInvariant(pattern[j]))
-                {
-                    matched = false;
-                    break;
-                }
-            }
-            if (matched) return i;
-        }
-        return -1;
     }
 
     /// <summary>
@@ -76,10 +50,11 @@ public static class FuzzyMatcher
         var lastMatchIndex = -1;
         var patternLen = pattern.Length;
         var textLen = text.Length;
+        var nextPatternChar = char.ToLowerInvariant(pattern[0]);
 
         for (var i = 0; i < textLen && patternIndex < patternLen; i++)
         {
-            if (char.ToLowerInvariant(text[i]) == char.ToLowerInvariant(pattern[patternIndex]))
+            if (char.ToLowerInvariant(text[i]) == nextPatternChar)
             {
                 score += 10;
 
@@ -97,6 +72,10 @@ public static class FuzzyMatcher
 
                 lastMatchIndex = i;
                 patternIndex++;
+                if (patternIndex < patternLen)
+                {
+                    nextPatternChar = char.ToLowerInvariant(pattern[patternIndex]);
+                }
             }
         }
 

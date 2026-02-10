@@ -13,6 +13,9 @@ namespace Koware.Application.UseCases;
 /// </summary>
 public static class DownloadPlanner
 {
+    private static readonly char[] InvalidFileNameChars = Path.GetInvalidFileNameChars();
+    private static readonly HashSet<char> InvalidFileNameCharSet = new(InvalidFileNameChars);
+
     /// <summary>
     /// Resolve which episodes to download based on user input.
     /// </summary>
@@ -149,12 +152,28 @@ public static class DownloadPlanner
             return "untitled";
         }
 
-        var invalid = Path.GetInvalidFileNameChars();
-        var cleaned = new string(value
-            .Select(c => invalid.Contains(c) ? '_' : c)
-            .ToArray());
+        var trimmed = value.Trim();
+        if (trimmed.Length == 0)
+        {
+            return "untitled";
+        }
 
-        cleaned = cleaned.Trim();
-        return string.IsNullOrWhiteSpace(cleaned) ? "untitled" : cleaned;
+        var firstInvalidIndex = trimmed.AsSpan().IndexOfAny(InvalidFileNameChars);
+        if (firstInvalidIndex < 0)
+        {
+            return trimmed;
+        }
+
+        var chars = trimmed.ToCharArray();
+        for (var i = firstInvalidIndex; i < chars.Length; i++)
+        {
+            if (InvalidFileNameCharSet.Contains(chars[i]))
+            {
+                chars[i] = '_';
+            }
+        }
+
+        var cleaned = new string(chars);
+        return cleaned.Length == 0 ? "untitled" : cleaned;
     }
 }

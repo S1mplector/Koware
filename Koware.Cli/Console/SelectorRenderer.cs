@@ -191,16 +191,18 @@ public sealed class SelectorRenderer
 
     private void RenderItems(RenderState state, ref int lines)
     {
+        var searchLower = string.IsNullOrWhiteSpace(state.SearchText)
+            ? null
+            : state.SearchText.ToLowerInvariant();
+
         for (var i = 0; i < _config.MaxVisibleItems; i++)
         {
-            var itemIndex = state.ScrollOffset + i;
-            
-            if (itemIndex < state.Items.Count)
+            if (i < state.Items.Count)
             {
-                var item = state.Items[itemIndex];
-                var isSelected = itemIndex == state.SelectedIndex;
+                var item = state.Items[i];
+                var isSelected = i == state.SelectedIndex;
                 
-                RenderItem(item, isSelected, i, state.SearchText);
+                RenderItem(item, isSelected, i, searchLower);
             }
             
             _buffer.WriteLine();
@@ -212,7 +214,7 @@ public sealed class SelectorRenderer
         (string Display, int OriginalIndex, ItemStatus Status, string? Preview) item,
         bool isSelected,
         int displayIndex,
-        string searchText)
+        string? searchLower)
     {
         // Empty item - just render blank line
         if (string.IsNullOrEmpty(item.Display) && item.OriginalIndex < 0)
@@ -233,7 +235,7 @@ public sealed class SelectorRenderer
 
         // Quick jump number (1-9) - only show if not disabled
         var displayNum = displayIndex + 1;
-        if (!_config.DisableQuickJump && displayNum <= 9 && string.IsNullOrEmpty(searchText))
+        if (!_config.DisableQuickJump && displayNum <= 9 && searchLower is null)
         {
             _buffer.SetColor(Theme.Secondary);
             _buffer.Write($"[{displayNum}] ");
@@ -269,7 +271,7 @@ public sealed class SelectorRenderer
             _buffer.SetColor(Theme.Text);
         }
 
-        WriteHighlighted(displayText, searchText, isSelected);
+        WriteHighlighted(displayText, searchLower, isSelected);
         _buffer.ResetColor();
     }
 
@@ -288,7 +290,7 @@ public sealed class SelectorRenderer
         if (!string.IsNullOrWhiteSpace(preview))
         {
             _buffer.SetColor(Theme.Muted);
-        _buffer.Write($"  {Icons.Preview} ");
+            _buffer.Write($"  {Icons.Preview} ");
             _buffer.SetColor(Theme.Text);
 
             var maxWidth = _buffer.Width - 6;
@@ -338,15 +340,14 @@ public sealed class SelectorRenderer
         lines++;
     }
 
-    private void WriteHighlighted(string text, string search, bool isSelected)
+    private void WriteHighlighted(string text, string? searchLower, bool isSelected)
     {
-        if (string.IsNullOrWhiteSpace(search))
+        if (string.IsNullOrEmpty(searchLower))
         {
             _buffer.Write(text);
             return;
         }
 
-        var searchLower = search.ToLowerInvariant();
         var searchIndex = 0;
 
         foreach (var ch in text)
@@ -356,13 +357,13 @@ public sealed class SelectorRenderer
             {
                 // Highlight matched character
                 _buffer.SetColor(isSelected ? _config.HighlightColor : ConsoleColor.Green);
-                _buffer.Write(ch.ToString());
+                _buffer.Write(ch);
                 _buffer.SetColor(isSelected ? _config.SelectionColor : Theme.Text);
                 searchIndex++;
             }
             else
             {
-                _buffer.Write(ch.ToString());
+                _buffer.Write(ch);
             }
         }
     }
