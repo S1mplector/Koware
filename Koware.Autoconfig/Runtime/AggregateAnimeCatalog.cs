@@ -13,7 +13,8 @@ namespace Koware.Autoconfig.Runtime;
 /// </summary>
 public sealed class AggregateAnimeCatalog : IAnimeCatalog
 {
-    private readonly IAnimeCatalog _builtInCatalog;
+    private readonly IReadOnlyDictionary<string, BuiltInAnimeProvider> _builtInProviders;
+    private readonly IReadOnlyList<BuiltInAnimeProvider> _orderedBuiltInProviders;
     private readonly IProviderStore _providerStore;
     private readonly ITransformEngine _transforms;
     private readonly HttpClient _httpClient;
@@ -21,13 +22,39 @@ public sealed class AggregateAnimeCatalog : IAnimeCatalog
     private readonly ILoggerFactory _loggerFactory;
 
     public AggregateAnimeCatalog(
-        IAnimeCatalog builtInCatalog,
+        IEnumerable<BuiltInAnimeProvider> builtInProviders,
         IProviderStore providerStore,
         ITransformEngine transforms,
         HttpClient httpClient,
         ILoggerFactory loggerFactory)
     {
-        _builtInCatalog = builtInCatalog;
+        var map = new Dictionary<string, BuiltInAnimeProvider>(StringComparer.OrdinalIgnoreCase);
+        var ordered = new List<BuiltInAnimeProvider>();
+
+        foreach (var provider in builtInProviders)
+        {
+            if (provider.Catalog is null || string.IsNullOrWhiteSpace(provider.Slug))
+            {
+                continue;
+            }
+
+            var slug = provider.Slug.Trim().ToLowerInvariant();
+            if (map.ContainsKey(slug))
+            {
+                continue;
+            }
+
+            var normalized = new BuiltInAnimeProvider(
+                slug,
+                string.IsNullOrWhiteSpace(provider.Name) ? slug : provider.Name.Trim(),
+                provider.Catalog);
+
+            map[slug] = normalized;
+            ordered.Add(normalized);
+        }
+
+        _builtInProviders = map;
+        _orderedBuiltInProviders = ordered;
         _providerStore = providerStore;
         _transforms = transforms;
         _httpClient = httpClient;
@@ -45,20 +72,25 @@ public sealed class AggregateAnimeCatalog : IAnimeCatalog
         var allResults = new List<Anime>();
         var tasks = new List<Task<IReadOnlyCollection<Anime>>>();
 
-        // Search built-in catalog
-        tasks.Add(SafeSearchAsync(_builtInCatalog, "AllAnime", query, filters, cancellationToken));
-
-        // Get active dynamic anime provider
-        var activeConfig = await _providerStore.GetActiveAsync(ProviderType.Anime, cancellationToken);
-        if (activeConfig != null && activeConfig.Type is ProviderType.Anime or ProviderType.Both)
+        foreach (var provider in _orderedBuiltInProviders)
         {
-            var dynamicCatalog = CreateDynamicCatalog(activeConfig);
-            tasks.Add(SafeSearchAsync(dynamicCatalog, activeConfig.Name, query, filters, cancellationToken));
+            tasks.Add(SafeSearchAsync(provider.Catalog, provider.Name, provider.Slug, query, filters, cancellationToken));
         }
 
-        // Wait for all searches to complete
+        var activeConfig = await _providerStore.GetActiveAsync(ProviderType.Anime, cancellationToken);
+        if (activeConfig is not null && activeConfig.Type is ProviderType.Anime or ProviderType.Both)
+        {
+            var dynamicCatalog = CreateDynamicCatalog(activeConfig);
+            tasks.Add(SafeSearchAsync(dynamicCatalog, activeConfig.Name, activeConfig.Slug, query, filters, cancellationToken));
+        }
+
+        if (tasks.Count == 0)
+        {
+            return Array.Empty<Anime>();
+        }
+
         var results = await Task.WhenAll(tasks);
-        
+
         foreach (var result in results)
         {
             allResults.AddRange(result);
@@ -72,19 +104,25 @@ public sealed class AggregateAnimeCatalog : IAnimeCatalog
         var allResults = new List<Anime>();
         var tasks = new List<Task<IReadOnlyCollection<Anime>>>();
 
-        // Browse built-in catalog
-        tasks.Add(SafeBrowseAsync(_builtInCatalog, "AllAnime", filters, cancellationToken));
+        foreach (var provider in _orderedBuiltInProviders)
+        {
+            tasks.Add(SafeBrowseAsync(provider.Catalog, provider.Name, provider.Slug, filters, cancellationToken));
+        }
 
-        // Get active dynamic anime provider
         var activeConfig = await _providerStore.GetActiveAsync(ProviderType.Anime, cancellationToken);
-        if (activeConfig != null && activeConfig.Type is ProviderType.Anime or ProviderType.Both)
+        if (activeConfig is not null && activeConfig.Type is ProviderType.Anime or ProviderType.Both)
         {
             var dynamicCatalog = CreateDynamicCatalog(activeConfig);
-            tasks.Add(SafeBrowseAsync(dynamicCatalog, activeConfig.Name, filters, cancellationToken));
+            tasks.Add(SafeBrowseAsync(dynamicCatalog, activeConfig.Name, activeConfig.Slug, filters, cancellationToken));
+        }
+
+        if (tasks.Count == 0)
+        {
+            return Array.Empty<Anime>();
         }
 
         var results = await Task.WhenAll(tasks);
-        
+
         foreach (var result in results)
         {
             allResults.AddRange(result);
@@ -95,40 +133,82 @@ public sealed class AggregateAnimeCatalog : IAnimeCatalog
 
     public async Task<IReadOnlyCollection<Episode>> GetEpisodesAsync(Anime anime, CancellationToken cancellationToken = default)
     {
-        // Determine which provider to use based on anime ID prefix
-        var providerSlug = ExtractProviderSlug(anime.Id.Value);
-        
-        if (!string.IsNullOrEmpty(providerSlug))
+        if (TryExtractProviderSlug(anime.Id.Value, out var providerSlug))
         {
-            var config = await _providerStore.GetAsync(providerSlug, cancellationToken);
-            if (config != null)
+            if (_builtInProviders.TryGetValue(providerSlug, out var builtInProvider))
             {
-                var dynamicCatalog = CreateDynamicCatalog(config);
-                return await dynamicCatalog.GetEpisodesAsync(anime, cancellationToken);
+                var strippedAnime = StripProviderPrefix(anime, providerSlug);
+                return await SafeGetEpisodesAsync(builtInProvider.Catalog, builtInProvider.Name, providerSlug, strippedAnime, cancellationToken);
+            }
+
+            var dynamicConfig = await _providerStore.GetAsync(providerSlug, cancellationToken);
+            if (dynamicConfig is not null)
+            {
+                var dynamicCatalog = CreateDynamicCatalog(dynamicConfig);
+                var strippedAnime = StripProviderPrefix(anime, providerSlug);
+                return await SafeGetEpisodesAsync(dynamicCatalog, dynamicConfig.Name, providerSlug, strippedAnime, cancellationToken);
             }
         }
 
-        // Fall back to built-in catalog
-        return await _builtInCatalog.GetEpisodesAsync(anime, cancellationToken);
+        var fallbackProvider = GetFallbackBuiltInProvider();
+        if (fallbackProvider is not null)
+        {
+            return await SafeGetEpisodesAsync(fallbackProvider.Catalog, fallbackProvider.Name, fallbackProvider.Slug, anime, cancellationToken);
+        }
+
+        var activeDynamic = await _providerStore.GetActiveAsync(ProviderType.Anime, cancellationToken);
+        if (activeDynamic is not null && activeDynamic.Type is ProviderType.Anime or ProviderType.Both)
+        {
+            var dynamicCatalog = CreateDynamicCatalog(activeDynamic);
+            return await SafeGetEpisodesAsync(dynamicCatalog, activeDynamic.Name, activeDynamic.Slug, anime, cancellationToken);
+        }
+
+        return Array.Empty<Episode>();
     }
 
     public async Task<IReadOnlyCollection<StreamLink>> GetStreamsAsync(Episode episode, CancellationToken cancellationToken = default)
     {
-        // Determine which provider to use based on episode ID prefix
-        var providerSlug = ExtractProviderSlug(episode.Id.Value);
-        
-        if (!string.IsNullOrEmpty(providerSlug))
+        if (TryExtractProviderSlug(episode.Id.Value, out var providerSlug))
         {
-            var config = await _providerStore.GetAsync(providerSlug, cancellationToken);
-            if (config != null)
+            if (_builtInProviders.TryGetValue(providerSlug, out var builtInProvider))
             {
-                var dynamicCatalog = CreateDynamicCatalog(config);
-                return await dynamicCatalog.GetStreamsAsync(episode, cancellationToken);
+                var strippedEpisode = StripProviderPrefix(episode, providerSlug);
+                return await SafeGetStreamsAsync(builtInProvider.Catalog, builtInProvider.Name, strippedEpisode, cancellationToken);
+            }
+
+            var dynamicConfig = await _providerStore.GetAsync(providerSlug, cancellationToken);
+            if (dynamicConfig is not null)
+            {
+                var dynamicCatalog = CreateDynamicCatalog(dynamicConfig);
+                var strippedEpisode = StripProviderPrefix(episode, providerSlug);
+                return await SafeGetStreamsAsync(dynamicCatalog, dynamicConfig.Name, strippedEpisode, cancellationToken);
             }
         }
 
-        // Fall back to built-in catalog
-        return await _builtInCatalog.GetStreamsAsync(episode, cancellationToken);
+        var fallbackProvider = GetFallbackBuiltInProvider();
+        if (fallbackProvider is not null)
+        {
+            return await SafeGetStreamsAsync(fallbackProvider.Catalog, fallbackProvider.Name, episode, cancellationToken);
+        }
+
+        var activeDynamic = await _providerStore.GetActiveAsync(ProviderType.Anime, cancellationToken);
+        if (activeDynamic is not null && activeDynamic.Type is ProviderType.Anime or ProviderType.Both)
+        {
+            var dynamicCatalog = CreateDynamicCatalog(activeDynamic);
+            return await SafeGetStreamsAsync(dynamicCatalog, activeDynamic.Name, episode, cancellationToken);
+        }
+
+        return Array.Empty<StreamLink>();
+    }
+
+    private BuiltInAnimeProvider? GetFallbackBuiltInProvider()
+    {
+        if (_builtInProviders.TryGetValue("allanime", out var allanime))
+        {
+            return allanime;
+        }
+
+        return _orderedBuiltInProviders.FirstOrDefault();
     }
 
     private DynamicAnimeCatalog CreateDynamicCatalog(DynamicProviderConfig config)
@@ -143,6 +223,7 @@ public sealed class AggregateAnimeCatalog : IAnimeCatalog
     private async Task<IReadOnlyCollection<Anime>> SafeSearchAsync(
         IAnimeCatalog catalog,
         string providerName,
+        string providerSlug,
         string query,
         SearchFilters filters,
         CancellationToken cancellationToken)
@@ -150,21 +231,7 @@ public sealed class AggregateAnimeCatalog : IAnimeCatalog
         try
         {
             var results = await catalog.SearchAsync(query, filters, cancellationToken);
-            
-            // Prefix anime IDs with provider slug for routing
-            if (catalog is DynamicAnimeCatalog dynamicCatalog)
-            {
-                return results.Select(a => new Anime(
-                    new AnimeId($"{dynamicCatalog.ProviderSlug}:{a.Id.Value}"),
-                    a.Title,
-                    a.Synopsis,
-                    a.CoverImage,
-                    a.DetailPage,
-                    a.Episodes
-                )).ToList();
-            }
-            
-            return results;
+            return PrefixAnimeIds(results, providerSlug);
         }
         catch (Exception ex)
         {
@@ -176,12 +243,14 @@ public sealed class AggregateAnimeCatalog : IAnimeCatalog
     private async Task<IReadOnlyCollection<Anime>> SafeBrowseAsync(
         IAnimeCatalog catalog,
         string providerName,
+        string providerSlug,
         SearchFilters? filters,
         CancellationToken cancellationToken)
     {
         try
         {
-            return await catalog.BrowsePopularAsync(filters, cancellationToken);
+            var results = await catalog.BrowsePopularAsync(filters, cancellationToken);
+            return PrefixAnimeIds(results, providerSlug);
         }
         catch (Exception ex)
         {
@@ -190,19 +259,126 @@ public sealed class AggregateAnimeCatalog : IAnimeCatalog
         }
     }
 
-    private static string? ExtractProviderSlug(string id)
+    private async Task<IReadOnlyCollection<Episode>> SafeGetEpisodesAsync(
+        IAnimeCatalog catalog,
+        string providerName,
+        string providerSlug,
+        Anime anime,
+        CancellationToken cancellationToken)
     {
-        // Format: "provider-slug:actual-id"
-        var colonIndex = id.IndexOf(':');
-        if (colonIndex > 0)
+        try
         {
-            var possibleSlug = id[..colonIndex];
-            // Check if it looks like a provider slug (not a numeric ID)
-            if (!possibleSlug.All(char.IsDigit))
-            {
-                return possibleSlug;
-            }
+            var episodes = await catalog.GetEpisodesAsync(anime, cancellationToken);
+            return PrefixEpisodeIds(episodes, providerSlug);
         }
-        return null;
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Episode fetch failed for provider {Provider}", providerName);
+            return Array.Empty<Episode>();
+        }
     }
+
+    private async Task<IReadOnlyCollection<StreamLink>> SafeGetStreamsAsync(
+        IAnimeCatalog catalog,
+        string providerName,
+        Episode episode,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await catalog.GetStreamsAsync(episode, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Stream fetch failed for provider {Provider}", providerName);
+            return Array.Empty<StreamLink>();
+        }
+    }
+
+    private static IReadOnlyCollection<Anime> PrefixAnimeIds(IReadOnlyCollection<Anime> results, string providerSlug)
+    {
+        return results.Select(anime => new Anime(
+            new AnimeId(PrefixId(providerSlug, anime.Id.Value)),
+            anime.Title,
+            anime.Synopsis,
+            anime.CoverImage,
+            anime.DetailPage,
+            PrefixEpisodeIds(anime.Episodes, providerSlug))).ToArray();
+    }
+
+    private static IReadOnlyCollection<Episode> PrefixEpisodeIds(IReadOnlyCollection<Episode> episodes, string providerSlug)
+    {
+        return episodes.Select(ep => new Episode(
+            new EpisodeId(PrefixId(providerSlug, ep.Id.Value)),
+            ep.Title,
+            ep.Number,
+            ep.PageUrl)).ToArray();
+    }
+
+    private static Anime StripProviderPrefix(Anime anime, string providerSlug)
+    {
+        return new Anime(
+            new AnimeId(RemovePrefix(providerSlug, anime.Id.Value)),
+            anime.Title,
+            anime.Synopsis,
+            anime.CoverImage,
+            anime.DetailPage,
+            anime.Episodes.Select(ep => StripProviderPrefix(ep, providerSlug)).ToArray());
+    }
+
+    private static Episode StripProviderPrefix(Episode episode, string providerSlug)
+    {
+        return new Episode(
+            new EpisodeId(RemovePrefix(providerSlug, episode.Id.Value)),
+            episode.Title,
+            episode.Number,
+            episode.PageUrl);
+    }
+
+    private static string PrefixId(string providerSlug, string id)
+    {
+        if (string.IsNullOrWhiteSpace(providerSlug) || string.IsNullOrWhiteSpace(id))
+        {
+            return id;
+        }
+
+        return id.StartsWith(providerSlug + ":", StringComparison.OrdinalIgnoreCase)
+            ? id
+            : $"{providerSlug}:{id}";
+    }
+
+    private static string RemovePrefix(string providerSlug, string id)
+    {
+        if (string.IsNullOrWhiteSpace(providerSlug) || string.IsNullOrWhiteSpace(id))
+        {
+            return id;
+        }
+
+        var prefix = providerSlug + ":";
+        return id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? id[prefix.Length..]
+            : id;
+    }
+
+    private static bool TryExtractProviderSlug(string id, out string providerSlug)
+    {
+        providerSlug = string.Empty;
+
+        var colonIndex = id.IndexOf(':');
+        if (colonIndex <= 0)
+        {
+            return false;
+        }
+
+        var possibleSlug = id[..colonIndex];
+        if (possibleSlug.All(char.IsDigit))
+        {
+            return false;
+        }
+
+        providerSlug = possibleSlug.ToLowerInvariant();
+        return true;
+    }
+
+    public sealed record BuiltInAnimeProvider(string Slug, string Name, IAnimeCatalog Catalog);
 }

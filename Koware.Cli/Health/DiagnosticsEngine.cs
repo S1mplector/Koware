@@ -79,6 +79,8 @@ public sealed class DiagnosticsEngine
 {
     private readonly HttpClient _httpClient;
     private readonly IOptions<AllAnimeOptions> _animeOptions;
+    private readonly IOptions<HiAnimeOptions> _hiAnimeOptions;
+    private readonly IOptions<NineAnimeOptions> _nineAnimeOptions;
     private readonly IOptions<AllMangaOptions> _mangaOptions;
     private readonly string _configPath;
     private readonly string _dataDir;
@@ -87,12 +89,16 @@ public sealed class DiagnosticsEngine
     public DiagnosticsEngine(
         HttpClient httpClient,
         IOptions<AllAnimeOptions> animeOptions,
+        IOptions<HiAnimeOptions> hiAnimeOptions,
+        IOptions<NineAnimeOptions> nineAnimeOptions,
         IOptions<AllMangaOptions> mangaOptions,
         string configPath)
     {
         _httpClient = httpClient;
         _httpClient.Timeout = TimeSpan.FromSeconds(10);
         _animeOptions = animeOptions;
+        _hiAnimeOptions = hiAnimeOptions;
+        _nineAnimeOptions = nineAnimeOptions;
         _mangaOptions = mangaOptions;
         _configPath = configPath;
 
@@ -1599,19 +1605,45 @@ public sealed class DiagnosticsEngine
     private async Task<List<DiagnosticResult>> RunProviderChecksAsync(CancellationToken cancellationToken)
     {
         var results = new List<DiagnosticResult>();
-        var providers = new (string name, AllAnimeOptions opts, bool isManga)[]
+        var providers = new[]
         {
-            ("Anime Provider (allanime)", _animeOptions.Value, false),
-            ("Manga Provider (allmanga)", CreateMangaAsAnimeOptions(_mangaOptions.Value), true)
+            new ProviderCheckTarget(
+                "Anime Provider (allanime)",
+                _animeOptions.Value.IsConfigured,
+                _animeOptions.Value.ApiBase,
+                _animeOptions.Value.Referer,
+                _animeOptions.Value.UserAgent,
+                ProviderProbeKind.GraphQl),
+            new ProviderCheckTarget(
+                "Anime Provider (hianime)",
+                _hiAnimeOptions.Value.IsConfigured,
+                _hiAnimeOptions.Value.BaseUrl,
+                _hiAnimeOptions.Value.EffectiveReferer,
+                _hiAnimeOptions.Value.UserAgent,
+                ProviderProbeKind.DirectAjax),
+            new ProviderCheckTarget(
+                "Anime Provider (9anime)",
+                _nineAnimeOptions.Value.IsConfigured,
+                _nineAnimeOptions.Value.BaseUrl,
+                _nineAnimeOptions.Value.EffectiveReferer,
+                _nineAnimeOptions.Value.UserAgent,
+                ProviderProbeKind.DirectAjax),
+            new ProviderCheckTarget(
+                "Manga Provider (allmanga)",
+                _mangaOptions.Value.IsConfigured,
+                _mangaOptions.Value.ApiBase,
+                _mangaOptions.Value.Referer,
+                _mangaOptions.Value.UserAgent,
+                ProviderProbeKind.GraphQl)
         };
 
-        foreach (var (name, opts, _) in providers)
+        foreach (var provider in providers)
         {
-            if (!opts.IsConfigured || string.IsNullOrWhiteSpace(opts.ApiBase))
+            if (!provider.Configured || string.IsNullOrWhiteSpace(provider.Endpoint))
             {
                 results.Add(new DiagnosticResult
                 {
-                    Name = name,
+                    Name = provider.Name,
                     Category = DiagnosticCategory.Providers,
                     Severity = DiagnosticSeverity.Skipped,
                     Message = "Not configured"
@@ -1619,8 +1651,7 @@ public sealed class DiagnosticsEngine
                 continue;
             }
 
-            // DNS check
-            var dnsResult = await CheckProviderDnsAsync(name, opts.ApiBase, cancellationToken);
+            var dnsResult = await CheckProviderDnsAsync(provider.Name, provider.Endpoint, cancellationToken);
             results.Add(dnsResult);
 
             if (dnsResult.Severity == DiagnosticSeverity.Error)
@@ -1628,14 +1659,12 @@ public sealed class DiagnosticsEngine
                 continue;
             }
 
-            // HTTP check
-            var httpResult = await CheckProviderHttpAsync(name, opts, cancellationToken);
+            var httpResult = await CheckProviderHttpAsync(provider, cancellationToken);
             results.Add(httpResult);
 
-            // API validation (try a simple query)
             if (httpResult.Severity == DiagnosticSeverity.Ok)
             {
-                var apiResult = await CheckProviderApiAsync(name, opts, cancellationToken);
+                var apiResult = await CheckProviderApiAsync(provider, cancellationToken);
                 results.Add(apiResult);
             }
         }
@@ -1643,21 +1672,12 @@ public sealed class DiagnosticsEngine
         return results;
     }
 
-    private static AllAnimeOptions CreateMangaAsAnimeOptions(AllMangaOptions manga) => new()
-    {
-        Enabled = manga.Enabled,
-        BaseHost = manga.BaseHost,
-        ApiBase = manga.ApiBase,
-        Referer = manga.Referer,
-        UserAgent = manga.UserAgent
-    };
-
-    private async Task<DiagnosticResult> CheckProviderDnsAsync(string providerName, string apiBase, CancellationToken cancellationToken)
+    private async Task<DiagnosticResult> CheckProviderDnsAsync(string providerName, string endpoint, CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         try
         {
-            var uri = new Uri(apiBase);
+            var uri = new Uri(endpoint);
             var addresses = await Dns.GetHostAddressesAsync(uri.Host, cancellationToken);
             sw.Stop();
 
@@ -1685,19 +1705,18 @@ public sealed class DiagnosticsEngine
         }
     }
 
-    private async Task<DiagnosticResult> CheckProviderHttpAsync(string providerName, AllAnimeOptions opts, CancellationToken cancellationToken)
+    private async Task<DiagnosticResult> CheckProviderHttpAsync(ProviderCheckTarget provider, CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         try
         {
-            var baseUri = new Uri(opts.ApiBase!.EndsWith('/') ? opts.ApiBase : opts.ApiBase + "/");
-            var request = new HttpRequestMessage(HttpMethod.Get, new Uri(baseUri, "/api"));
-            
-            if (!string.IsNullOrWhiteSpace(opts.UserAgent))
-            {
-                request.Headers.UserAgent.ParseAdd(opts.UserAgent);
-            }
-            request.Headers.Accept.ParseAdd("application/json");
+            var baseUri = new Uri(provider.Endpoint!.EndsWith('/') ? provider.Endpoint : provider.Endpoint + "/");
+            var requestUri = provider.ProbeKind == ProviderProbeKind.GraphQl
+                ? new Uri(baseUri, "api")
+                : baseUri;
+            var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+            ApplyProviderHeaders(request, provider);
+            request.Headers.Accept.ParseAdd("application/json, text/plain, */*");
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(10000);
@@ -1707,7 +1726,7 @@ public sealed class DiagnosticsEngine
 
             return new DiagnosticResult
             {
-                Name = $"{providerName} HTTP",
+                Name = $"{provider.Name} HTTP",
                 Category = DiagnosticCategory.Providers,
                 Severity = response.IsSuccessStatusCode || (int)response.StatusCode < 500 ? DiagnosticSeverity.Ok : DiagnosticSeverity.Error,
                 Message = $"HTTP {(int)response.StatusCode}",
@@ -1719,7 +1738,7 @@ public sealed class DiagnosticsEngine
             sw.Stop();
             return new DiagnosticResult
             {
-                Name = $"{providerName} HTTP",
+                Name = $"{provider.Name} HTTP",
                 Category = DiagnosticCategory.Providers,
                 Severity = DiagnosticSeverity.Error,
                 Message = "Failed",
@@ -1729,13 +1748,28 @@ public sealed class DiagnosticsEngine
         }
     }
 
-    private async Task<DiagnosticResult> CheckProviderApiAsync(string providerName, AllAnimeOptions opts, CancellationToken cancellationToken)
+    private async Task<DiagnosticResult> CheckProviderApiAsync(ProviderCheckTarget provider, CancellationToken cancellationToken)
+    {
+        return provider.ProbeKind switch
+        {
+            ProviderProbeKind.GraphQl => await CheckProviderGraphQlApiAsync(provider, cancellationToken),
+            ProviderProbeKind.DirectAjax => await CheckProviderDirectApiAsync(provider, cancellationToken),
+            _ => new DiagnosticResult
+            {
+                Name = $"{provider.Name} API",
+                Category = DiagnosticCategory.Providers,
+                Severity = DiagnosticSeverity.Skipped,
+                Message = "Unsupported probe"
+            }
+        };
+    }
+
+    private async Task<DiagnosticResult> CheckProviderGraphQlApiAsync(ProviderCheckTarget provider, CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         try
         {
-            // Try a minimal GraphQL query to validate API is working
-            var baseUri = new Uri(opts.ApiBase!.EndsWith('/') ? opts.ApiBase : opts.ApiBase + "/");
+            var baseUri = new Uri(provider.Endpoint!.EndsWith('/') ? provider.Endpoint : provider.Endpoint + "/");
             var graphqlUri = new Uri(baseUri, "api");
             
             var query = new { query = "{ __typename }" };
@@ -1745,14 +1779,7 @@ public sealed class DiagnosticsEngine
                 "application/json");
 
             var request = new HttpRequestMessage(HttpMethod.Post, graphqlUri) { Content = content };
-            if (!string.IsNullOrWhiteSpace(opts.UserAgent))
-            {
-                request.Headers.UserAgent.ParseAdd(opts.UserAgent);
-            }
-            if (!string.IsNullOrWhiteSpace(opts.Referer))
-            {
-                request.Headers.Referrer = new Uri(opts.Referer);
-            }
+            ApplyProviderHeaders(request, provider);
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(10000);
@@ -1768,7 +1795,7 @@ public sealed class DiagnosticsEngine
             {
                 return new DiagnosticResult
                 {
-                    Name = $"{providerName} API",
+                    Name = $"{provider.Name} API",
                     Category = DiagnosticCategory.Providers,
                     Severity = DiagnosticSeverity.Ok,
                     Message = "Responding",
@@ -1778,7 +1805,7 @@ public sealed class DiagnosticsEngine
 
             return new DiagnosticResult
             {
-                Name = $"{providerName} API",
+                Name = $"{provider.Name} API",
                 Category = DiagnosticCategory.Providers,
                 Severity = DiagnosticSeverity.Warning,
                 Message = hasError ? "API returned errors" : $"HTTP {(int)response.StatusCode}",
@@ -1790,7 +1817,7 @@ public sealed class DiagnosticsEngine
             sw.Stop();
             return new DiagnosticResult
             {
-                Name = $"{providerName} API",
+                Name = $"{provider.Name} API",
                 Category = DiagnosticCategory.Providers,
                 Severity = DiagnosticSeverity.Warning,
                 Message = "API check failed",
@@ -1799,6 +1826,92 @@ public sealed class DiagnosticsEngine
             };
         }
     }
+
+    private async Task<DiagnosticResult> CheckProviderDirectApiAsync(ProviderCheckTarget provider, CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var baseUri = new Uri(provider.Endpoint!.EndsWith('/') ? provider.Endpoint : provider.Endpoint + "/");
+            var searchUri = new Uri(baseUri, "ajax/search/suggest?keyword=naruto");
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, searchUri);
+            ApplyProviderHeaders(request, provider);
+            request.Headers.TryAddWithoutValidation("X-Requested-With", "XMLHttpRequest");
+            request.Headers.Accept.ParseAdd("application/json, text/plain, */*");
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(10000);
+
+            var response = await _httpClient.SendAsync(request, cts.Token);
+            var body = await response.Content.ReadAsStringAsync(cts.Token);
+            sw.Stop();
+
+            var looksValid = body.Contains("\"html\"") || body.Contains("/watch/", StringComparison.OrdinalIgnoreCase);
+            if ((response.IsSuccessStatusCode || (int)response.StatusCode < 500) && looksValid)
+            {
+                return new DiagnosticResult
+                {
+                    Name = $"{provider.Name} API",
+                    Category = DiagnosticCategory.Providers,
+                    Severity = DiagnosticSeverity.Ok,
+                    Message = "Responding",
+                    Duration = sw.Elapsed
+                };
+            }
+
+            return new DiagnosticResult
+            {
+                Name = $"{provider.Name} API",
+                Category = DiagnosticCategory.Providers,
+                Severity = DiagnosticSeverity.Warning,
+                Message = looksValid ? $"HTTP {(int)response.StatusCode}" : "Unexpected response payload",
+                Duration = sw.Elapsed
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return new DiagnosticResult
+            {
+                Name = $"{provider.Name} API",
+                Category = DiagnosticCategory.Providers,
+                Severity = DiagnosticSeverity.Warning,
+                Message = "API check failed",
+                Detail = ErrorClassifier.SafeDetail(ex),
+                Duration = sw.Elapsed
+            };
+        }
+    }
+
+    private static void ApplyProviderHeaders(HttpRequestMessage request, ProviderCheckTarget provider)
+    {
+        if (!string.IsNullOrWhiteSpace(provider.UserAgent))
+        {
+            request.Headers.UserAgent.ParseAdd(provider.UserAgent);
+        }
+
+        if (!string.IsNullOrWhiteSpace(provider.Referer) &&
+            Uri.TryCreate(provider.Referer, UriKind.Absolute, out var refererUri))
+        {
+            request.Headers.Referrer = refererUri;
+            request.Headers.TryAddWithoutValidation("Origin", $"{refererUri.Scheme}://{refererUri.Host}");
+        }
+    }
+
+    private enum ProviderProbeKind
+    {
+        GraphQl,
+        DirectAjax
+    }
+
+    private sealed record ProviderCheckTarget(
+        string Name,
+        bool Configured,
+        string? Endpoint,
+        string? Referer,
+        string? UserAgent,
+        ProviderProbeKind ProbeKind);
 
     #endregion
 

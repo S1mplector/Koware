@@ -18,11 +18,15 @@ public static class InfrastructureServiceCollectionExtensions
         {
             services.Configure<AllAnimeOptions>(configuration.GetSection("AllAnime"));
             services.Configure<AllMangaOptions>(configuration.GetSection("AllManga"));
+            services.Configure<HiAnimeOptions>(configuration.GetSection("HiAnime"));
+            services.Configure<NineAnimeOptions>(configuration.GetSection("NineAnime"));
         }
         else
         {
             services.Configure<AllAnimeOptions>(_ => { });
             services.Configure<AllMangaOptions>(_ => { });
+            services.Configure<HiAnimeOptions>(_ => { });
+            services.Configure<NineAnimeOptions>(_ => { });
         }
 
         services.AddHttpClient<AllAnimeCatalog>((sp, client) =>
@@ -37,16 +41,9 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 client.DefaultRequestHeaders.Referrer = refererUri;
             }
-            client.DefaultRequestHeaders.UserAgent.ParseAdd(options.UserAgent);
+            ConfigureCommonClient(client, options.UserAgent);
             client.DefaultRequestHeaders.Accept.ParseAdd("application/json, */*");
-            client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
-            client.DefaultRequestVersion = HttpVersion.Version11;
-            client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
-        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
-        {
-            AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate,
-            PooledConnectionLifetime = TimeSpan.FromMinutes(2)
-        });
+        }).ConfigurePrimaryHttpMessageHandler(CreateDefaultHandler);
 
         services.AddHttpClient<AllMangaCatalog>((sp, client) =>
         {
@@ -60,22 +57,66 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 client.DefaultRequestHeaders.Referrer = refererUri;
             }
-            client.DefaultRequestHeaders.UserAgent.ParseAdd(options.UserAgent);
+            ConfigureCommonClient(client, options.UserAgent);
             client.DefaultRequestHeaders.Accept.ParseAdd("application/json, */*");
-            client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
-            client.DefaultRequestVersion = HttpVersion.Version11;
-            client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
-        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        }).ConfigurePrimaryHttpMessageHandler(CreateDefaultHandler);
+
+        services.AddHttpClient<HiAnimeCatalog>((sp, client) =>
         {
-            AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate,
-            PooledConnectionLifetime = TimeSpan.FromMinutes(2)
-        });
+            var options = sp.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
+            if (!string.IsNullOrWhiteSpace(options.BaseUrl) && Uri.TryCreate(options.BaseUrl.Trim(), UriKind.Absolute, out var baseUri))
+            {
+                client.BaseAddress = baseUri;
+            }
+            if (!string.IsNullOrWhiteSpace(options.Referer) && Uri.TryCreate(options.Referer.Trim(), UriKind.Absolute, out var refererUri))
+            {
+                client.DefaultRequestHeaders.Referrer = refererUri;
+            }
+            ConfigureCommonClient(client, options.UserAgent);
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/plain, */*");
+        }).ConfigurePrimaryHttpMessageHandler(CreateDefaultHandler);
+
+        services.AddHttpClient<NineAnimeCatalog>((sp, client) =>
+        {
+            var options = sp.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
+            if (!string.IsNullOrWhiteSpace(options.BaseUrl) && Uri.TryCreate(options.BaseUrl.Trim(), UriKind.Absolute, out var baseUri))
+            {
+                client.BaseAddress = baseUri;
+            }
+            if (!string.IsNullOrWhiteSpace(options.Referer) && Uri.TryCreate(options.Referer.Trim(), UriKind.Absolute, out var refererUri))
+            {
+                client.DefaultRequestHeaders.Referrer = refererUri;
+            }
+            ConfigureCommonClient(client, options.UserAgent);
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/plain, */*");
+        }).ConfigurePrimaryHttpMessageHandler(CreateDefaultHandler);
 
         services.AddSingleton<AllAnimeCatalog>();
         services.AddSingleton<AllMangaCatalog>();
+        services.AddSingleton<HiAnimeCatalog>();
+        services.AddSingleton<NineAnimeCatalog>();
         services.AddSingleton<IAnimeCatalog>(sp => sp.GetRequiredService<AllAnimeCatalog>());
         services.AddSingleton<IMangaCatalog>(sp => sp.GetRequiredService<AllMangaCatalog>());
-        services.AddSingleton<IAnimeCatalog>(sp => sp.GetRequiredService<AllAnimeCatalog>());
         return services;
+    }
+
+    private static void ConfigureCommonClient(HttpClient client, string userAgent)
+    {
+        if (!string.IsNullOrWhiteSpace(userAgent))
+        {
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(userAgent);
+        }
+        client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+        client.DefaultRequestVersion = HttpVersion.Version11;
+        client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
+    }
+
+    private static HttpMessageHandler CreateDefaultHandler()
+    {
+        return new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2)
+        };
     }
 }

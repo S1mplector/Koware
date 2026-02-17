@@ -191,4 +191,86 @@ public class ProviderOptionsTests
     }
 
     #endregion
+
+    #region HiAnimeOptions Tests
+
+    [Fact]
+    public void HiAnimeOptions_IsConfigured_ReturnsFalse_WhenNotEnabled()
+    {
+        var options = new HiAnimeOptions
+        {
+            Enabled = false,
+            BaseUrl = "https://hianime.to"
+        };
+
+        Assert.False(options.IsConfigured);
+    }
+
+    [Fact]
+    public void HiAnimeOptions_IsConfigured_ReturnsTrue_WhenEnabledAndBaseUrlPresent()
+    {
+        var options = new HiAnimeOptions
+        {
+            Enabled = true,
+            BaseUrl = "https://hianime.to"
+        };
+
+        Assert.True(options.IsConfigured);
+    }
+
+    [Fact]
+    public void HiAnimeOptions_EffectiveReferer_FallsBackToBaseUrl()
+    {
+        var options = new HiAnimeOptions
+        {
+            Enabled = true,
+            BaseUrl = "https://hianime.to",
+            Referer = null
+        };
+
+        Assert.Equal("https://hianime.to", options.EffectiveReferer);
+    }
+
+    #endregion
+
+    #region NineAnimeOptions Tests
+
+    [Fact]
+    public void NineAnimeOptions_IsConfigured_ReturnsFalse_WhenBaseUrlMissing()
+    {
+        var options = new NineAnimeOptions
+        {
+            Enabled = true,
+            BaseUrl = null
+        };
+
+        Assert.False(options.IsConfigured);
+    }
+
+    [Fact]
+    public void NineAnimeOptions_IsConfigured_ReturnsTrue_WhenEnabledAndBaseUrlPresent()
+    {
+        var options = new NineAnimeOptions
+        {
+            Enabled = true,
+            BaseUrl = "https://aniwatchtv.to"
+        };
+
+        Assert.True(options.IsConfigured);
+    }
+
+    [Fact]
+    public void NineAnimeOptions_EffectiveReferer_UsesExplicitReferer()
+    {
+        var options = new NineAnimeOptions
+        {
+            Enabled = true,
+            BaseUrl = "https://aniwatchtv.to",
+            Referer = "https://aniwatchtv.to/custom"
+        };
+
+        Assert.Equal("https://aniwatchtv.to/custom", options.EffectiveReferer);
+    }
+
+    #endregion
 }

@@ -149,12 +149,40 @@ static IHost BuildHost(string[] args)
     // Register aggregate catalogs that combine built-in and dynamic providers
     builder.Services.AddSingleton<AggregateAnimeCatalog>(sp =>
     {
-        var builtIn = sp.GetRequiredService<AllAnimeCatalog>();
+        var builtIns = new List<AggregateAnimeCatalog.BuiltInAnimeProvider>();
+        var allAnimeOptions = sp.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+        var hiAnimeOptions = sp.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
+        var nineAnimeOptions = sp.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
+
+        if (allAnimeOptions.IsConfigured)
+        {
+            builtIns.Add(new AggregateAnimeCatalog.BuiltInAnimeProvider(
+                "allanime",
+                "AllAnime",
+                sp.GetRequiredService<AllAnimeCatalog>()));
+        }
+
+        if (hiAnimeOptions.IsConfigured)
+        {
+            builtIns.Add(new AggregateAnimeCatalog.BuiltInAnimeProvider(
+                "hianime",
+                "HiAnime",
+                sp.GetRequiredService<HiAnimeCatalog>()));
+        }
+
+        if (nineAnimeOptions.IsConfigured)
+        {
+            builtIns.Add(new AggregateAnimeCatalog.BuiltInAnimeProvider(
+                "9anime",
+                "9anime",
+                sp.GetRequiredService<NineAnimeCatalog>()));
+        }
+
         var store = sp.GetRequiredService<IProviderStore>();
         var transforms = sp.GetRequiredService<ITransformEngine>();
         var http = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
         var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-        return new AggregateAnimeCatalog(builtIn, store, transforms, http, loggerFactory);
+        return new AggregateAnimeCatalog(builtIns, store, transforms, http, loggerFactory);
     });
     builder.Services.AddSingleton<AggregateMangaCatalog>(sp =>
     {
@@ -213,7 +241,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
     {
         PrintBanner();
         // Show warning if no providers configured on first run
-        WarnIfNoProvidersConfigured(services);
+        await WarnIfNoProvidersConfiguredAsync(services, cts.Token);
         return 0;
     }
 
@@ -235,7 +263,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
     // Show non-blocking warning for commands that don't require providers but aren't utility commands
     if (!providerRequiredCommands.Contains(command) && !utilityCommands.Contains(command))
     {
-        WarnIfNoProvidersConfigured(services);
+        await WarnIfNoProvidersConfiguredAsync(services, cts.Token);
     }
 
     try
@@ -255,7 +283,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 mode = CliMode.Manga;
             }
             
-            if (!CheckProvidersConfigured(services, mode, logger))
+            if (!await CheckProvidersConfiguredAsync(services, mode, cts.Token))
             {
                 return 1;
             }
@@ -356,22 +384,27 @@ static async Task<int> RunAsync(IHost host, string[] args)
 /// Check if any providers are configured for the given mode (anime or manga).
 /// Returns true if at least one provider is ready; otherwise prints guidance and returns false.
 /// </summary>
-static bool CheckProvidersConfigured(IServiceProvider services, CliMode mode, ILogger logger)
+static async Task<bool> CheckProvidersConfiguredAsync(IServiceProvider services, CliMode mode, CancellationToken cancellationToken)
 {
     var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+    var hiAnime = services.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
+    var nineAnime = services.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
     var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+    var providerStore = services.GetRequiredService<IProviderStore>();
 
     bool hasConfiguredProvider;
     string modeLabel;
 
     if (mode == CliMode.Manga)
     {
-        hasConfiguredProvider = allManga.IsConfigured;
+        var activeDynamic = await providerStore.GetActiveAsync(ProviderType.Manga, cancellationToken);
+        hasConfiguredProvider = allManga.IsConfigured || activeDynamic is not null;
         modeLabel = "manga";
     }
     else
     {
-        hasConfiguredProvider = allAnime.IsConfigured;
+        var activeDynamic = await providerStore.GetActiveAsync(ProviderType.Anime, cancellationToken);
+        hasConfiguredProvider = allAnime.IsConfigured || hiAnime.IsConfigured || nineAnime.IsConfigured || activeDynamic is not null;
         modeLabel = "anime";
     }
 
@@ -388,13 +421,24 @@ static bool CheckProvidersConfigured(IServiceProvider services, CliMode mode, IL
 /// Show a non-blocking warning if no providers are configured at all.
 /// This is displayed on startup for informational purposes.
 /// </summary>
-static void WarnIfNoProvidersConfigured(IServiceProvider services)
+static async Task WarnIfNoProvidersConfiguredAsync(IServiceProvider services, CancellationToken cancellationToken)
 {
     var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+    var hiAnime = services.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
+    var nineAnime = services.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
     var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+    var providerStore = services.GetRequiredService<IProviderStore>();
 
     // Check if ANY provider is configured
-    var hasAnyProvider = allAnime.IsConfigured || allManga.IsConfigured;
+    var activeAnimeDynamic = await providerStore.GetActiveAsync(ProviderType.Anime, cancellationToken);
+    var activeMangaDynamic = await providerStore.GetActiveAsync(ProviderType.Manga, cancellationToken);
+    var hasAnyProvider =
+        allAnime.IsConfigured ||
+        hiAnime.IsConfigured ||
+        nineAnime.IsConfigured ||
+        allManga.IsConfigured ||
+        activeAnimeDynamic is not null ||
+        activeMangaDynamic is not null;
 
     if (!hasAnyProvider)
     {
@@ -755,12 +799,16 @@ static async Task<int> HandleDoctorAsync(string[] args, IServiceProvider service
     }
 
     var animeOptions = services.GetRequiredService<IOptions<AllAnimeOptions>>();
+    var hiAnimeOptions = services.GetRequiredService<IOptions<HiAnimeOptions>>();
+    var nineAnimeOptions = services.GetRequiredService<IOptions<NineAnimeOptions>>();
     var mangaOptions = services.GetRequiredService<IOptions<AllMangaOptions>>();
     var configPath = GetUserConfigFilePath();
 
     var engine = new DiagnosticsEngine(
         new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) }),
         animeOptions,
+        hiAnimeOptions,
+        nineAnimeOptions,
         mangaOptions,
         configPath);
 
@@ -1318,9 +1366,11 @@ static async Task<int> HandleProviderAsync(string[] args, IServiceProvider servi
         if (subcommand == "test")
         {
             var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+            var hiAnime = services.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
+            var nineAnime = services.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
             var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
             var providerToTest = args.Length > 2 ? args[2] : null;
-            return await HandleProviderTestAsync(providerToTest, allAnime, allManga, services);
+            return await HandleProviderTestAsync(providerToTest, allAnime, hiAnime, nineAnime, allManga, services);
         }
     }
     
@@ -1333,8 +1383,9 @@ static async Task<int> HandleProviderAsync(string[] args, IServiceProvider servi
 /// </summary>
 static async Task<int> HandleProviderInteractiveAsync(IServiceProvider services, string configPath)
 {
-    var providerStore = services.GetRequiredService<IProviderStore>();
     var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+    var hiAnime = services.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
+    var nineAnime = services.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
     var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
     
     while (true)
@@ -1366,7 +1417,7 @@ static async Task<int> HandleProviderInteractiveAsync(IServiceProvider services,
         switch (result.Selected.Id)
         {
             case "providers":
-                await HandleProviderListAsync(allAnime, allManga, services);
+                await HandleProviderListAsync(allAnime, hiAnime, nineAnime, allManga, services);
                 break;
                 
             case "add":
@@ -1379,7 +1430,7 @@ static async Task<int> HandleProviderInteractiveAsync(IServiceProvider services,
                 break;
                 
             case "test":
-                await HandleProviderTestAsync(null, allAnime, allManga, services);
+                await HandleProviderTestAsync(null, allAnime, hiAnime, nineAnime, allManga, services);
                 break;
                 
             case "edit":
@@ -1394,7 +1445,12 @@ static async Task<int> HandleProviderInteractiveAsync(IServiceProvider services,
 /// <summary>
 /// List all providers with interactive selection to enable/disable.
 /// </summary>
-static async Task<int> HandleProviderListAsync(AllAnimeOptions allAnime, AllMangaOptions allManga, IServiceProvider services)
+static async Task<int> HandleProviderListAsync(
+    AllAnimeOptions allAnime,
+    HiAnimeOptions hiAnime,
+    NineAnimeOptions nineAnime,
+    AllMangaOptions allManga,
+    IServiceProvider services)
 {
     var providerStore = services.GetRequiredService<IProviderStore>();
     
@@ -1410,6 +1466,24 @@ static async Task<int> HandleProviderListAsync(AllAnimeOptions allAnime, AllMang
             allAnime.IsConfigured ? (allAnime.Enabled ? "Ready" : "Disabled") : "Not configured",
             allAnime.ApiBase ?? "https://api.allanime.day",
             allAnime.Enabled,
+            false
+        ));
+
+        providers.Add(new ProviderItem(
+            "HiAnime",
+            "Anime",
+            hiAnime.IsConfigured ? (hiAnime.Enabled ? "Ready" : "Disabled") : "Not configured",
+            hiAnime.BaseUrl ?? "https://hianime.to",
+            hiAnime.Enabled,
+            false
+        ));
+
+        providers.Add(new ProviderItem(
+            "9anime",
+            "Anime",
+            nineAnime.IsConfigured ? (nineAnime.Enabled ? "Ready" : "Disabled") : "Not configured",
+            nineAnime.BaseUrl ?? "https://aniwatchtv.to",
+            nineAnime.Enabled,
             false
         ));
         
@@ -1577,12 +1651,21 @@ static int HandleProviderEdit(string configPath)
 /// <summary>
 /// Test provider connectivity.
 /// </summary>
-static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOptions allAnime, AllMangaOptions allManga, IServiceProvider services)
+static async Task<int> HandleProviderTestAsync(
+    string? providerName,
+    AllAnimeOptions allAnime,
+    HiAnimeOptions hiAnime,
+    NineAnimeOptions nineAnime,
+    AllMangaOptions allManga,
+    IServiceProvider services)
 {
-    var providers = new Dictionary<string, (bool configured, string? apiBase, string? referer, string? userAgent, bool isDynamic)>(StringComparer.OrdinalIgnoreCase)
+    var providers = new Dictionary<string, (bool configured, string? endpoint, string endpointField, string? referer, string? userAgent, bool isDynamic)>(StringComparer.OrdinalIgnoreCase)
     {
-        ["allanime"] = (allAnime.IsConfigured, allAnime.ApiBase, allAnime.Referer, allAnime.UserAgent, false),
-        ["allmanga"] = (allManga.IsConfigured, allManga.ApiBase, allManga.Referer, allManga.UserAgent, false),
+        ["allanime"] = (allAnime.IsConfigured, allAnime.ApiBase, "ApiBase", allAnime.Referer, allAnime.UserAgent, false),
+        ["allmanga"] = (allManga.IsConfigured, allManga.ApiBase, "ApiBase", allManga.Referer, allManga.UserAgent, false),
+        ["hianime"] = (hiAnime.IsConfigured, hiAnime.BaseUrl, "BaseUrl", hiAnime.EffectiveReferer, hiAnime.UserAgent, false),
+        ["9anime"] = (nineAnime.IsConfigured, nineAnime.BaseUrl, "BaseUrl", nineAnime.EffectiveReferer, nineAnime.UserAgent, false),
+        ["nineanime"] = (nineAnime.IsConfigured, nineAnime.BaseUrl, "BaseUrl", nineAnime.EffectiveReferer, nineAnime.UserAgent, false),
     };
     
     // Add dynamic providers from autoconfig
@@ -1594,7 +1677,10 @@ static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOpt
         var config = await providerStore.GetAsync(dp.Slug);
         if (config != null)
         {
-            providers[dp.Slug] = (true, $"https://{config.Hosts.BaseHost}", config.Hosts.Referer, config.Hosts.UserAgent, true);
+            var endpoint = !string.IsNullOrWhiteSpace(config.Hosts.ApiBase)
+                ? config.Hosts.ApiBase
+                : $"https://{config.Hosts.BaseHost}";
+            providers[dp.Slug] = (true, endpoint, "ApiBase", config.Hosts.Referer, config.Hosts.UserAgent, true);
         }
     }
     
@@ -1618,7 +1704,7 @@ static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOpt
         Console.Write($"Testing {name}... ");
         
         var missing = new List<string>();
-        if (string.IsNullOrWhiteSpace(info.apiBase)) missing.Add("ApiBase");
+        if (string.IsNullOrWhiteSpace(info.endpoint)) missing.Add(info.endpointField);
         if (string.IsNullOrWhiteSpace(info.referer)) missing.Add("Referer");
         if (string.IsNullOrWhiteSpace(info.userAgent)) missing.Add("UserAgent");
 
@@ -1639,7 +1725,7 @@ static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOpt
         
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, info.apiBase);
+            using var request = new HttpRequestMessage(HttpMethod.Get, info.endpoint);
             if (!string.IsNullOrWhiteSpace(info.referer))
                 request.Headers.TryAddWithoutValidation("Referer", info.referer);
             if (!string.IsNullOrWhiteSpace(info.userAgent))
@@ -1667,7 +1753,7 @@ static async Task<int> HandleProviderTestAsync(string? providerName, AllAnimeOpt
                 {
                     Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.WriteLine("  Hint: Access denied. This is commonly caused by a wrong/missing Referer/Origin header or a blocked User-Agent.");
-                    Console.WriteLine("  Try: koware provider autoconfig  (or verify ApiBase + Referer in appsettings.user.json)");
+                    Console.WriteLine($"  Try: koware provider autoconfig  (or verify {info.endpointField} + Referer in appsettings.user.json)");
                     Console.ResetColor();
                 }
                 else if (code == 429)
@@ -4287,16 +4373,41 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
     }
     else
     {
-        var options = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
-        if (options.IsConfigured)
+        var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+        var hiAnime = services.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
+        var nineAnime = services.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
+
+        if (allAnime.IsConfigured)
         {
             choices.Add(new ExploreProviderChoice(
                 "AllAnime",
                 "allanime",
                 ProviderType.Anime,
                 true,
-                options.Enabled,
-                options.BaseHost ?? options.ApiBase ?? "allanime"));
+                allAnime.Enabled,
+                allAnime.BaseHost ?? allAnime.ApiBase ?? "allanime"));
+        }
+
+        if (hiAnime.IsConfigured)
+        {
+            choices.Add(new ExploreProviderChoice(
+                "HiAnime",
+                "hianime",
+                ProviderType.Anime,
+                true,
+                hiAnime.Enabled,
+                hiAnime.BaseUrl ?? "hianime.to"));
+        }
+
+        if (nineAnime.IsConfigured)
+        {
+            choices.Add(new ExploreProviderChoice(
+                "9anime",
+                "9anime",
+                ProviderType.Anime,
+                true,
+                nineAnime.Enabled,
+                nineAnime.BaseUrl ?? "aniwatchtv.to"));
         }
     }
 
@@ -4384,12 +4495,42 @@ static async Task<List<ExploreProviderContext>> BuildExploreProviderContextsAsyn
             else
             {
                 var options = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+                IAnimeCatalog? animeCatalog = provider.Slug.ToLowerInvariant() switch
+                {
+                    "allanime" => services.GetRequiredService<AllAnimeCatalog>(),
+                    "hianime" => services.GetRequiredService<HiAnimeCatalog>(),
+                    "9anime" or "nineanime" => services.GetRequiredService<NineAnimeCatalog>(),
+                    _ => null
+                };
+
+                if (animeCatalog is null)
+                {
+                    logger.LogWarning("Unknown built-in anime provider {Provider}", provider.Slug);
+                    continue;
+                }
+
+                string? referrer = provider.Slug.ToLowerInvariant() switch
+                {
+                    "allanime" => options.Referer,
+                    "hianime" => services.GetRequiredService<IOptions<HiAnimeOptions>>().Value.EffectiveReferer,
+                    "9anime" or "nineanime" => services.GetRequiredService<IOptions<NineAnimeOptions>>().Value.EffectiveReferer,
+                    _ => null
+                };
+
+                string? userAgent = provider.Slug.ToLowerInvariant() switch
+                {
+                    "allanime" => options.UserAgent,
+                    "hianime" => services.GetRequiredService<IOptions<HiAnimeOptions>>().Value.UserAgent,
+                    "9anime" or "nineanime" => services.GetRequiredService<IOptions<NineAnimeOptions>>().Value.UserAgent,
+                    _ => null
+                };
+
                 contexts.Add(new ExploreProviderContext
                 {
                     Info = provider,
-                    AnimeCatalog = services.GetRequiredService<AllAnimeCatalog>(),
-                    Referrer = options.Referer,
-                    UserAgent = options.UserAgent
+                    AnimeCatalog = animeCatalog,
+                    Referrer = referrer,
+                    UserAgent = userAgent
                 });
             }
             continue;
@@ -9936,6 +10077,8 @@ static List<string> GetHelpLines(string command, CliMode mode)
             lines.Add("");
             lines.Add("Providers:");
             lines.Add("  - AllAnime configuration status");
+            lines.Add("  - HiAnime configuration status");
+            lines.Add("  - 9anime configuration status");
             lines.Add("  - AllManga configuration status");
             lines.Add("  - DNS resolution for provider domains");
             lines.Add("  - HTTP connectivity test");
