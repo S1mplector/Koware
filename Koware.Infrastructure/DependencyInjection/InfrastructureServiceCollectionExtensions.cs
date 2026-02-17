@@ -20,6 +20,8 @@ public static class InfrastructureServiceCollectionExtensions
             services.Configure<AllMangaOptions>(configuration.GetSection("AllManga"));
             services.Configure<HiAnimeOptions>(configuration.GetSection("HiAnime"));
             services.Configure<NineAnimeOptions>(configuration.GetSection("NineAnime"));
+            services.Configure<HanimeOptions>(configuration.GetSection("Hanime"));
+            services.Configure<NhentaiOptions>(configuration.GetSection("Nhentai"));
         }
         else
         {
@@ -27,6 +29,8 @@ public static class InfrastructureServiceCollectionExtensions
             services.Configure<AllMangaOptions>(_ => { });
             services.Configure<HiAnimeOptions>(_ => { });
             services.Configure<NineAnimeOptions>(_ => { });
+            services.Configure<HanimeOptions>(_ => { });
+            services.Configure<NhentaiOptions>(_ => { });
         }
 
         services.AddHttpClient<AllAnimeCatalog>((sp, client) =>
@@ -91,10 +95,42 @@ public static class InfrastructureServiceCollectionExtensions
             client.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/plain, */*");
         }).ConfigurePrimaryHttpMessageHandler(CreateDefaultHandler);
 
+        services.AddHttpClient<HanimeCatalog>((sp, client) =>
+        {
+            var options = sp.GetRequiredService<IOptions<HanimeOptions>>().Value;
+            if (!string.IsNullOrWhiteSpace(options.BaseUrl) && Uri.TryCreate(options.BaseUrl.Trim(), UriKind.Absolute, out var baseUri))
+            {
+                client.BaseAddress = baseUri;
+            }
+            if (!string.IsNullOrWhiteSpace(options.Referer) && Uri.TryCreate(options.Referer.Trim(), UriKind.Absolute, out var refererUri))
+            {
+                client.DefaultRequestHeaders.Referrer = refererUri;
+            }
+            ConfigureCommonClient(client, options.UserAgent);
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/plain, */*");
+        }).ConfigurePrimaryHttpMessageHandler(CreateDefaultHandler);
+
+        services.AddHttpClient<NhentaiCatalog>((sp, client) =>
+        {
+            var options = sp.GetRequiredService<IOptions<NhentaiOptions>>().Value;
+            if (!string.IsNullOrWhiteSpace(options.ApiBase) && Uri.TryCreate(options.ApiBase.Trim(), UriKind.Absolute, out var apiBaseUri))
+            {
+                client.BaseAddress = apiBaseUri;
+            }
+            if (!string.IsNullOrWhiteSpace(options.Referer) && Uri.TryCreate(options.Referer.Trim(), UriKind.Absolute, out var refererUri))
+            {
+                client.DefaultRequestHeaders.Referrer = refererUri;
+            }
+            ConfigureCommonClient(client, options.UserAgent);
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/plain, */*");
+        }).ConfigurePrimaryHttpMessageHandler(CreateDefaultHandler);
+
         services.AddSingleton<AllAnimeCatalog>();
         services.AddSingleton<AllMangaCatalog>();
         services.AddSingleton<HiAnimeCatalog>();
         services.AddSingleton<NineAnimeCatalog>();
+        services.AddSingleton<HanimeCatalog>();
+        services.AddSingleton<NhentaiCatalog>();
         services.AddSingleton<IAnimeCatalog>(sp => sp.GetRequiredService<AllAnimeCatalog>());
         services.AddSingleton<IMangaCatalog>(sp => sp.GetRequiredService<AllMangaCatalog>());
         return services;

@@ -153,6 +153,7 @@ static IHost BuildHost(string[] args)
         var allAnimeOptions = sp.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
         var hiAnimeOptions = sp.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
         var nineAnimeOptions = sp.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
+        var hanimeOptions = sp.GetRequiredService<IOptions<HanimeOptions>>().Value;
 
         if (allAnimeOptions.IsConfigured)
         {
@@ -178,6 +179,14 @@ static IHost BuildHost(string[] args)
                 sp.GetRequiredService<NineAnimeCatalog>()));
         }
 
+        if (hanimeOptions.IsConfigured)
+        {
+            builtIns.Add(new AggregateAnimeCatalog.BuiltInAnimeProvider(
+                "hanime",
+                "Hanime",
+                sp.GetRequiredService<HanimeCatalog>()));
+        }
+
         var store = sp.GetRequiredService<IProviderStore>();
         var transforms = sp.GetRequiredService<ITransformEngine>();
         var http = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
@@ -186,12 +195,31 @@ static IHost BuildHost(string[] args)
     });
     builder.Services.AddSingleton<AggregateMangaCatalog>(sp =>
     {
-        var builtIn = sp.GetRequiredService<AllMangaCatalog>();
+        var builtIns = new List<AggregateMangaCatalog.BuiltInMangaProvider>();
+        var allMangaOptions = sp.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+        var nhentaiOptions = sp.GetRequiredService<IOptions<NhentaiOptions>>().Value;
+
+        if (allMangaOptions.IsConfigured)
+        {
+            builtIns.Add(new AggregateMangaCatalog.BuiltInMangaProvider(
+                "allmanga",
+                "AllManga",
+                sp.GetRequiredService<AllMangaCatalog>()));
+        }
+
+        if (nhentaiOptions.IsConfigured)
+        {
+            builtIns.Add(new AggregateMangaCatalog.BuiltInMangaProvider(
+                "nhentai",
+                "nhentai",
+                sp.GetRequiredService<NhentaiCatalog>()));
+        }
+
         var store = sp.GetRequiredService<IProviderStore>();
         var transforms = sp.GetRequiredService<ITransformEngine>();
         var http = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
         var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-        return new AggregateMangaCatalog(builtIn, store, transforms, http, loggerFactory);
+        return new AggregateMangaCatalog(builtIns, store, transforms, http, loggerFactory);
     });
     
     // Override the default catalog registrations with aggregate versions
@@ -389,7 +417,9 @@ static async Task<bool> CheckProvidersConfiguredAsync(IServiceProvider services,
     var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
     var hiAnime = services.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
     var nineAnime = services.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
+    var hanime = services.GetRequiredService<IOptions<HanimeOptions>>().Value;
     var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+    var nhentai = services.GetRequiredService<IOptions<NhentaiOptions>>().Value;
     var providerStore = services.GetRequiredService<IProviderStore>();
 
     bool hasConfiguredProvider;
@@ -398,13 +428,13 @@ static async Task<bool> CheckProvidersConfiguredAsync(IServiceProvider services,
     if (mode == CliMode.Manga)
     {
         var activeDynamic = await providerStore.GetActiveAsync(ProviderType.Manga, cancellationToken);
-        hasConfiguredProvider = allManga.IsConfigured || activeDynamic is not null;
+        hasConfiguredProvider = allManga.IsConfigured || nhentai.IsConfigured || activeDynamic is not null;
         modeLabel = "manga";
     }
     else
     {
         var activeDynamic = await providerStore.GetActiveAsync(ProviderType.Anime, cancellationToken);
-        hasConfiguredProvider = allAnime.IsConfigured || hiAnime.IsConfigured || nineAnime.IsConfigured || activeDynamic is not null;
+        hasConfiguredProvider = allAnime.IsConfigured || hiAnime.IsConfigured || nineAnime.IsConfigured || hanime.IsConfigured || activeDynamic is not null;
         modeLabel = "anime";
     }
 
@@ -426,7 +456,9 @@ static async Task WarnIfNoProvidersConfiguredAsync(IServiceProvider services, Ca
     var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
     var hiAnime = services.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
     var nineAnime = services.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
+    var hanime = services.GetRequiredService<IOptions<HanimeOptions>>().Value;
     var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+    var nhentai = services.GetRequiredService<IOptions<NhentaiOptions>>().Value;
     var providerStore = services.GetRequiredService<IProviderStore>();
 
     // Check if ANY provider is configured
@@ -436,7 +468,9 @@ static async Task WarnIfNoProvidersConfiguredAsync(IServiceProvider services, Ca
         allAnime.IsConfigured ||
         hiAnime.IsConfigured ||
         nineAnime.IsConfigured ||
+        hanime.IsConfigured ||
         allManga.IsConfigured ||
+        nhentai.IsConfigured ||
         activeAnimeDynamic is not null ||
         activeMangaDynamic is not null;
 
@@ -801,7 +835,9 @@ static async Task<int> HandleDoctorAsync(string[] args, IServiceProvider service
     var animeOptions = services.GetRequiredService<IOptions<AllAnimeOptions>>();
     var hiAnimeOptions = services.GetRequiredService<IOptions<HiAnimeOptions>>();
     var nineAnimeOptions = services.GetRequiredService<IOptions<NineAnimeOptions>>();
+    var hanimeOptions = services.GetRequiredService<IOptions<HanimeOptions>>();
     var mangaOptions = services.GetRequiredService<IOptions<AllMangaOptions>>();
+    var nhentaiOptions = services.GetRequiredService<IOptions<NhentaiOptions>>();
     var configPath = GetUserConfigFilePath();
 
     var engine = new DiagnosticsEngine(
@@ -810,6 +846,8 @@ static async Task<int> HandleDoctorAsync(string[] args, IServiceProvider service
         hiAnimeOptions,
         nineAnimeOptions,
         mangaOptions,
+        hanimeOptions,
+        nhentaiOptions,
         configPath);
 
     if (!jsonOutput)
@@ -1368,9 +1406,11 @@ static async Task<int> HandleProviderAsync(string[] args, IServiceProvider servi
             var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
             var hiAnime = services.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
             var nineAnime = services.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
+            var hanime = services.GetRequiredService<IOptions<HanimeOptions>>().Value;
             var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+            var nhentai = services.GetRequiredService<IOptions<NhentaiOptions>>().Value;
             var providerToTest = args.Length > 2 ? args[2] : null;
-            return await HandleProviderTestAsync(providerToTest, allAnime, hiAnime, nineAnime, allManga, services);
+            return await HandleProviderTestAsync(providerToTest, allAnime, hiAnime, nineAnime, hanime, allManga, nhentai, services);
         }
     }
     
@@ -1386,7 +1426,9 @@ static async Task<int> HandleProviderInteractiveAsync(IServiceProvider services,
     var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
     var hiAnime = services.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
     var nineAnime = services.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
+    var hanime = services.GetRequiredService<IOptions<HanimeOptions>>().Value;
     var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+    var nhentai = services.GetRequiredService<IOptions<NhentaiOptions>>().Value;
     
     while (true)
     {
@@ -1417,7 +1459,7 @@ static async Task<int> HandleProviderInteractiveAsync(IServiceProvider services,
         switch (result.Selected.Id)
         {
             case "providers":
-                await HandleProviderListAsync(allAnime, hiAnime, nineAnime, allManga, services);
+                await HandleProviderListAsync(allAnime, hiAnime, nineAnime, hanime, allManga, nhentai, services);
                 break;
                 
             case "add":
@@ -1430,7 +1472,7 @@ static async Task<int> HandleProviderInteractiveAsync(IServiceProvider services,
                 break;
                 
             case "test":
-                await HandleProviderTestAsync(null, allAnime, hiAnime, nineAnime, allManga, services);
+                await HandleProviderTestAsync(null, allAnime, hiAnime, nineAnime, hanime, allManga, nhentai, services);
                 break;
                 
             case "edit":
@@ -1449,7 +1491,9 @@ static async Task<int> HandleProviderListAsync(
     AllAnimeOptions allAnime,
     HiAnimeOptions hiAnime,
     NineAnimeOptions nineAnime,
+    HanimeOptions hanime,
     AllMangaOptions allManga,
+    NhentaiOptions nhentai,
     IServiceProvider services)
 {
     var providerStore = services.GetRequiredService<IProviderStore>();
@@ -1486,6 +1530,15 @@ static async Task<int> HandleProviderListAsync(
             nineAnime.Enabled,
             false
         ));
+
+        providers.Add(new ProviderItem(
+            "Hanime",
+            "Anime",
+            hanime.IsConfigured ? (hanime.Enabled ? "Ready" : "Disabled") : "Not configured",
+            hanime.BaseUrl ?? "https://hanime.tv",
+            hanime.Enabled,
+            false
+        ));
         
         providers.Add(new ProviderItem(
             "AllManga", 
@@ -1493,6 +1546,15 @@ static async Task<int> HandleProviderListAsync(
             allManga.IsConfigured ? (allManga.Enabled ? "Ready" : "Disabled") : "Not configured",
             allManga.ApiBase ?? "https://api.allanime.day",
             allManga.Enabled,
+            false
+        ));
+
+        providers.Add(new ProviderItem(
+            "nhentai",
+            "Manga",
+            nhentai.IsConfigured ? (nhentai.Enabled ? "Ready" : "Disabled") : "Not configured",
+            nhentai.BaseUrl ?? "https://nhentai.net",
+            nhentai.Enabled,
             false
         ));
         
@@ -1656,7 +1718,9 @@ static async Task<int> HandleProviderTestAsync(
     AllAnimeOptions allAnime,
     HiAnimeOptions hiAnime,
     NineAnimeOptions nineAnime,
+    HanimeOptions hanime,
     AllMangaOptions allManga,
+    NhentaiOptions nhentai,
     IServiceProvider services)
 {
     var providers = new Dictionary<string, (bool configured, string? endpoint, string endpointField, string? referer, string? userAgent, bool isDynamic)>(StringComparer.OrdinalIgnoreCase)
@@ -1666,6 +1730,8 @@ static async Task<int> HandleProviderTestAsync(
         ["hianime"] = (hiAnime.IsConfigured, hiAnime.BaseUrl, "BaseUrl", hiAnime.EffectiveReferer, hiAnime.UserAgent, false),
         ["9anime"] = (nineAnime.IsConfigured, nineAnime.BaseUrl, "BaseUrl", nineAnime.EffectiveReferer, nineAnime.UserAgent, false),
         ["nineanime"] = (nineAnime.IsConfigured, nineAnime.BaseUrl, "BaseUrl", nineAnime.EffectiveReferer, nineAnime.UserAgent, false),
+        ["hanime"] = (hanime.IsConfigured, hanime.EffectiveSearchApiUrl, "SearchApiUrl", hanime.EffectiveReferer, hanime.UserAgent, false),
+        ["nhentai"] = (nhentai.IsConfigured, $"{nhentai.EffectiveApiBase.TrimEnd('/')}/galleries/search?query=naruto&page=1", "ApiBase", nhentai.EffectiveReferer, nhentai.UserAgent, false),
     };
     
     // Add dynamic providers from autoconfig
@@ -1727,9 +1793,17 @@ static async Task<int> HandleProviderTestAsync(
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, info.endpoint);
             if (!string.IsNullOrWhiteSpace(info.referer))
+            {
                 request.Headers.TryAddWithoutValidation("Referer", info.referer);
+                if (Uri.TryCreate(info.referer, UriKind.Absolute, out var refererUri))
+                {
+                    request.Headers.TryAddWithoutValidation("Origin", $"{refererUri.Scheme}://{refererUri.Host}");
+                }
+            }
             if (!string.IsNullOrWhiteSpace(info.userAgent))
+            {
                 request.Headers.TryAddWithoutValidation("User-Agent", info.userAgent);
+            }
             
             var response = await http.SendAsync(request);
             var code = (int)response.StatusCode;
@@ -2232,6 +2306,10 @@ static string ResolveRemoteProviderSection(string key, JsonObject? providerInfo,
     {
         "allanime" => "AllAnime",
         "allmanga" => "AllManga",
+        "hianime" => "HiAnime",
+        "9anime" or "nineanime" => "NineAnime",
+        "hanime" => "Hanime",
+        "nhentai" => "Nhentai",
         "gogoanime" => "GogoAnime",
         _ => displayName
     };
@@ -4359,16 +4437,29 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
 
     if (mode == CliMode.Manga)
     {
-        var options = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
-        if (options.IsConfigured)
+        var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+        var nhentai = services.GetRequiredService<IOptions<NhentaiOptions>>().Value;
+
+        if (allManga.IsConfigured)
         {
             choices.Add(new ExploreProviderChoice(
                 "AllManga",
                 "allmanga",
                 ProviderType.Manga,
                 true,
-                options.Enabled,
-                options.BaseHost ?? options.ApiBase ?? "allmanga"));
+                allManga.Enabled,
+                allManga.BaseHost ?? allManga.ApiBase ?? "allmanga"));
+        }
+
+        if (nhentai.IsConfigured)
+        {
+            choices.Add(new ExploreProviderChoice(
+                "nhentai",
+                "nhentai",
+                ProviderType.Manga,
+                true,
+                nhentai.Enabled,
+                nhentai.BaseUrl ?? "nhentai.net"));
         }
     }
     else
@@ -4376,6 +4467,7 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
         var allAnime = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
         var hiAnime = services.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
         var nineAnime = services.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
+        var hanime = services.GetRequiredService<IOptions<HanimeOptions>>().Value;
 
         if (allAnime.IsConfigured)
         {
@@ -4408,6 +4500,17 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
                 true,
                 nineAnime.Enabled,
                 nineAnime.BaseUrl ?? "aniwatchtv.to"));
+        }
+
+        if (hanime.IsConfigured)
+        {
+            choices.Add(new ExploreProviderChoice(
+                "Hanime",
+                "hanime",
+                ProviderType.Anime,
+                true,
+                hanime.Enabled,
+                hanime.BaseUrl ?? "hanime.tv"));
         }
     }
 
@@ -4483,23 +4586,56 @@ static async Task<List<ExploreProviderContext>> BuildExploreProviderContextsAsyn
         {
             if (mode == CliMode.Manga)
             {
-                var options = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+                IMangaCatalog? mangaCatalog = provider.Slug.ToLowerInvariant() switch
+                {
+                    "allmanga" => services.GetRequiredService<AllMangaCatalog>(),
+                    "nhentai" => services.GetRequiredService<NhentaiCatalog>(),
+                    _ => null
+                };
+
+                if (mangaCatalog is null)
+                {
+                    logger.LogWarning("Unknown built-in manga provider {Provider}", provider.Slug);
+                    continue;
+                }
+
+                var allMangaOptions = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
+                var nhentaiOptions = services.GetRequiredService<IOptions<NhentaiOptions>>().Value;
+
+                string? referrer = provider.Slug.ToLowerInvariant() switch
+                {
+                    "allmanga" => allMangaOptions.Referer,
+                    "nhentai" => nhentaiOptions.EffectiveReferer,
+                    _ => null
+                };
+
+                string? userAgent = provider.Slug.ToLowerInvariant() switch
+                {
+                    "allmanga" => allMangaOptions.UserAgent,
+                    "nhentai" => nhentaiOptions.UserAgent,
+                    _ => null
+                };
+
                 contexts.Add(new ExploreProviderContext
                 {
                     Info = provider,
-                    MangaCatalog = services.GetRequiredService<AllMangaCatalog>(),
-                    Referrer = options.Referer,
-                    UserAgent = options.UserAgent
+                    MangaCatalog = mangaCatalog,
+                    Referrer = referrer,
+                    UserAgent = userAgent
                 });
             }
             else
             {
                 var options = services.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
+                var hiAnimeOptions = services.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
+                var nineAnimeOptions = services.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
+                var hanimeOptions = services.GetRequiredService<IOptions<HanimeOptions>>().Value;
                 IAnimeCatalog? animeCatalog = provider.Slug.ToLowerInvariant() switch
                 {
                     "allanime" => services.GetRequiredService<AllAnimeCatalog>(),
                     "hianime" => services.GetRequiredService<HiAnimeCatalog>(),
                     "9anime" or "nineanime" => services.GetRequiredService<NineAnimeCatalog>(),
+                    "hanime" => services.GetRequiredService<HanimeCatalog>(),
                     _ => null
                 };
 
@@ -4512,16 +4648,18 @@ static async Task<List<ExploreProviderContext>> BuildExploreProviderContextsAsyn
                 string? referrer = provider.Slug.ToLowerInvariant() switch
                 {
                     "allanime" => options.Referer,
-                    "hianime" => services.GetRequiredService<IOptions<HiAnimeOptions>>().Value.EffectiveReferer,
-                    "9anime" or "nineanime" => services.GetRequiredService<IOptions<NineAnimeOptions>>().Value.EffectiveReferer,
+                    "hianime" => hiAnimeOptions.EffectiveReferer,
+                    "9anime" or "nineanime" => nineAnimeOptions.EffectiveReferer,
+                    "hanime" => hanimeOptions.EffectiveReferer,
                     _ => null
                 };
 
                 string? userAgent = provider.Slug.ToLowerInvariant() switch
                 {
                     "allanime" => options.UserAgent,
-                    "hianime" => services.GetRequiredService<IOptions<HiAnimeOptions>>().Value.UserAgent,
-                    "9anime" or "nineanime" => services.GetRequiredService<IOptions<NineAnimeOptions>>().Value.UserAgent,
+                    "hianime" => hiAnimeOptions.UserAgent,
+                    "9anime" or "nineanime" => nineAnimeOptions.UserAgent,
+                    "hanime" => hanimeOptions.UserAgent,
                     _ => null
                 };
 
@@ -10079,7 +10217,9 @@ static List<string> GetHelpLines(string command, CliMode mode)
             lines.Add("  - AllAnime configuration status");
             lines.Add("  - HiAnime configuration status");
             lines.Add("  - 9anime configuration status");
+            lines.Add("  - Hanime configuration status");
             lines.Add("  - AllManga configuration status");
+            lines.Add("  - nhentai configuration status");
             lines.Add("  - DNS resolution for provider domains");
             lines.Add("  - HTTP connectivity test");
             lines.Add("");
@@ -11448,7 +11588,7 @@ static async Task<int> HandleStatsAsync(string[] args, IServiceProvider services
     var isJson = args.Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
 
     Console.ForegroundColor = Theme.Primary;
-    Console.WriteLine("📊 Statistics Dashboard");
+    Console.WriteLine("Statistics Dashboard");
     Console.ForegroundColor = Theme.Muted;
     Console.WriteLine(new string('═', 50));
     Console.ResetColor();
@@ -11564,7 +11704,7 @@ static async Task<int> HandleStatsAsync(string[] args, IServiceProvider services
     var mangaByStatus = mangaListAll.GroupBy(m => m.Status).ToDictionary(g => g.Key, g => g.Count());
 
     Console.ForegroundColor = Theme.Secondary;
-    Console.WriteLine("📚 Manga List");
+    Console.WriteLine("Manga List");
     Console.ForegroundColor = Theme.Muted;
     Console.WriteLine(new string('─', 30));
     Console.ResetColor();

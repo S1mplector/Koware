@@ -82,6 +82,8 @@ public sealed class DiagnosticsEngine
     private readonly IOptions<HiAnimeOptions> _hiAnimeOptions;
     private readonly IOptions<NineAnimeOptions> _nineAnimeOptions;
     private readonly IOptions<AllMangaOptions> _mangaOptions;
+    private readonly IOptions<HanimeOptions> _hanimeOptions;
+    private readonly IOptions<NhentaiOptions> _nhentaiOptions;
     private readonly string _configPath;
     private readonly string _dataDir;
     private readonly string _dbPath;
@@ -92,6 +94,8 @@ public sealed class DiagnosticsEngine
         IOptions<HiAnimeOptions> hiAnimeOptions,
         IOptions<NineAnimeOptions> nineAnimeOptions,
         IOptions<AllMangaOptions> mangaOptions,
+        IOptions<HanimeOptions> hanimeOptions,
+        IOptions<NhentaiOptions> nhentaiOptions,
         string configPath)
     {
         _httpClient = httpClient;
@@ -100,6 +104,8 @@ public sealed class DiagnosticsEngine
         _hiAnimeOptions = hiAnimeOptions;
         _nineAnimeOptions = nineAnimeOptions;
         _mangaOptions = mangaOptions;
+        _hanimeOptions = hanimeOptions;
+        _nhentaiOptions = nhentaiOptions;
         _configPath = configPath;
 
         var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -560,7 +566,11 @@ public sealed class DiagnosticsEngine
 
         // Provider configuration validation
         var animeOpts = _animeOptions.Value;
+        var hiAnimeOpts = _hiAnimeOptions.Value;
+        var nineAnimeOpts = _nineAnimeOptions.Value;
+        var hanimeOpts = _hanimeOptions.Value;
         var mangaOpts = _mangaOptions.Value;
+        var nhentaiOpts = _nhentaiOptions.Value;
 
         results.Add(new DiagnosticResult
         {
@@ -582,6 +592,42 @@ public sealed class DiagnosticsEngine
             Detail = mangaOpts.IsConfigured 
                 ? $"API: {mangaOpts.ApiBase}" 
                 : "Run 'koware provider' to configure"
+        });
+
+        results.Add(new DiagnosticResult
+        {
+            Name = "HiAnime Config",
+            Category = DiagnosticCategory.Configuration,
+            Severity = hiAnimeOpts.IsConfigured ? DiagnosticSeverity.Ok : DiagnosticSeverity.Info,
+            Message = hiAnimeOpts.IsConfigured ? "Configured" : "Optional / not configured",
+            Detail = hiAnimeOpts.IsConfigured ? $"Base: {hiAnimeOpts.BaseUrl}" : null
+        });
+
+        results.Add(new DiagnosticResult
+        {
+            Name = "9anime Config",
+            Category = DiagnosticCategory.Configuration,
+            Severity = nineAnimeOpts.IsConfigured ? DiagnosticSeverity.Ok : DiagnosticSeverity.Info,
+            Message = nineAnimeOpts.IsConfigured ? "Configured" : "Optional / not configured",
+            Detail = nineAnimeOpts.IsConfigured ? $"Base: {nineAnimeOpts.BaseUrl}" : null
+        });
+
+        results.Add(new DiagnosticResult
+        {
+            Name = "Hanime Config",
+            Category = DiagnosticCategory.Configuration,
+            Severity = hanimeOpts.IsConfigured ? DiagnosticSeverity.Ok : DiagnosticSeverity.Info,
+            Message = hanimeOpts.IsConfigured ? "Configured" : "Optional / not configured",
+            Detail = hanimeOpts.IsConfigured ? $"Base: {hanimeOpts.BaseUrl}" : null
+        });
+
+        results.Add(new DiagnosticResult
+        {
+            Name = "nhentai Config",
+            Category = DiagnosticCategory.Configuration,
+            Severity = nhentaiOpts.IsConfigured ? DiagnosticSeverity.Ok : DiagnosticSeverity.Info,
+            Message = nhentaiOpts.IsConfigured ? "Configured" : "Optional / not configured",
+            Detail = nhentaiOpts.IsConfigured ? $"API: {nhentaiOpts.EffectiveApiBase}" : null
         });
 
         return results;
@@ -1629,12 +1675,28 @@ public sealed class DiagnosticsEngine
                 _nineAnimeOptions.Value.UserAgent,
                 ProviderProbeKind.DirectAjax),
             new ProviderCheckTarget(
+                "Anime Provider (hanime)",
+                _hanimeOptions.Value.IsConfigured,
+                _hanimeOptions.Value.BaseUrl,
+                _hanimeOptions.Value.EffectiveReferer,
+                _hanimeOptions.Value.UserAgent,
+                ProviderProbeKind.DirectHanimeIndex,
+                _hanimeOptions.Value.EffectiveSearchApiUrl),
+            new ProviderCheckTarget(
                 "Manga Provider (allmanga)",
                 _mangaOptions.Value.IsConfigured,
                 _mangaOptions.Value.ApiBase,
                 _mangaOptions.Value.Referer,
                 _mangaOptions.Value.UserAgent,
-                ProviderProbeKind.GraphQl)
+                ProviderProbeKind.GraphQl),
+            new ProviderCheckTarget(
+                "Manga Provider (nhentai)",
+                _nhentaiOptions.Value.IsConfigured,
+                _nhentaiOptions.Value.BaseUrl,
+                _nhentaiOptions.Value.EffectiveReferer,
+                _nhentaiOptions.Value.UserAgent,
+                ProviderProbeKind.DirectNhentaiApi,
+                _nhentaiOptions.Value.EffectiveApiBase)
         };
 
         foreach (var provider in providers)
@@ -1754,6 +1816,8 @@ public sealed class DiagnosticsEngine
         {
             ProviderProbeKind.GraphQl => await CheckProviderGraphQlApiAsync(provider, cancellationToken),
             ProviderProbeKind.DirectAjax => await CheckProviderDirectApiAsync(provider, cancellationToken),
+            ProviderProbeKind.DirectHanimeIndex => await CheckProviderHanimeIndexApiAsync(provider, cancellationToken),
+            ProviderProbeKind.DirectNhentaiApi => await CheckProviderNhentaiApiAsync(provider, cancellationToken),
             _ => new DiagnosticResult
             {
                 Name = $"{provider.Name} API",
@@ -1884,6 +1948,97 @@ public sealed class DiagnosticsEngine
         }
     }
 
+    private async Task<DiagnosticResult> CheckProviderHanimeIndexApiAsync(ProviderCheckTarget provider, CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var endpoint = string.IsNullOrWhiteSpace(provider.ApiEndpoint) ? provider.Endpoint! : provider.ApiEndpoint!;
+            using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+            ApplyProviderHeaders(request, provider);
+            request.Headers.Accept.ParseAdd("application/json, text/plain, */*");
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(10000);
+
+            var response = await _httpClient.SendAsync(request, cts.Token);
+            var body = await response.Content.ReadAsStringAsync(cts.Token);
+            sw.Stop();
+
+            var looksValid = response.IsSuccessStatusCode &&
+                             body.TrimStart().StartsWith("[", StringComparison.Ordinal) &&
+                             body.Contains("\"slug\"", StringComparison.OrdinalIgnoreCase);
+
+            return new DiagnosticResult
+            {
+                Name = $"{provider.Name} API",
+                Category = DiagnosticCategory.Providers,
+                Severity = looksValid ? DiagnosticSeverity.Ok : DiagnosticSeverity.Warning,
+                Message = looksValid ? "Responding" : $"Unexpected response (HTTP {(int)response.StatusCode})",
+                Duration = sw.Elapsed
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return new DiagnosticResult
+            {
+                Name = $"{provider.Name} API",
+                Category = DiagnosticCategory.Providers,
+                Severity = DiagnosticSeverity.Warning,
+                Message = "API check failed",
+                Detail = ErrorClassifier.SafeDetail(ex),
+                Duration = sw.Elapsed
+            };
+        }
+    }
+
+    private async Task<DiagnosticResult> CheckProviderNhentaiApiAsync(ProviderCheckTarget provider, CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var apiBase = (string.IsNullOrWhiteSpace(provider.ApiEndpoint) ? provider.Endpoint! : provider.ApiEndpoint!).TrimEnd('/');
+            var searchUri = $"{apiBase}/galleries/search?query=naruto&page=1";
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, searchUri);
+            ApplyProviderHeaders(request, provider);
+            request.Headers.Accept.ParseAdd("application/json, text/plain, */*");
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(10000);
+
+            var response = await _httpClient.SendAsync(request, cts.Token);
+            var body = await response.Content.ReadAsStringAsync(cts.Token);
+            sw.Stop();
+
+            var looksValid = response.IsSuccessStatusCode &&
+                             body.Contains("\"result\"", StringComparison.OrdinalIgnoreCase);
+
+            return new DiagnosticResult
+            {
+                Name = $"{provider.Name} API",
+                Category = DiagnosticCategory.Providers,
+                Severity = looksValid ? DiagnosticSeverity.Ok : DiagnosticSeverity.Warning,
+                Message = looksValid ? "Responding" : $"Unexpected response (HTTP {(int)response.StatusCode})",
+                Duration = sw.Elapsed
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return new DiagnosticResult
+            {
+                Name = $"{provider.Name} API",
+                Category = DiagnosticCategory.Providers,
+                Severity = DiagnosticSeverity.Warning,
+                Message = "API check failed",
+                Detail = ErrorClassifier.SafeDetail(ex),
+                Duration = sw.Elapsed
+            };
+        }
+    }
+
     private static void ApplyProviderHeaders(HttpRequestMessage request, ProviderCheckTarget provider)
     {
         if (!string.IsNullOrWhiteSpace(provider.UserAgent))
@@ -1902,7 +2057,9 @@ public sealed class DiagnosticsEngine
     private enum ProviderProbeKind
     {
         GraphQl,
-        DirectAjax
+        DirectAjax,
+        DirectHanimeIndex,
+        DirectNhentaiApi
     }
 
     private sealed record ProviderCheckTarget(
@@ -1911,7 +2068,8 @@ public sealed class DiagnosticsEngine
         string? Endpoint,
         string? Referer,
         string? UserAgent,
-        ProviderProbeKind ProbeKind);
+        ProviderProbeKind ProbeKind,
+        string? ApiEndpoint = null);
 
     #endregion
 

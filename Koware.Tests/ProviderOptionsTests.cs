@@ -273,4 +273,87 @@ public class ProviderOptionsTests
     }
 
     #endregion
+
+    #region HanimeOptions Tests
+
+    [Fact]
+    public void HanimeOptions_IsConfigured_ReturnsFalse_WhenBaseUrlMissing()
+    {
+        var options = new HanimeOptions
+        {
+            Enabled = true,
+            BaseUrl = null
+        };
+
+        Assert.False(options.IsConfigured);
+    }
+
+    [Fact]
+    public void HanimeOptions_IsConfigured_ReturnsTrue_WhenEnabledAndBaseUrlPresent()
+    {
+        var options = new HanimeOptions
+        {
+            Enabled = true,
+            BaseUrl = "https://hanime.tv"
+        };
+
+        Assert.True(options.IsConfigured);
+    }
+
+    [Fact]
+    public void HanimeOptions_EffectiveSearchApiUrl_FallsBackToDefault()
+    {
+        var options = new HanimeOptions
+        {
+            Enabled = true,
+            BaseUrl = "https://hanime.tv",
+            SearchApiUrl = null
+        };
+
+        Assert.Equal("https://cached.freeanimehentai.net/api/v10/search_hvs", options.EffectiveSearchApiUrl);
+    }
+
+    #endregion
+
+    #region NhentaiOptions Tests
+
+    [Fact]
+    public void NhentaiOptions_IsConfigured_ReturnsTrue_WhenEnabledAndBaseUrlPresent()
+    {
+        var options = new NhentaiOptions
+        {
+            Enabled = true,
+            BaseUrl = "https://nhentai.net"
+        };
+
+        Assert.True(options.IsConfigured);
+    }
+
+    [Fact]
+    public void NhentaiOptions_EffectiveApiBase_FallsBackToBaseUrlApi()
+    {
+        var options = new NhentaiOptions
+        {
+            Enabled = true,
+            BaseUrl = "https://nhentai.net",
+            ApiBase = null
+        };
+
+        Assert.Equal("https://nhentai.net/api", options.EffectiveApiBase);
+    }
+
+    [Fact]
+    public void NhentaiOptions_EffectiveReferer_UsesExplicitReferer()
+    {
+        var options = new NhentaiOptions
+        {
+            Enabled = true,
+            BaseUrl = "https://nhentai.net",
+            Referer = "https://nhentai.net/g/177013/"
+        };
+
+        Assert.Equal("https://nhentai.net/g/177013/", options.EffectiveReferer);
+    }
+
+    #endregion
 }
