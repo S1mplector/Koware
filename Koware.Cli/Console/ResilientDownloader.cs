@@ -346,6 +346,8 @@ public static class ResilientImageDownloader
         for (var attempt = 1; attempt <= maxRetries; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var tempPath = outputPath + ".part";
+            var succeeded = false;
 
             try
             {
@@ -367,15 +369,44 @@ public static class ResilientImageDownloader
                 using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, attemptCts.Token);
                 response.EnsureSuccessStatusCode();
 
-                var bytes = await response.Content.ReadAsByteArrayAsync(attemptCts.Token);
-
-                // Validate image data (basic check for common image headers)
-                if (bytes.Length < 8)
+                var outputDirectory = Path.GetDirectoryName(outputPath);
+                if (!string.IsNullOrWhiteSpace(outputDirectory))
                 {
-                    throw new InvalidDataException("Downloaded data too small to be a valid image");
+                    Directory.CreateDirectory(outputDirectory);
                 }
 
-                await File.WriteAllBytesAsync(outputPath, bytes, cancellationToken);
+                await using var responseStream = await response.Content.ReadAsStreamAsync(attemptCts.Token);
+                await using var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+
+                // Capture the first bytes while streaming to validate image signature without buffering full payload.
+                var header = new byte[12];
+                var headerCount = 0;
+                var buffer = new byte[81920];
+                long totalBytes = 0;
+                int read;
+
+                while ((read = await responseStream.ReadAsync(buffer.AsMemory(0, buffer.Length), attemptCts.Token)) > 0)
+                {
+                    if (headerCount < header.Length)
+                    {
+                        var copyCount = Math.Min(read, header.Length - headerCount);
+                        Buffer.BlockCopy(buffer, 0, header, headerCount, copyCount);
+                        headerCount += copyCount;
+                    }
+
+                    await fileStream.WriteAsync(buffer.AsMemory(0, read), attemptCts.Token);
+                    totalBytes += read;
+                }
+
+                await fileStream.FlushAsync(attemptCts.Token);
+
+                if (totalBytes < 8 || !LooksLikeImage(header, headerCount))
+                {
+                    throw new InvalidDataException("Downloaded data is not a valid image");
+                }
+
+                File.Move(tempPath, outputPath, overwrite: true);
+                succeeded = true;
                 return true;
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -394,12 +425,71 @@ public static class ResilientImageDownloader
             {
                 logger?.LogDebug(ex, "Invalid image data on attempt {Attempt}/{Max}: {Url}", attempt, maxRetries, imageUrl);
             }
+            finally
+            {
+                if (!succeeded && File.Exists(tempPath))
+                {
+                    try
+                    {
+                        File.Delete(tempPath);
+                    }
+                    catch (IOException ex)
+                    {
+                        logger?.LogDebug(ex, "Failed to clean up partial image file: {Path}", tempPath);
+                    }
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        logger?.LogDebug(ex, "Failed to clean up partial image file (access denied): {Path}", tempPath);
+                    }
+                }
+            }
 
             if (attempt < maxRetries)
             {
                 await Task.Delay(retryDelay, cancellationToken);
                 retryDelay = TimeSpan.FromMilliseconds(Math.Min(retryDelay.TotalMilliseconds * 2, 5000));
             }
+        }
+
+        return false;
+    }
+
+    private static bool LooksLikeImage(byte[] header, int length)
+    {
+        // JPEG
+        if (length >= 3 && header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF)
+        {
+            return true;
+        }
+
+        // PNG
+        if (length >= 8 &&
+            header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47 &&
+            header[4] == 0x0D && header[5] == 0x0A && header[6] == 0x1A && header[7] == 0x0A)
+        {
+            return true;
+        }
+
+        // GIF (GIF87a/GIF89a)
+        if (length >= 6 &&
+            header[0] == 0x47 && header[1] == 0x49 && header[2] == 0x46 &&
+            header[3] == 0x38 && (header[4] == 0x37 || header[4] == 0x39) && header[5] == 0x61)
+        {
+            return true;
+        }
+
+        // BMP
+        if (length >= 2 && header[0] == 0x42 && header[1] == 0x4D)
+        {
+            return true;
+        }
+
+        // WEBP (RIFF....WEBP)
+        if (length >= 12 &&
+            header[0] == 0x52 && header[1] == 0x49 && header[2] == 0x46 && header[3] == 0x46 &&
+            header[8] == 0x57 && header[9] == 0x45 && header[10] == 0x42 && header[11] == 0x50)
+        {
+            return true;
         }
 
         return false;

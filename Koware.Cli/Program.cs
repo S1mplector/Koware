@@ -7615,6 +7615,11 @@ static void PrintFriendlyCommandHint(string command)
             WriteColoredLine("Example: koware search \"fullmetal alchemist\"", ConsoleColor.Green);
             WriteColoredLine("Tip: try 'koware explore' for the new interactive browser.", ConsoleColor.DarkGray);
             break;
+        case "download":
+            WriteColoredLine("Command looks incomplete. Add a search query to download content.", ConsoleColor.Yellow);
+            WriteColoredLine("Usage:   koware download <query> [--episode <n> | --episodes <n-m|all>] [--quality <label>] [--index <match>] [--dir <path>]", ConsoleColor.Cyan);
+            WriteColoredLine("Example: koware download \"bleach\" --episode 1 --dir ~/Downloads/Anime", ConsoleColor.Green);
+            break;
         case "provider":
             Console.WriteLine("Usage: koware provider [--enable <name> | --disable <name>]");
             Console.WriteLine("Shows provider status or toggles a provider on/off.");
