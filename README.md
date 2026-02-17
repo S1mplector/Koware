@@ -329,13 +329,14 @@ Then edit the copy with your own host/API URLs.
 Koware can pull working provider configs from the public `koware-providers` repo and merge them into your `appsettings.user.json`. This is the recommended way to configure providers. This repository is public, anyone can contribute to it, but it is not guaranteed to be up-to-date or always perfectly working. 
 
 ```bash
-koware provider autoconfig            # configure all available providers
+koware provider autoconfig            # configure default provider profiles
+koware provider autoconfig --all      # configure default + optional profiles
 koware provider autoconfig --list     # see what’s available
 koware provider autoconfig allanime   # configure a single provider
 koware provider test                  # verify connectivity
 ```
 
-The command fetches `providers.json` plus the referenced config files, merges them into your config, and keeps any custom fields you already have. If the request fails, you can still edit manually as described below.
+The command fetches `providers.json` plus the referenced config files, merges them into your config, and keeps any custom fields you already have. By default it applies only profiles marked as default in the manifest; use `--all` to apply optional variants too. If the request fails, you can still edit manually as described below.
 
 ### Example Configuration
 
@@ -401,6 +402,7 @@ Koware does not provide or recommend specific sources. You must:
 |---------|--------------|
 | `koware provider list` | Show providers and enabled/disabled state |
 | `koware provider autoconfig [name]` | Pull remote config for all or a specific provider |
+| `koware provider autoconfig --all` | Pull all remote profiles (default + optional) |
 | `koware provider autoconfig --list` | Show which remote providers are available |
 | `koware provider test [name]` | Quick connectivity check |
 | `koware provider --enable <name>` / `--disable <name>` | Toggle a provider |

@@ -1936,8 +1936,8 @@ static string? GetArgValue(string[] args, string flag)
 /// </summary>
 static async Task<int> HandleRemoteManifestAutoconfigAsync(string? providerName, bool listOnly, string configPath)
 {
-    const string repoBase = "https://raw.githubusercontent.com/S1mplector/koware-providers/main";
-    const string manifestUrl = $"{repoBase}/providers.json";
+    var repoBase = GetProvidersRepoBase();
+    var manifestUrl = $"{repoBase}/providers.json";
     
     using var http = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) });
     http.DefaultRequestHeaders.Add("User-Agent", "Koware-CLI");
@@ -1978,25 +1978,37 @@ static async Task<int> HandleRemoteManifestAutoconfigAsync(string? providerName,
         Console.WriteLine();
         Console.WriteLine("Available remote providers:");
         Console.WriteLine(new string('─', 50));
-        foreach (var (key, value) in providers)
+        foreach (var (key, value) in providers.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
         {
             var info = value as JsonObject;
-            var name = info?["name"]?.GetValue<string>() ?? key;
             var type = info?["type"]?.GetValue<string>() ?? "unknown";
             var desc = info?["description"]?.GetValue<string>() ?? "";
-            Console.WriteLine($"  {name,-12} [{type,-6}] {desc}");
+            var name = info?["name"]?.GetValue<string>() ?? key;
+            var section = ResolveRemoteProviderSection(key, info, name);
+            var isDefault = IsDefaultRemoteProvider(info);
+            Console.WriteLine($"  {key,-20} [{type,-6}] -> {section,-10} {(isDefault ? "default " : "optional")} {desc}");
         }
+        Console.WriteLine();
+        Console.WriteLine("Notes:");
+        Console.WriteLine("  - Running 'koware provider autoconfig' configures default profiles only.");
+        Console.WriteLine("  - Use specific keys (left column) to apply optional profiles.");
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  koware provider autoconfig <name>           Configure from remote manifest");
+        Console.WriteLine("  koware provider autoconfig --all            Configure every profile (default + optional)");
         Console.WriteLine("  koware provider autoconfig <url>            Analyze website and generate config");
         return 0;
     }
     
     // Determine which providers to configure
-    var toConfig = string.IsNullOrWhiteSpace(providerName)
+    var toConfig = providerName?.Equals("--all", StringComparison.OrdinalIgnoreCase) == true
         ? providers.Select(p => p.Key).ToList()
-        : new List<string> { providerName.ToLowerInvariant() };
+        : string.IsNullOrWhiteSpace(providerName)
+            ? providers
+                .Where(p => IsDefaultRemoteProvider(p.Value as JsonObject))
+                .Select(p => p.Key)
+                .ToList()
+            : new List<string> { providerName.ToLowerInvariant() };
     
     // Load existing config
     var configJson = File.Exists(configPath)
@@ -2042,12 +2054,7 @@ static async Task<int> HandleRemoteManifestAutoconfigAsync(string? providerName,
             }
             
             // Map to section name
-            var sectionName = key switch
-            {
-                "allanime" => "AllAnime",
-                "allmanga" => "AllManga",
-                _ => displayName
-            };
+            var sectionName = ResolveRemoteProviderSection(key, providerInfo, displayName);
             
             // Merge config (preserves user overrides for fields not in remote)
             var existingSection = configJson[sectionName] as JsonObject ?? new JsonObject();
@@ -2097,6 +2104,51 @@ static async Task<int> HandleRemoteManifestAutoconfigAsync(string? providerName,
     }
     
     return configured > 0 ? 0 : 1;
+}
+
+static string GetProvidersRepoBase()
+{
+    var fromEnvironment = Environment.GetEnvironmentVariable("KOWARE_PROVIDERS_BASE_URL");
+    if (!string.IsNullOrWhiteSpace(fromEnvironment))
+    {
+        return fromEnvironment.TrimEnd('/');
+    }
+
+    return "https://raw.githubusercontent.com/S1mplector/koware-providers/main";
+}
+
+static bool IsDefaultRemoteProvider(JsonObject? providerInfo)
+{
+    if (providerInfo?["default"] is JsonValue value)
+    {
+        try
+        {
+            return value.GetValue<bool>();
+        }
+        catch
+        {
+            // Invalid manifest values should not block users; fall back to default behavior.
+        }
+    }
+
+    return true;
+}
+
+static string ResolveRemoteProviderSection(string key, JsonObject? providerInfo, string displayName)
+{
+    var explicitSection = providerInfo?["section"]?.GetValue<string>();
+    if (!string.IsNullOrWhiteSpace(explicitSection))
+    {
+        return explicitSection.Trim();
+    }
+
+    return key switch
+    {
+        "allanime" => "AllAnime",
+        "allmanga" => "AllManga",
+        "gogoanime" => "GogoAnime",
+        _ => displayName
+    };
 }
 
 /// <summary>
@@ -9859,9 +9911,11 @@ static List<string> GetHelpLines(string command, CliMode mode)
             lines.Add("    --dry-run           Analyze without saving");
             lines.Add("");
             lines.Add("Autoconfig from remote manifest:");
-            lines.Add("  koware provider autoconfig             Auto-configure all");
+            lines.Add("  koware provider autoconfig             Auto-configure default profiles");
+            lines.Add("  koware provider autoconfig --all       Configure default + optional profiles");
             lines.Add("  koware provider autoconfig allanime    Configure specific");
             lines.Add("  koware provider autoconfig --list      List available");
+            lines.Add("  (Use key names from --list output)");
             lines.Add("");
             lines.Add("Other examples:");
             lines.Add("  koware provider list");
