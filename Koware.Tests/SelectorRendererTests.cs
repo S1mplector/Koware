@@ -345,7 +345,7 @@ public class SelectorRendererTests
 
         var items = new[]
         {
-            ("Demon Slayer", 0, ItemStatus.None, "A young boy becomes a demon slayer to save his sister.")
+            ("Demon Slayer", 0, ItemStatus.None, (string?)"A young boy becomes a demon slayer to save his sister.")
         };
 
         var state = new RenderState

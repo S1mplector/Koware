@@ -24,10 +24,11 @@ public sealed class AutoconfigOrchestratorTests
         var loggerFactory = new LoggerFactory();
 
         var siteProber = new SiteProber(httpClient, loggerFactory.CreateLogger<SiteProber>());
-        var apiDiscovery = new ApiDiscoveryEngine(httpClient, loggerFactory.CreateLogger<ApiDiscoveryEngine>());
+        var responseAnalyzer = new ResponseAnalyzer(httpClient, loggerFactory.CreateLogger<ResponseAnalyzer>());
+        var apiDiscovery = new ApiDiscoveryEngine(httpClient, responseAnalyzer, loggerFactory.CreateLogger<ApiDiscoveryEngine>());
         var patternMatcher = new ContentPatternMatcher(httpClient, loggerFactory.CreateLogger<ContentPatternMatcher>());
-        var templateLibrary = new ProviderTemplateLibrary();
-        var schemaGenerator = new SchemaGenerator(templateLibrary);
+        var templateLibrary = new ProviderTemplateLibrary(loggerFactory.CreateLogger<ProviderTemplateLibrary>());
+        var schemaGenerator = new SchemaGenerator(templateLibrary, loggerFactory.CreateLogger<SchemaGenerator>());
         var transformEngine = new TransformEngine(loggerFactory.CreateLogger<TransformEngine>());
         var validator = new ConfigValidator(httpClient, transformEngine, loggerFactory.CreateLogger<ConfigValidator>());
         _providerStore = new InMemoryProviderStore();

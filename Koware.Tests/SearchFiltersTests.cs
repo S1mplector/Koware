@@ -190,8 +190,9 @@ public class SearchFiltersTests
         var args = new[] { "--genre", "action" };
         var filters = SearchFilters.Parse(args);
 
-        Assert.Single(filters.Genres);
-        Assert.Contains("Action", filters.Genres);
+        var genres = Assert.IsAssignableFrom<IReadOnlyList<string>>(filters.Genres);
+        Assert.Single(genres);
+        Assert.Contains("Action", genres);
     }
 
     [Fact]
@@ -200,9 +201,10 @@ public class SearchFiltersTests
         var args = new[] { "--genre", "action", "--genre", "comedy" };
         var filters = SearchFilters.Parse(args);
 
-        Assert.Equal(2, filters.Genres.Count);
-        Assert.Contains("Action", filters.Genres);
-        Assert.Contains("Comedy", filters.Genres);
+        var genres = Assert.IsAssignableFrom<IReadOnlyList<string>>(filters.Genres);
+        Assert.Equal(2, genres.Count);
+        Assert.Contains("Action", genres);
+        Assert.Contains("Comedy", genres);
     }
 
     [Fact]
@@ -298,7 +300,8 @@ public class SearchFiltersTests
         var args = new[] { "search", "one piece", "--genre", "action", "--year", "2023", "--limit", "10" };
         var filters = SearchFilters.Parse(args);
 
-        Assert.Single(filters.Genres);
+        var genres = Assert.IsAssignableFrom<IReadOnlyList<string>>(filters.Genres);
+        Assert.Single(genres);
         Assert.Equal(2023, filters.Year);
     }
 
@@ -317,7 +320,8 @@ public class SearchFiltersTests
         };
         var filters = SearchFilters.Parse(args);
 
-        Assert.Equal(2, filters.Genres.Count);
+        var genres = Assert.IsAssignableFrom<IReadOnlyList<string>>(filters.Genres);
+        Assert.Equal(2, genres.Count);
         Assert.Equal(2023, filters.Year);
         Assert.Equal(ContentStatus.Ongoing, filters.Status);
         Assert.Equal(SearchSort.Popularity, filters.Sort);
