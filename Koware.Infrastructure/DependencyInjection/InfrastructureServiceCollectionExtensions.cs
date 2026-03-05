@@ -143,6 +143,7 @@ public static class InfrastructureServiceCollectionExtensions
             client.DefaultRequestHeaders.UserAgent.ParseAdd(userAgent);
         }
         client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+        client.Timeout = TimeSpan.FromSeconds(20);
         client.DefaultRequestVersion = HttpVersion.Version11;
         client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
     }

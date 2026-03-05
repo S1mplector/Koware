@@ -273,7 +273,6 @@ static async Task<int> RunAsync(IHost host, string[] args)
         return 0;
     }
 
-    var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
     var command = args[0].ToLowerInvariant();
 
     // Commands that require configured providers (will block if not configured)
@@ -323,6 +322,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 // Keep --json support for scripting, otherwise redirect to explore
                 if (args.Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase)))
                 {
+                    var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
                     return await HandleSearchAsync(orchestrator, args, services, logger, defaults, cts.Token);
                 }
                 Console.ForegroundColor = ConsoleColor.DarkGray;
@@ -333,12 +333,21 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandleExploreAsync(args, services, logger, defaults, cts.Token);
             case "plan":
             case "stream":
+                {
+                    var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
                 return await HandlePlanAsync(orchestrator, args, logger, defaults, cts.Token);
+                }
             case "watch":
             case "play":
+                {
+                    var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
                 return await HandlePlayAsync(orchestrator, args, services, logger, defaults, cts.Token);
+                }
             case "download":
+                {
+                    var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
                 return await HandleDownloadAsync(orchestrator, args, services, logger, defaults, cts.Token);
+                }
             case "read":
                 return await HandleReadAsync(args, services, logger, defaults, cts.Token);
             case "last":
@@ -3068,7 +3077,6 @@ static async Task<int> HandleListAsync(string[] args, IServiceProvider services,
     }
 
     var animeList = services.GetRequiredService<IAnimeListStore>();
-    var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
 
     if (args.Length < 2)
     {
@@ -3077,6 +3085,7 @@ static async Task<int> HandleListAsync(string[] args, IServiceProvider services,
         var log = logger;
         var ct = cancellationToken;
         var defs = defaults;
+        var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
         
         Func<AnimeListEntry, Task> onPlay = async entry =>
         {
@@ -3096,6 +3105,7 @@ static async Task<int> HandleListAsync(string[] args, IServiceProvider services,
     switch (subcommand)
     {
         case "add":
+            var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
             return await HandleListAddAsync(args, animeList, orchestrator, logger, cancellationToken);
         case "update":
             return await HandleListUpdateAsync(args, animeList, logger, cancellationToken);
@@ -3599,7 +3609,6 @@ static string RenderProgressBar(int current, int? total, int width)
 static async Task<int> HandleMangaListAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
 {
     var mangaList = services.GetRequiredService<IMangaListStore>();
-    var catalog = services.GetRequiredService<IMangaCatalog>();
 
     if (args.Length < 2)
     {
@@ -3641,6 +3650,7 @@ static async Task<int> HandleMangaListAsync(string[] args, IServiceProvider serv
     switch (subcommand)
     {
         case "add":
+            var catalog = services.GetRequiredService<IMangaCatalog>();
             return await HandleMangaListAddAsync(args, mangaList, catalog, logger, cancellationToken);
         case "update":
             return await HandleMangaListUpdateAsync(args, mangaList, logger, cancellationToken);

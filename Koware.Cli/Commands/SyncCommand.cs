@@ -1,4 +1,5 @@
 // Author: Ilgaz Mehmetoğlu
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using Koware.Cli.Console;
@@ -48,65 +49,10 @@ public sealed class SyncCommand : ICliCommand
 
     private static async Task<int> ShowInteractiveMenuAsync(string[] args, CommandContext context)
     {
-        var dataDir = GetDataDirectory();
-        var gitDir = Path.Combine(dataDir, ".git");
-        var isInitialized = Directory.Exists(gitDir);
-
-        // Build menu items based on current state
-        var menuItems = new List<SyncMenuItem>();
-
-        if (!isInitialized)
-        {
-            // Not initialized - show setup options
-            menuItems.Add(new SyncMenuItem("init", $"{Icons.Add} Initialize", "Set up git sync (auto-creates GitHub repo if gh CLI available)"));
-            menuItems.Add(new SyncMenuItem("clone", $"{Icons.Download} Clone existing", "Clone from an existing sync repository URL"));
-        }
-        else
-        {
-            // Check for pending changes and remote status
-            var (_, statusOutput, _) = await RunGitAsync(dataDir, "status --porcelain");
-            var hasChanges = !string.IsNullOrWhiteSpace(statusOutput);
-            var changeCount = hasChanges ? statusOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length : 0;
-
-            var (_, remote, _) = await RunGitAsync(dataDir, "remote get-url origin");
-            var hasRemote = !string.IsNullOrWhiteSpace(remote);
-
-            // Check for merge conflicts
-            var mergeEngine = new SyncMergeEngine(dataDir);
-            var hasConflicts = await mergeEngine.HasUnmergedFilesAsync();
-
-            if (hasConflicts)
-            {
-                menuItems.Add(new SyncMenuItem("resolve", $"{Icons.Warning} Resolve conflicts", "Auto-resolve merge conflicts from previous sync"));
-                menuItems.Add(new SyncMenuItem("abort", $"{Icons.Error} Abort merge", "Cancel merge and restore previous state"));
-            }
-
-            // Primary actions
-            menuItems.Add(new SyncMenuItem("quick", $"{Icons.Play} Quick sync", hasChanges 
-                ? $"Pull → Commit {changeCount} change(s) → Push" 
-                : "Pull → Push (no local changes)"));
-
-            if (hasChanges)
-            {
-                menuItems.Add(new SyncMenuItem("diff", $"{Icons.Search} View changes", $"Preview {changeCount} pending change(s)"));
-                menuItems.Add(new SyncMenuItem("push", $"{Icons.Add} Push", $"Commit and push {changeCount} change(s)"));
-            }
-
-            menuItems.Add(new SyncMenuItem("pull", $"{Icons.Download} Pull", "Pull changes from remote (auto-merges conflicts)"));
-            menuItems.Add(new SyncMenuItem("status", $"{Icons.Info} Status", "Show detailed sync status"));
-            menuItems.Add(new SyncMenuItem("log", $"{Icons.History} History", "View recent sync history"));
-
-            // Settings
-            var configPath = Path.Combine(dataDir, "sync.config");
-            var autoEnabled = File.Exists(configPath) && File.ReadAllText(configPath).Trim() == "enabled";
-            menuItems.Add(new SyncMenuItem("auto", $"{Icons.Provider} Auto-sync", autoEnabled ? "Currently: ON" : "Currently: OFF"));
-        }
-
-        menuItems.Add(new SyncMenuItem("exit", $"{Icons.Back} Exit", "Return to shell"));
-
-        // Show the menu
         while (true)
         {
+            var menuItems = await BuildSyncMenuItemsAsync();
+
             var selector = new InteractiveSelector<SyncMenuItem>(
                 menuItems,
                 m => m.Label,
@@ -127,12 +73,11 @@ public sealed class SyncCommand : ICliCommand
             }
 
             var choice = result.Selected!.Id;
-            int exitCode;
 
             switch (choice)
             {
                 case "init":
-                    exitCode = await InitAsync(args, context);
+                    await InitAsync(args, context);
                     break;
                 case "clone":
                     SystemConsole.Write("Enter repository URL: ");
@@ -144,34 +89,34 @@ public sealed class SyncCommand : ICliCommand
                         SystemConsole.ResetColor();
                         continue;
                     }
-                    exitCode = await CloneAsync(new[] { "sync", "clone", url }, context);
+                    await CloneAsync(new[] { "sync", "clone", url }, context);
                     break;
                 case "quick":
-                    exitCode = await QuickSyncAsync(context);
+                    await QuickSyncAsync(context);
                     break;
                 case "push":
-                    exitCode = await PushAsync(args, context);
+                    await PushAsync(args, context);
                     break;
                 case "pull":
-                    exitCode = await PullAsync(context);
+                    await PullAsync(context);
                     break;
                 case "status":
-                    exitCode = await StatusAsync(context);
+                    await StatusAsync(context);
                     break;
                 case "diff":
-                    exitCode = await DiffAsync(context);
+                    await DiffAsync(context);
                     break;
                 case "log":
-                    exitCode = await LogAsync(context);
+                    await LogAsync(context);
                     break;
                 case "auto":
-                    exitCode = await ShowAutoSyncMenuAsync(context);
+                    await ShowAutoSyncMenuAsync(context);
                     break;
                 case "resolve":
-                    exitCode = await ResolveConflictsAsync(context);
+                    await ResolveConflictsAsync(context);
                     break;
                 case "abort":
-                    exitCode = await AbortMergeAsync(context);
+                    await AbortMergeAsync(context);
                     break;
                 default:
                     continue;
@@ -182,17 +127,63 @@ public sealed class SyncCommand : ICliCommand
             {
                 WaitForContinue();
             }
-
-            // Refresh menu items after action
-            return await ShowInteractiveMenuAsync(args, context);
         }
+    }
+
+    private static async Task<List<SyncMenuItem>> BuildSyncMenuItemsAsync()
+    {
+        var dataDir = GetDataDirectory();
+        var gitDir = Path.Combine(dataDir, ".git");
+        var isInitialized = Directory.Exists(gitDir);
+        var menuItems = new List<SyncMenuItem>();
+
+        if (!isInitialized)
+        {
+            menuItems.Add(new SyncMenuItem("init", $"{Icons.Add} Initialize", "Set up git sync (auto-creates GitHub repo if gh CLI available)"));
+            menuItems.Add(new SyncMenuItem("clone", $"{Icons.Download} Clone existing", "Clone from an existing sync repository URL"));
+        }
+        else
+        {
+            var (_, statusOutput, _) = await RunGitAsync(dataDir, "status --porcelain");
+            var hasChanges = !string.IsNullOrWhiteSpace(statusOutput);
+            var changeCount = hasChanges ? statusOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length : 0;
+
+            var mergeEngine = new SyncMergeEngine(dataDir);
+            var hasConflicts = await mergeEngine.HasUnmergedFilesAsync();
+
+            if (hasConflicts)
+            {
+                menuItems.Add(new SyncMenuItem("resolve", $"{Icons.Warning} Resolve conflicts", "Auto-resolve merge conflicts from previous sync"));
+                menuItems.Add(new SyncMenuItem("abort", $"{Icons.Error} Abort merge", "Cancel merge and restore previous state"));
+            }
+
+            menuItems.Add(new SyncMenuItem("quick", $"{Icons.Play} Quick sync", hasChanges
+                ? $"Pull → Commit {changeCount} change(s) → Push"
+                : "Pull → Push (no local changes)"));
+
+            if (hasChanges)
+            {
+                menuItems.Add(new SyncMenuItem("diff", $"{Icons.Search} View changes", $"Preview {changeCount} pending change(s)"));
+                menuItems.Add(new SyncMenuItem("push", $"{Icons.Add} Push", $"Commit and push {changeCount} change(s)"));
+            }
+
+            menuItems.Add(new SyncMenuItem("pull", $"{Icons.Download} Pull", "Pull changes from remote (auto-merges conflicts)"));
+            menuItems.Add(new SyncMenuItem("status", $"{Icons.Info} Status", "Show detailed sync status"));
+            menuItems.Add(new SyncMenuItem("log", $"{Icons.History} History", "View recent sync history"));
+
+            var autoEnabled = IsAutoSyncEnabled(GetAutoSyncConfigPath(dataDir));
+            menuItems.Add(new SyncMenuItem("auto", $"{Icons.Provider} Auto-sync", autoEnabled ? "Currently: ON" : "Currently: OFF"));
+        }
+
+        menuItems.Add(new SyncMenuItem("exit", $"{Icons.Back} Exit", "Return to shell"));
+        return menuItems;
     }
 
     private static async Task<int> ShowAutoSyncMenuAsync(CommandContext context)
     {
         var dataDir = GetDataDirectory();
-        var configPath = Path.Combine(dataDir, "sync.config");
-        var autoEnabled = File.Exists(configPath) && File.ReadAllText(configPath).Trim() == "enabled";
+        var configPath = GetAutoSyncConfigPath(dataDir);
+        var autoEnabled = IsAutoSyncEnabled(configPath);
 
         var menuItems = new[]
         {
@@ -222,17 +213,14 @@ public sealed class SyncCommand : ICliCommand
         var choice = result.Selected!.Id;
         if (choice == "on")
         {
-            await File.WriteAllTextAsync(configPath, "enabled");
+            await SetAutoSyncEnabledAsync(configPath, enabled: true, context.CancellationToken);
             SystemConsole.ForegroundColor = ConsoleColor.Green;
             SystemConsole.WriteLine("[+] Auto-sync enabled");
             SystemConsole.ResetColor();
         }
         else if (choice == "off")
         {
-            if (File.Exists(configPath))
-            {
-                File.Delete(configPath);
-            }
+            await SetAutoSyncEnabledAsync(configPath, enabled: false, context.CancellationToken);
             SystemConsole.ForegroundColor = ConsoleColor.Yellow;
             SystemConsole.WriteLine("[!] Auto-sync disabled");
             SystemConsole.ResetColor();
@@ -1389,7 +1377,7 @@ public sealed class SyncCommand : ICliCommand
     private static async Task<int> AutoSyncAsync(string[] args, CommandContext context)
     {
         var dataDir = GetDataDirectory();
-        var configPath = Path.Combine(dataDir, "sync.config");
+        var configPath = GetAutoSyncConfigPath(dataDir);
         
         // Parse action: on, off, status
         var action = args.Length > 2 ? args[2].ToLowerInvariant() : "status";
@@ -1411,7 +1399,7 @@ public sealed class SyncCommand : ICliCommand
                 }
                 engine.Dispose();
                 
-                await File.WriteAllTextAsync(configPath, "enabled", context.CancellationToken);
+                await SetAutoSyncEnabledAsync(configPath, enabled: true, context.CancellationToken);
                 SystemConsole.ForegroundColor = ConsoleColor.Green;
                 SystemConsole.WriteLine("[+] Auto-sync enabled");
                 SystemConsole.ResetColor();
@@ -1423,10 +1411,7 @@ public sealed class SyncCommand : ICliCommand
             
             case "off" or "disable":
             {
-                if (File.Exists(configPath))
-                {
-                    File.Delete(configPath);
-                }
+                await SetAutoSyncEnabledAsync(configPath, enabled: false, context.CancellationToken);
                 SystemConsole.ForegroundColor = ConsoleColor.Yellow;
                 SystemConsole.WriteLine("[ ] Auto-sync disabled");
                 SystemConsole.ResetColor();
@@ -1439,8 +1424,7 @@ public sealed class SyncCommand : ICliCommand
             case "status":
             default:
             {
-                var enabled = File.Exists(configPath) && 
-                              (await File.ReadAllTextAsync(configPath, context.CancellationToken)).Trim() == "enabled";
+                var enabled = IsAutoSyncEnabled(configPath);
                 
                 var engine = new SyncEngine();
                 var configured = engine.IsGitConfigured();
@@ -1516,6 +1500,42 @@ public sealed class SyncCommand : ICliCommand
         return 0;
     }
 
+    private static string GetAutoSyncConfigPath(string dataDir) =>
+        Path.Combine(dataDir, "sync.config");
+
+    private static bool IsAutoSyncEnabled(string configPath)
+    {
+        try
+        {
+            return File.Exists(configPath) &&
+                   string.Equals(File.ReadAllText(configPath).Trim(), "enabled", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static async Task SetAutoSyncEnabledAsync(string configPath, bool enabled, CancellationToken cancellationToken)
+    {
+        var configDirectory = Path.GetDirectoryName(configPath);
+        if (!string.IsNullOrWhiteSpace(configDirectory))
+        {
+            Directory.CreateDirectory(configDirectory);
+        }
+
+        if (enabled)
+        {
+            await File.WriteAllTextAsync(configPath, "enabled", cancellationToken);
+            return;
+        }
+
+        if (File.Exists(configPath))
+        {
+            File.Delete(configPath);
+        }
+    }
+
     private static string GetDataDirectory()
     {
         if (OperatingSystem.IsWindows())
@@ -1564,7 +1584,7 @@ public sealed class SyncCommand : ICliCommand
             
             return (process.ExitCode, outputTask.Result.Trim(), errorTask.Result.Trim());
         }
-        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or Win32Exception)
         {
             // Process may have exited prematurely
             return (-1, "", ex.Message);
