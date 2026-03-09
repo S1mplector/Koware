@@ -39,8 +39,10 @@ internal static class ListProgressTracker
             episodesWatched = Math.Min(episodesWatched, totalEpisodes.Value);
         }
 
-        var status = ResolveAnimeStatus(existing, episodesWatched, totalEpisodes, previousProgress);
-        var completedAt = ResolveCompletedAt(existing?.CompletedAt, existing?.Status, status, now);
+        var completedStateInvalidated = IsCompletedAnimeStateInvalidated(existing, episodesWatched, totalEpisodes, previousProgress);
+        var status = ResolveAnimeStatus(existing, episodesWatched, totalEpisodes, previousProgress, completedStateInvalidated);
+        var preserveCompletedAt = existing?.Status == AnimeWatchStatus.Completed && !completedStateInvalidated;
+        var completedAt = ResolveCompletedAt(existing?.CompletedAt, status, preserveCompletedAt, now);
 
         return new AnimeProgressSnapshot(episodesWatched, totalEpisodes, status, completedAt);
     }
@@ -61,8 +63,10 @@ internal static class ListProgressTracker
             chaptersRead = Math.Min(chaptersRead, totalChapters.Value);
         }
 
-        var status = ResolveMangaStatus(existing, chaptersRead, totalChapters, previousProgress);
-        var completedAt = ResolveCompletedAt(existing?.CompletedAt, existing?.Status, status, now);
+        var completedStateInvalidated = IsCompletedMangaStateInvalidated(existing, chaptersRead, totalChapters, previousProgress);
+        var status = ResolveMangaStatus(existing, chaptersRead, totalChapters, previousProgress, completedStateInvalidated);
+        var preserveCompletedAt = existing?.Status == MangaReadStatus.Completed && !completedStateInvalidated;
+        var completedAt = ResolveCompletedAt(existing?.CompletedAt, status, preserveCompletedAt, now);
 
         return new MangaProgressSnapshot(chaptersRead, totalChapters, status, completedAt);
     }
@@ -118,9 +122,17 @@ internal static class ListProgressTracker
         AnimeListEntry? existing,
         int episodesWatched,
         int? totalEpisodes,
-        int previousProgress)
+        int previousProgress,
+        bool completedStateInvalidated)
     {
         if (existing is null)
+        {
+            return totalEpisodes.HasValue && episodesWatched >= totalEpisodes.Value
+                ? AnimeWatchStatus.Completed
+                : AnimeWatchStatus.Watching;
+        }
+
+        if (completedStateInvalidated)
         {
             return totalEpisodes.HasValue && episodesWatched >= totalEpisodes.Value
                 ? AnimeWatchStatus.Completed
@@ -138,11 +150,6 @@ internal static class ListProgressTracker
             return AnimeWatchStatus.Watching;
         }
 
-        if (existing.Status == AnimeWatchStatus.Completed && totalEpisodes.HasValue && episodesWatched < totalEpisodes.Value)
-        {
-            return AnimeWatchStatus.Watching;
-        }
-
         return existing.Status;
     }
 
@@ -150,9 +157,17 @@ internal static class ListProgressTracker
         MangaListEntry? existing,
         int chaptersRead,
         int? totalChapters,
-        int previousProgress)
+        int previousProgress,
+        bool completedStateInvalidated)
     {
         if (existing is null)
+        {
+            return totalChapters.HasValue && chaptersRead >= totalChapters.Value
+                ? MangaReadStatus.Completed
+                : MangaReadStatus.Reading;
+        }
+
+        if (completedStateInvalidated)
         {
             return totalChapters.HasValue && chaptersRead >= totalChapters.Value
                 ? MangaReadStatus.Completed
@@ -170,18 +185,51 @@ internal static class ListProgressTracker
             return MangaReadStatus.Reading;
         }
 
-        if (existing.Status == MangaReadStatus.Completed && totalChapters.HasValue && chaptersRead < totalChapters.Value)
+        return existing.Status;
+    }
+
+    private static bool IsCompletedAnimeStateInvalidated(
+        AnimeListEntry? existing,
+        int episodesWatched,
+        int? totalEpisodes,
+        int previousProgress)
+    {
+        if (existing?.Status != AnimeWatchStatus.Completed)
         {
-            return MangaReadStatus.Reading;
+            return false;
         }
 
-        return existing.Status;
+        if (episodesWatched > previousProgress)
+        {
+            return true;
+        }
+
+        return totalEpisodes.HasValue && episodesWatched < totalEpisodes.Value;
+    }
+
+    private static bool IsCompletedMangaStateInvalidated(
+        MangaListEntry? existing,
+        int chaptersRead,
+        int? totalChapters,
+        int previousProgress)
+    {
+        if (existing?.Status != MangaReadStatus.Completed)
+        {
+            return false;
+        }
+
+        if (chaptersRead > previousProgress)
+        {
+            return true;
+        }
+
+        return totalChapters.HasValue && chaptersRead < totalChapters.Value;
     }
 
     private static DateTimeOffset? ResolveCompletedAt(
         DateTimeOffset? existingCompletedAt,
-        AnimeWatchStatus? previousStatus,
         AnimeWatchStatus nextStatus,
+        bool preserveExistingCompletedAt,
         DateTimeOffset now)
     {
         if (nextStatus != AnimeWatchStatus.Completed)
@@ -189,14 +237,13 @@ internal static class ListProgressTracker
             return null;
         }
 
-        var wasCompleted = previousStatus == AnimeWatchStatus.Completed;
-        return wasCompleted ? existingCompletedAt ?? now : now;
+        return preserveExistingCompletedAt ? existingCompletedAt ?? now : now;
     }
 
     private static DateTimeOffset? ResolveCompletedAt(
         DateTimeOffset? existingCompletedAt,
-        MangaReadStatus? previousStatus,
         MangaReadStatus nextStatus,
+        bool preserveExistingCompletedAt,
         DateTimeOffset now)
     {
         if (nextStatus != MangaReadStatus.Completed)
@@ -204,7 +251,6 @@ internal static class ListProgressTracker
             return null;
         }
 
-        var wasCompleted = previousStatus == MangaReadStatus.Completed;
-        return wasCompleted ? existingCompletedAt ?? now : now;
+        return preserveExistingCompletedAt ? existingCompletedAt ?? now : now;
     }
 }

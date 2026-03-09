@@ -62,4 +62,44 @@ public class ListStoreProgressTests
         Assert.Equal(24, entry.TotalEpisodes);
         Assert.Equal(AnimeWatchStatus.Watching, entry.Status);
     }
+
+    [Fact]
+    public async Task RecordEpisodeWatchedAsync_ReopensCompletedAnimeWhenProgressAdvancesWithoutKnownTotal()
+    {
+        using var factory = new TestDatabaseConnectionFactory();
+        var store = new SqliteAnimeListStore(factory);
+
+        await store.AddAsync("a1", "Unknown Length Anime", AnimeWatchStatus.Completed);
+        await store.UpdateAsync("Unknown Length Anime", episodesWatched: 3, cancellationToken: default);
+
+        await store.RecordEpisodeWatchedAsync("a1", "Unknown Length Anime", 4);
+
+        var entry = await store.GetByTitleAsync("Unknown Length Anime");
+
+        Assert.NotNull(entry);
+        Assert.Equal(4, entry!.EpisodesWatched);
+        Assert.Null(entry.TotalEpisodes);
+        Assert.Equal(AnimeWatchStatus.Watching, entry.Status);
+        Assert.Null(entry.CompletedAt);
+    }
+
+    [Fact]
+    public async Task RecordChapterReadAsync_ReopensCompletedMangaWhenProgressAdvancesWithoutKnownTotal()
+    {
+        using var factory = new TestDatabaseConnectionFactory();
+        var store = new SqliteMangaListStore(factory);
+
+        await store.AddAsync("m1", "Unknown Length Manga", MangaReadStatus.Completed);
+        await store.UpdateAsync("Unknown Length Manga", chaptersRead: 10, cancellationToken: default);
+
+        await store.RecordChapterReadAsync("m1", "Unknown Length Manga", 11f);
+
+        var entry = await store.GetByTitleAsync("Unknown Length Manga");
+
+        Assert.NotNull(entry);
+        Assert.Equal(11, entry!.ChaptersRead);
+        Assert.Null(entry.TotalChapters);
+        Assert.Equal(MangaReadStatus.Reading, entry.Status);
+        Assert.Null(entry.CompletedAt);
+    }
 }
