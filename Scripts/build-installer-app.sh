@@ -2,7 +2,7 @@
 # Author: Ilgaz Mehmetoğlu
 # Summary: Creates a clickable Installer.app for Koware matching Windows installer UX.
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -81,12 +81,10 @@ publish_app() {
     local project="$1"
     local output_dir="$2"
     local exe_name="$3"
-    local single_file="$4" # "true" to enable single-file publish (but NOT native extraction)
 
     rm -rf "$output_dir"
     mkdir -p "$output_dir"
 
-    # Self-contained deployment with native libraries for SQLite support
     if [[ "$RUNTIME" == "universal" ]]; then
         for rid in "${TARGET_RIDS[@]}"; do
             local rid_dir="$output_dir/$rid"
@@ -95,8 +93,7 @@ publish_app() {
                 -c "$CONFIGURATION" \
                 -r "$rid" \
                 -o "$rid_dir" \
-                --self-contained true \
-                $( [[ "$single_file" == "true" ]] && echo "/p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true /p:EnableCompressionInSingleFile=true" )
+                --self-contained true
             chmod +x "$rid_dir/$exe_name" 2>/dev/null || true
         done
     else
@@ -104,40 +101,57 @@ publish_app() {
             -c "$CONFIGURATION" \
             -r "$RUNTIME" \
             -o "$output_dir" \
-            --self-contained true \
-            $( [[ "$single_file" == "true" ]] && echo "/p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true /p:EnableCompressionInSingleFile=true" )
+            --self-contained true
         chmod +x "$output_dir/$exe_name" 2>/dev/null || true
     fi
+}
+
+publish_cli_bundle() {
+    local output_dir="$1"
+
+    rm -rf "$output_dir"
+    mkdir -p "$output_dir"
+
+    for rid in "${TARGET_RIDS[@]}"; do
+        local cli_dir="$output_dir/$rid"
+        local reader_dir="$cli_dir/reader"
+        mkdir -p "$cli_dir" "$reader_dir"
+
+        dotnet publish "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj" \
+            -c "$CONFIGURATION" \
+            -r "$rid" \
+            -o "$cli_dir" \
+            --self-contained true
+        chmod +x "$cli_dir/Koware.Cli" 2>/dev/null || true
+
+        dotnet publish "$REPO_ROOT/Koware.Reader/Koware.Reader.csproj" \
+            -c "$CONFIGURATION" \
+            -r "$rid" \
+            -o "$reader_dir" \
+            --self-contained true
+        chmod +x "$reader_dir/Koware.Reader" 2>/dev/null || true
+    done
 }
 
 # Step 1: Publish CLI
 info "Publishing Koware CLI..."
 PUBLISH_DIR="$BUILD_DIR/cli"
-publish_app "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj" "$PUBLISH_DIR" "Koware.Cli" "true"
-if [[ "$RUNTIME" == "universal" ]]; then
-    for rid in "${TARGET_RIDS[@]}"; do
-        mv "$PUBLISH_DIR/$rid/Koware.Cli" "$PUBLISH_DIR/$rid/koware"
-        chmod +x "$PUBLISH_DIR/$rid/koware"
-    done
-else
-    mv "$PUBLISH_DIR/Koware.Cli" "$PUBLISH_DIR/koware"
-    chmod +x "$PUBLISH_DIR/koware"
-fi
+publish_cli_bundle "$PUBLISH_DIR"
 
 # Step 1b: Publish Avalonia Player
 info "Publishing Koware Player (Avalonia)..."
 PLAYER_DIR="$BUILD_DIR/player"
-publish_app "$REPO_ROOT/Koware.Player/Koware.Player.csproj" "$PLAYER_DIR" "Koware.Player" ""
+publish_app "$REPO_ROOT/Koware.Player/Koware.Player.csproj" "$PLAYER_DIR" "Koware.Player"
 
 # Step 1c: Publish Avalonia Reader
 info "Publishing Koware Reader (Avalonia)..."
 READER_DIR="$BUILD_DIR/reader"
-publish_app "$REPO_ROOT/Koware.Reader/Koware.Reader.csproj" "$READER_DIR" "Koware.Reader" ""
+publish_app "$REPO_ROOT/Koware.Reader/Koware.Reader.csproj" "$READER_DIR" "Koware.Reader"
 
 # Step 1d: Publish Avalonia Browser
 info "Publishing Koware Browser (Avalonia)..."
 BROWSER_DIR="$BUILD_DIR/browser"
-publish_app "$REPO_ROOT/Koware.Browser/Koware.Browser.csproj" "$BROWSER_DIR" "Koware.Browser" ""
+publish_app "$REPO_ROOT/Koware.Browser/Koware.Browser.csproj" "$BROWSER_DIR" "Koware.Browser"
 
 # Step 2: Create macOS icon from PNG
 info "Creating app icon..."
@@ -211,18 +225,9 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
 </plist>
 EOF
 
-# Copy the CLI binary and config to Resources
-if [[ "$RUNTIME" == "universal" ]]; then
-    for rid in "${TARGET_RIDS[@]}"; do
-        mkdir -p "$APP_BUNDLE/Contents/Resources/cli/$rid"
-        cp -r "$PUBLISH_DIR/$rid/." "$APP_BUNDLE/Contents/Resources/cli/$rid/"
-    done
-else
-    cp "$PUBLISH_DIR/koware" "$APP_BUNDLE/Contents/Resources/"
-    if [ -f "$PUBLISH_DIR/appsettings.json" ]; then
-        cp "$PUBLISH_DIR/appsettings.json" "$APP_BUNDLE/Contents/Resources/"
-    fi
-fi
+# Copy the CLI runtime bundle to Resources
+mkdir -p "$APP_BUNDLE/Contents/Resources/cli"
+cp -R "$PUBLISH_DIR"/. "$APP_BUNDLE/Contents/Resources/cli/"
 
 # Copy Player and Reader to Resources
 if [[ "$RUNTIME" == "universal" ]]; then
@@ -266,12 +271,15 @@ cat > "$APP_BUNDLE/Contents/MacOS/installer" << 'SCRIPT'
 # Koware Installer for macOS
 # Matches Windows installer UX
 
-SCRIPT_DIR="$(dirname "$0")"
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RESOURCES_DIR="$SCRIPT_DIR/../Resources"
 CONFIG_DIR="$HOME/.config/koware"
 VERSION="__VERSION__"
 INSTALL_DIR="/usr/local/bin"
 HOMEBREW_BIN="/opt/homebrew/bin"
+LIB_INSTALL_ROOT="/usr/local/lib/koware"
 
 resolve_install_dir() {
     if [ -d "$HOMEBREW_BIN" ]; then
@@ -283,7 +291,8 @@ resolve_install_dir() {
 
 resolve_install_dir
 
-CLI_DIR="$RESOURCES_DIR"
+CLI_ROOT="$RESOURCES_DIR/cli"
+CLI_DIR="$CLI_ROOT"
 PLAYER_SRC="$RESOURCES_DIR/player"
 READER_SRC="$RESOURCES_DIR/reader"
 BROWSER_SRC="$RESOURCES_DIR/browser"
@@ -298,18 +307,23 @@ detect_rid() {
     esac
 }
 
+CLI_RID="$(detect_rid)"
+
 resolve_payload_dirs() {
-    if [ -d "$RESOURCES_DIR/cli/osx-arm64" ] && [ -d "$RESOURCES_DIR/cli/osx-x64" ]; then
-        local rid
-        rid="$(detect_rid)"
-        CLI_DIR="$RESOURCES_DIR/cli/$rid"
-        PLAYER_SRC="$RESOURCES_DIR/player/$rid"
-        READER_SRC="$RESOURCES_DIR/reader/$rid"
-        BROWSER_SRC="$RESOURCES_DIR/browser/$rid"
+    if [ -d "$CLI_ROOT/$CLI_RID" ]; then
+        CLI_DIR="$CLI_ROOT/$CLI_RID"
     fi
 
-    if [ ! -f "$CLI_DIR/koware" ] && [ -f "$RESOURCES_DIR/koware" ]; then
-        CLI_DIR="$RESOURCES_DIR"
+    if [ -d "$RESOURCES_DIR/player/$CLI_RID" ]; then
+        PLAYER_SRC="$RESOURCES_DIR/player/$CLI_RID"
+    fi
+
+    if [ -d "$RESOURCES_DIR/reader/$CLI_RID" ]; then
+        READER_SRC="$RESOURCES_DIR/reader/$CLI_RID"
+    fi
+
+    if [ -d "$RESOURCES_DIR/browser/$CLI_RID" ]; then
+        BROWSER_SRC="$RESOURCES_DIR/browser/$CLI_RID"
     fi
 }
 
@@ -317,7 +331,7 @@ resolve_payload_dirs
 
 # Check if already installed
 is_installed() {
-    [ -f "$INSTALL_DIR/koware" ] || [ -f "/usr/local/bin/koware" ]
+    [ -f "$INSTALL_DIR/koware" ] || [ -f "/usr/local/bin/koware" ] || [ -d "$LIB_INSTALL_ROOT" ]
 }
 
 get_installed_version() {
@@ -345,7 +359,9 @@ This installer sets up Koware CLI with a single click.
 
 What you'll get:
 • Fresh Release build of Koware CLI
-• PATH ready for 'koware' command
+• PATH-ready launcher for 'koware'
+• Bundled runtime at $LIB_INSTALL_ROOT
+• Koware.app in /Applications
 • Configuration at ~/.config/koware/$installed_info
 
 Copyright © Ilgaz Mehmetoglu
@@ -395,7 +411,8 @@ display dialog "Koware Installer
 
 This will install:
 • Koware.app → /Applications
-• koware CLI → $INSTALL_DIR
+• koware launcher → $INSTALL_DIR
+• runtime bundle → $LIB_INSTALL_ROOT
 
 Config location: $CONFIG_DIR/
 
@@ -417,14 +434,16 @@ do_install() {
     local INSTALL_SCRIPT=$(mktemp)
     cat > "$INSTALL_SCRIPT" << 'INSTALLSCRIPT'
 #!/bin/bash
-set -e
+set -euo pipefail
 RESOURCES_DIR="$1"
 INSTALL_DIR="$2"
 CONFIG_DIR="$3"
 BACKUP_DIR="$4"
+LIB_INSTALL_ROOT="$5"
 APP_DIR="/Applications/Koware.app"
 
-CLI_DIR="$RESOURCES_DIR"
+CLI_ROOT="$RESOURCES_DIR/cli"
+CLI_DIR="$CLI_ROOT"
 PLAYER_SRC="$RESOURCES_DIR/player"
 READER_SRC="$RESOURCES_DIR/reader"
 BROWSER_SRC="$RESOURCES_DIR/browser"
@@ -439,18 +458,23 @@ detect_rid() {
     esac
 }
 
+CLI_RID="$(detect_rid)"
+
 resolve_payload_dirs() {
-    if [ -d "$RESOURCES_DIR/cli/osx-arm64" ] && [ -d "$RESOURCES_DIR/cli/osx-x64" ]; then
-        local rid
-        rid="$(detect_rid)"
-        CLI_DIR="$RESOURCES_DIR/cli/$rid"
-        PLAYER_SRC="$RESOURCES_DIR/player/$rid"
-        READER_SRC="$RESOURCES_DIR/reader/$rid"
-        BROWSER_SRC="$RESOURCES_DIR/browser/$rid"
+    if [ -d "$CLI_ROOT/$CLI_RID" ]; then
+        CLI_DIR="$CLI_ROOT/$CLI_RID"
     fi
 
-    if [ ! -f "$CLI_DIR/koware" ] && [ -f "$RESOURCES_DIR/koware" ]; then
-        CLI_DIR="$RESOURCES_DIR"
+    if [ -d "$RESOURCES_DIR/player/$CLI_RID" ]; then
+        PLAYER_SRC="$RESOURCES_DIR/player/$CLI_RID"
+    fi
+
+    if [ -d "$RESOURCES_DIR/reader/$CLI_RID" ]; then
+        READER_SRC="$RESOURCES_DIR/reader/$CLI_RID"
+    fi
+
+    if [ -d "$RESOURCES_DIR/browser/$CLI_RID" ]; then
+        BROWSER_SRC="$RESOURCES_DIR/browser/$CLI_RID"
     fi
 }
 
@@ -465,9 +489,36 @@ restore_config() {
 
 trap restore_config ERR
 
-# 1. Install CLI to /usr/local/bin
+# 1. Install CLI runtime bundle and launcher
 mkdir -p "$INSTALL_DIR"
-cp "$CLI_DIR/koware" "$INSTALL_DIR/"
+rm -rf "$LIB_INSTALL_ROOT"
+mkdir -p "$LIB_INSTALL_ROOT/$CLI_RID"
+cp -R "$CLI_DIR"/. "$LIB_INSTALL_ROOT/$CLI_RID/"
+chmod +x "$LIB_INSTALL_ROOT/$CLI_RID/Koware.Cli" 2>/dev/null || true
+chmod +x "$LIB_INSTALL_ROOT/$CLI_RID/reader/Koware.Reader" 2>/dev/null || true
+
+cat > "$INSTALL_DIR/koware" << 'WRAPPER'
+#!/bin/bash
+set -euo pipefail
+
+APP_ROOT="/usr/local/lib/koware"
+ARCH="$(uname -m)"
+
+case "$ARCH" in
+    arm64|aarch64) PRIMARY_RID="osx-arm64"; FALLBACK_RID="osx-x64" ;;
+    x86_64) PRIMARY_RID="osx-x64"; FALLBACK_RID="osx-arm64" ;;
+    *) PRIMARY_RID=""; FALLBACK_RID="" ;;
+esac
+
+for rid in "$PRIMARY_RID" "$FALLBACK_RID"; do
+    if [ -n "$rid" ] && [ -x "$APP_ROOT/$rid/Koware.Cli" ]; then
+        exec "$APP_ROOT/$rid/Koware.Cli" "$@"
+    fi
+done
+
+echo "No compatible Koware runtime bundle found in $APP_ROOT." >&2
+exit 1
+WRAPPER
 chmod +x "$INSTALL_DIR/koware"
 
 # 2. Create Koware.app bundle in /Applications
@@ -500,16 +551,41 @@ if [ -d "$READER_SRC" ]; then
     chmod +x "$APP_DIR/Contents/Resources/reader/Koware.Reader" 2>/dev/null
 fi
 
-# Copy CLI into app bundle for reference
-cp "$CLI_DIR/koware" "$APP_DIR/Contents/Resources/"
+# Copy CLI bundle into app resources for direct execution
+mkdir -p "$APP_DIR/Contents/Resources/cli/$CLI_RID"
+cp -R "$CLI_DIR"/. "$APP_DIR/Contents/Resources/cli/$CLI_RID/"
+chmod +x "$APP_DIR/Contents/Resources/cli/$CLI_RID/Koware.Cli" 2>/dev/null || true
 
 # Copy app icon if available
 if [ -f "$RESOURCES_DIR/AppIcon.icns" ]; then
     cp "$RESOURCES_DIR/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 fi
 
-# Create CLI symlink inside app bundle for drag-drop installs
-ln -sf "../Resources/koware" "$APP_DIR/Contents/MacOS/koware"
+# Create CLI launcher inside app bundle
+cat > "$APP_DIR/Contents/MacOS/koware" << 'CLIWRAPPER'
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_ROOT="$(cd "$SCRIPT_DIR/../Resources/cli" && pwd)"
+ARCH="$(uname -m)"
+
+case "$ARCH" in
+    arm64|aarch64) PRIMARY_RID="osx-arm64"; FALLBACK_RID="osx-x64" ;;
+    x86_64) PRIMARY_RID="osx-x64"; FALLBACK_RID="osx-arm64" ;;
+    *) PRIMARY_RID=""; FALLBACK_RID="" ;;
+esac
+
+for rid in "$PRIMARY_RID" "$FALLBACK_RID"; do
+    if [ -n "$rid" ] && [ -x "$APP_ROOT/$rid/Koware.Cli" ]; then
+        exec "$APP_ROOT/$rid/Koware.Cli" "$@"
+    fi
+done
+
+echo "No compatible Koware runtime bundle found in $APP_ROOT." >&2
+exit 1
+CLIWRAPPER
+chmod +x "$APP_DIR/Contents/MacOS/koware"
 
 # Create Info.plist
 cat > "$APP_DIR/Contents/Info.plist" << PLIST
@@ -549,7 +625,7 @@ INSTALLSCRIPT
 
     # Use AppleScript to get admin privileges and run install script
     osascript << EOF 2>/dev/null
-do shell script "bash '$INSTALL_SCRIPT' '$RESOURCES_DIR' '$INSTALL_DIR' '$CONFIG_DIR' '$backup_dir'" with administrator privileges
+do shell script "bash '$INSTALL_SCRIPT' '$RESOURCES_DIR' '$INSTALL_DIR' '$CONFIG_DIR' '$backup_dir' '$LIB_INSTALL_ROOT'" with administrator privileges
 EOF
     local install_result=$?
     rm -f "$INSTALL_SCRIPT"
@@ -566,7 +642,8 @@ EOF
 display dialog "Koware installed successfully!
 
 ✓ Koware.app installed to /Applications
-✓ CLI available as 'koware' in Terminal
+✓ CLI launcher available as 'koware' in Terminal
+✓ Runtime bundle installed to /usr/local/lib/koware
 
 You can now:
 • Open Koware from Applications
@@ -582,6 +659,7 @@ do_uninstall() {
 display dialog "This will remove Koware from this machine:
 • /Applications/Koware.app
 • /usr/local/bin/koware (and /opt/homebrew/bin/koware if present)
+• /usr/local/lib/koware
 
 Your config at ~/.config/koware/ will be preserved.
 
@@ -595,7 +673,7 @@ EOF
 
     # Remove with admin privileges
     osascript << EOF 2>/dev/null
-do shell script "rm -f '$INSTALL_DIR/koware' && rm -f '/opt/homebrew/bin/koware' && rm -rf '$INSTALL_DIR/koware-apps' && rm -rf '/Applications/Koware.app'" with administrator privileges
+do shell script "rm -f '$INSTALL_DIR/koware' && rm -f '/usr/local/bin/koware' && rm -f '/opt/homebrew/bin/koware' && rm -rf '/usr/local/lib/koware' && rm -rf '$INSTALL_DIR/koware-apps' && rm -rf '/Applications/Koware.app'" with administrator privileges
 EOF
 
     if [ $? -ne 0 ]; then
@@ -670,7 +748,8 @@ Double-click "Koware Installer" to install, reinstall, or remove Koware.
 After installation, open Terminal and run:
     koware --help
 
-Install location: /usr/local/bin/koware
+Install location: /usr/local/bin/koware (or /opt/homebrew/bin/koware)
+Runtime bundle:  /usr/local/lib/koware
 Config location:  ~/.config/koware/
 
 For more information, visit the project repository.
