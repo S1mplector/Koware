@@ -78,6 +78,7 @@ mkdir -p "$DMG_STAGING/lib"
 cp -R "$BUNDLE_ROOT" "$DMG_STAGING/lib/koware"
 
 macos_write_runtime_launcher "$DMG_STAGING/koware" "lib/koware" "relative_to_script"
+macos_write_runtime_launcher "$DMG_STAGING/.koware-install-wrapper" "/usr/local/lib/koware"
 
 cat > "$DMG_STAGING/install.sh" << 'EOF'
 #!/bin/bash
@@ -87,15 +88,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_ROOT="$SCRIPT_DIR/lib/koware"
 INSTALL_ROOT="/usr/local/lib/koware"
 BIN_DIR="/usr/local/bin"
-TEMP_WRAPPER="$(mktemp)"
-macos_write_runtime_launcher "$TEMP_WRAPPER" "/usr/local/lib/koware"
+WRAPPER_SOURCE="$SCRIPT_DIR/.koware-install-wrapper"
+
+if [ -d "/opt/homebrew/bin" ]; then
+    BIN_DIR="/opt/homebrew/bin"
+fi
 
 copy_payload() {
     mkdir -p "$INSTALL_ROOT" "$BIN_DIR"
     rm -rf "$INSTALL_ROOT"
     mkdir -p "$INSTALL_ROOT"
     cp -R "$SOURCE_ROOT"/. "$INSTALL_ROOT/"
-    cp "$TEMP_WRAPPER" "$BIN_DIR/koware"
+    cp "$WRAPPER_SOURCE" "$BIN_DIR/koware"
     chmod +x "$BIN_DIR/koware"
 }
 
@@ -109,11 +113,9 @@ else
     sudo rm -rf "$INSTALL_ROOT"
     sudo mkdir -p "$INSTALL_ROOT"
     sudo cp -R "$SOURCE_ROOT"/. "$INSTALL_ROOT/"
-    sudo cp "$TEMP_WRAPPER" "$BIN_DIR/koware"
+    sudo cp "$WRAPPER_SOURCE" "$BIN_DIR/koware"
     sudo chmod +x "$BIN_DIR/koware"
 fi
-
-rm -f "$TEMP_WRAPPER"
 
 echo ""
 echo "Koware installed successfully."
@@ -140,6 +142,10 @@ USAGE:
   koware --help          Show help
   koware --version       Show version
   koware read "<title>"  Uses the bundled reader on macOS
+
+The installer copies:
+  runtime bundle -> /usr/local/lib/koware
+  launcher       -> /usr/local/bin/koware (or /opt/homebrew/bin/koware)
 
 For more information, visit the project repository.
 EOF

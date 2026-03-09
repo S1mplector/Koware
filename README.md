@@ -46,7 +46,7 @@ Koware does **NOT** host any media. It does **NOT** include any source URLs. It 
 ## Quickstart (about 5 minutes)
 
 - Install (Windows): `.\install-koware.ps1 -Publish`
-- Install (macOS): `./Scripts/publish-macos.sh` then run the app from `publish/`
+- Install (macOS): `./Scripts/build-installer-app.sh` then open the DMG from `publish/`
 - Install (Linux): `curl -fsSL https://raw.githubusercontent.com/S1mplector/Koware/main/Scripts/install-koware-linux.sh | bash`
 - Auto-configure providers: `koware provider autoconfig`
 - Test connectivity: `koware provider test`
@@ -202,26 +202,43 @@ Or re-run the one-line installer to get the latest version.
 #### Option 1: DMG Installer
 Download the DMG from the [releases page](https://github.com/S1mplector/Koware/releases), open it, and it will run you through the install process. 
 
-#### Option 2: Build from source
+#### Option 2: Build the Installer.app DMG (recommended)
 ```bash
-# Clone and navigate to repo
-cd Koware
-
-# Make the script executable and run it
 chmod +x Scripts/publish-macos.sh
-./Scripts/publish-macos.sh
+chmod +x Scripts/build-installer-app.sh
+./Scripts/build-installer-app.sh
 
 # For Apple Silicon (default)
-./Scripts/publish-macos.sh --runtime osx-arm64
+./Scripts/build-installer-app.sh --runtime osx-arm64
 
 # For Intel Macs
-./Scripts/publish-macos.sh --runtime osx-x64
+./Scripts/build-installer-app.sh --runtime osx-x64
+
+# Universal (Intel + Apple Silicon)
+./Scripts/build-installer-app.sh --runtime universal
+```
+
+This creates a clickable `Koware Installer` DMG in `publish/`.
+
+#### Option 3: Build a native `.pkg`
+```bash
+chmod +x Scripts/build-pkg.sh
+./Scripts/build-pkg.sh
+
+# Universal (Intel + Apple Silicon)
+./Scripts/build-pkg.sh --runtime universal
+```
+
+#### Option 4: Build a portable DMG
+```bash
+chmod +x Scripts/publish-macos.sh
+./Scripts/publish-macos.sh
 
 # Universal (Intel + Apple Silicon)
 ./Scripts/publish-macos.sh --runtime universal
 ```
 
-The script creates a DMG in `publish/` that you can distribute or install from.
+`publish-macos.sh` creates a lightweight DMG with `koware` plus an `install.sh`. `create-dmg.sh` is the low-level helper for repackaging an already prepared staging folder.
 
 ### Run without installing globally
 

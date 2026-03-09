@@ -202,6 +202,7 @@ EOF
 mkdir -p "$APP_BUNDLE/Contents/Resources/cli"
 cp -R "$PUBLISH_DIR"/. "$APP_BUNDLE/Contents/Resources/cli/"
 macos_write_runtime_launcher "$APP_BUNDLE/Contents/Resources/koware-wrapper" "/usr/local/lib/koware"
+macos_write_runtime_launcher "$APP_BUNDLE/Contents/Resources/koware-app-launcher" "../Resources/cli" "relative_to_script"
 
 # Copy Player and Reader to Resources
 if [[ "$RUNTIME" == "universal" ]]; then
@@ -415,6 +416,7 @@ CONFIG_DIR="$3"
 BACKUP_DIR="$4"
 LIB_INSTALL_ROOT="$5"
 APP_DIR="/Applications/Koware.app"
+VERSION="__VERSION__"
 
 CLI_ROOT="$RESOURCES_DIR/cli"
 CLI_DIR="$CLI_ROOT"
@@ -515,8 +517,8 @@ if [ -f "$RESOURCES_DIR/AppIcon.icns" ]; then
 fi
 
 # Create CLI launcher inside app bundle
-cp "$RESOURCES_DIR/koware-wrapper" "$APP_DIR/Contents/Resources/koware-wrapper"
-macos_write_runtime_launcher "$APP_DIR/Contents/MacOS/koware" "../Resources/cli" "relative_to_script"
+cp "$RESOURCES_DIR/koware-app-launcher" "$APP_DIR/Contents/MacOS/koware"
+chmod +x "$APP_DIR/Contents/MacOS/koware"
 
 # Create Info.plist
 cat > "$APP_DIR/Contents/Info.plist" << PLIST

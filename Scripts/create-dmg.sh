@@ -9,18 +9,47 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 source "$SCRIPT_DIR/lib/macos-packaging.sh"
 
 # Configuration
-APP_NAME="Koware"
 APP_VERSION="$(macos_read_app_version "$REPO_ROOT")"
 RUNTIME="${RUNTIME:-osx-arm64}"
 SOURCE_DIR="${SOURCE_DIR:-$REPO_ROOT/publish/macos/dmg-staging}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/publish}"
-DMG_NAME="Koware-${APP_VERSION}-${RUNTIME}.dmg"
 VOLUME_NAME="Koware"
-DMG_TEMP="$OUTPUT_DIR/dmg-temp"
+OUTPUT_PATH="${OUTPUT_PATH:-}"
 
 info() { echo -e "\033[36m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 err()  { echo -e "\033[31m[ERR ]\033[0m $1"; exit 1; }
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --source) SOURCE_DIR="$2"; shift 2 ;;
+        --output) OUTPUT_PATH="$2"; shift 2 ;;
+        --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
+        --runtime) RUNTIME="$2"; shift 2 ;;
+        --volume-name) VOLUME_NAME="$2"; shift 2 ;;
+        --help)
+            echo "Usage: $0 [options]"
+            echo "Options:"
+            echo "  --source <dir>        Staging directory to package. Default: publish/macos/dmg-staging"
+            echo "  --output <path>       Final DMG path. Default: publish/Koware-<version>-<runtime>.dmg"
+            echo "  --output-dir <dir>    Directory for generated DMG and temp files. Default: publish/"
+            echo "  --runtime <rid>       Runtime label used in the default DMG name. Default: osx-arm64"
+            echo "  --volume-name <name>  Mounted DMG volume name. Default: Koware"
+            exit 0
+            ;;
+        *) err "Unknown option: $1" ;;
+    esac
+done
+
+DMG_NAME="Koware-${APP_VERSION}-${RUNTIME}.dmg"
+if [ -z "$OUTPUT_PATH" ]; then
+    OUTPUT_PATH="$OUTPUT_DIR/$DMG_NAME"
+fi
+
+OUTPUT_PARENT="$(dirname "$OUTPUT_PATH")"
+DMG_TEMP="$OUTPUT_PARENT/dmg-temp"
+TEMP_DMG="$OUTPUT_PARENT/temp-rw.dmg"
 
 # Check if source exists
 if [ ! -d "$SOURCE_DIR" ]; then
@@ -32,17 +61,15 @@ info "Creating DMG for Koware v$APP_VERSION"
 # Clean up any previous temp files
 rm -rf "$DMG_TEMP"
 mkdir -p "$DMG_TEMP"
-mkdir -p "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_PARENT"
 
 # Copy contents
 cp -r "$SOURCE_DIR/"* "$DMG_TEMP/"
 
 # Create a styled DMG
-DMG_PATH="$OUTPUT_DIR/$DMG_NAME"
-rm -f "$DMG_PATH"
+rm -f "$OUTPUT_PATH"
 
 # Create initial writable DMG (larger size for styling)
-TEMP_DMG="$OUTPUT_DIR/temp-rw.dmg"
 rm -f "$TEMP_DMG"
 
 info "Creating writable DMG..."
@@ -95,11 +122,11 @@ hdiutil detach "$MOUNT_POINT" -quiet || hdiutil detach "$MOUNT_POINT" -force
 
 # Convert to compressed read-only DMG
 info "Compressing DMG..."
-hdiutil convert "$TEMP_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG_PATH"
+hdiutil convert "$TEMP_DMG" -format UDZO -imagekey zlib-level=9 -o "$OUTPUT_PATH"
 
 # Clean up
 rm -f "$TEMP_DMG"
 rm -rf "$DMG_TEMP"
 
-info "DMG created successfully: $DMG_PATH"
-echo "  Size: $(du -h "$DMG_PATH" | cut -f1)"
+info "DMG created successfully: $OUTPUT_PATH"
+echo "  Size: $(du -h "$OUTPUT_PATH" | cut -f1)"

@@ -37,9 +37,6 @@ dotnet --version
 ```bash
 # Install Xcode CLI tools
 xcode-select --install
-
-# Install create-dmg (for DMG creation)
-brew install create-dmg
 ```
 
 ```bash
@@ -61,8 +58,10 @@ Koware/
 ├── Scripts/
 │   ├── build-installer-app.sh   # macOS Installer.app builder
 │   ├── build-pkg.sh             # macOS .pkg builder
-│   ├── create-dmg.sh            # macOS DMG creator
-│   ├── publish-macos.sh         # macOS publish script
+│   ├── create-dmg.sh            # macOS DMG repack helper for an existing staging dir
+│   ├── publish-macos.sh         # macOS portable DMG builder
+│   ├── lib/
+│   │   └── macos-packaging.sh   # shared macOS packaging helpers
 │   ├── publish-installer.ps1    # Windows installer builder
 │   └── install-koware.ps1       # Windows local installation
 └── Assets/
@@ -123,16 +122,19 @@ The installer package includes:
 
 ## macOS Packaging
 
-### Option 1: Quick Build for Testing
+### Option 1: Build a Portable DMG
 
 ```bash
-# Build CLI only
-dotnet publish Koware.Cli -c Release -r osx-arm64 --self-contained -o ./publish/macos
+# From repo root
+chmod +x Scripts/publish-macos.sh
+./Scripts/publish-macos.sh
 
-# Build with cross-platform player and reader
-dotnet publish Koware.Cli -c Release -r osx-arm64 --self-contained -o ./publish/macos
-dotnet publish Koware.Player -c Release -r osx-arm64 --self-contained -o ./publish/macos/player
-dotnet publish Koware.Reader -c Release -r osx-arm64 --self-contained -o ./publish/macos/reader
+# Universal (Intel + Apple Silicon)
+./Scripts/publish-macos.sh --runtime universal
+
+# This creates:
+# - publish/Koware-<version>-<runtime>.dmg
+# - a portable bundle with `koware` and `install.sh`
 ```
 
 ### Option 2: Build Installer.app (Recommended)
@@ -146,8 +148,8 @@ chmod +x Scripts/build-installer-app.sh
 ./Scripts/build-installer-app.sh --runtime universal
 
 # This creates:
-# - dist/Koware-Installer.app (GUI installer)
-# - dist/Koware-Installer.dmg (distributable disk image)
+# - publish/Koware-Installer-<version>-<runtime>.dmg
+# - a GUI Installer.app inside the DMG
 ```
 
 ### Option 3: Build .pkg Installer
@@ -161,25 +163,30 @@ chmod +x Scripts/build-pkg.sh
 ./Scripts/build-pkg.sh --runtime universal
 
 # This creates:
-# - dist/Koware-<version>.pkg
+# - publish/Koware-<version>-<runtime>.pkg
 ```
 
-### Option 4: Create DMG Only
+### Option 4: Repackage an Existing Staging Folder
 
 ```bash
-# After building the app
+# After preparing a staging directory with the files you want in the DMG
 chmod +x Scripts/create-dmg.sh
-./Scripts/create-dmg.sh ./dist/Koware-Installer.app ./dist/Koware-Installer.dmg
+./Scripts/create-dmg.sh --source ./publish/macos/dmg-staging
 
-# Or with custom volume name
-./Scripts/create-dmg.sh ./dist/Koware-Installer.app ./dist/Koware.dmg "Koware Installer"
+# Override the output path or volume name
+./Scripts/create-dmg.sh \
+  --source ./publish/macos/dmg-staging \
+  --output ./publish/Koware-Custom.dmg \
+  --volume-name "Koware Installer"
 ```
+
+`create-dmg.sh` is a low-level helper. Most releases should use `build-installer-app.sh`, `build-pkg.sh`, or `publish-macos.sh` directly.
 
 ### macOS Package Contents
 
 | Component | Location |
 |-----------|----------|
-| Koware CLI | `/usr/local/bin/koware` |
+| Koware CLI | `/usr/local/bin/koware` or `/opt/homebrew/bin/koware` |
 | Config directory | `~/.config/koware/` |
 | Player | External (IINA/mpv/VLC) or Koware.Player |
 | Reader | Browser-based or Koware.Reader |
@@ -278,21 +285,11 @@ Write-Host "Build complete! Installer at ./publish/Koware.Installer.Win.exe"
 #!/bin/bash
 set -e
 
-# Clean
-rm -rf ./publish
-mkdir -p ./publish/koware
+./Scripts/build-installer-app.sh --runtime osx-arm64
+./Scripts/build-pkg.sh --runtime osx-arm64
+./Scripts/publish-macos.sh --runtime osx-arm64
 
-# Build CLI
-dotnet publish Koware.Cli -c Release -r osx-arm64 --self-contained -p:PublishSingleFile=true -o ./publish/koware
-
-# Build cross-platform player and reader
-dotnet publish Koware.Player -c Release -r osx-arm64 --self-contained -o ./publish/koware/player
-dotnet publish Koware.Reader -c Release -r osx-arm64 --self-contained -o ./publish/koware/reader
-
-# Build installer
-./Scripts/build-installer-app.sh
-
-echo "Build complete! DMG at ./dist/Koware-Installer.dmg"
+echo "Build complete! Artifacts are in ./publish/"
 ```
 
 ---
@@ -312,9 +309,9 @@ echo "Build complete! DMG at ./dist/Koware-Installer.dmg"
 | Issue | Solution |
 |-------|----------|
 | "Permission denied" | Run `chmod +x Scripts/*.sh` |
-| Gatekeeper blocks app | Run `xattr -cr ./dist/Koware-Installer.app` |
+| Gatekeeper blocks app | Run `xattr -cr "/Applications/Koware.app"` after install or remove quarantine from the mounted app bundle |
 | LibVLC not found | Install VLC or use `brew install libvlc` |
-| create-dmg not found | Run `brew install create-dmg` |
+| DMG icon tweaks missing | Install Xcode Command Line Tools so `SetFile` and `Rez` are available |
 
 ---
 

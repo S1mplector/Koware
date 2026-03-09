@@ -8238,7 +8238,7 @@ static int ScoreStream(StreamLink stream)
         score += 20;
     }
 
-    // Provider-aware tweaks similar to ani-cli
+    // Provider-aware scoring tweaks for common source patterns.
     if (provider.Contains("hianime", StringComparison.OrdinalIgnoreCase)
         || provider.Contains("wixmp", StringComparison.OrdinalIgnoreCase))
     {

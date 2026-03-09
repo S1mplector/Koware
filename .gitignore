@@ -53,6 +53,4 @@ Koware.Installer.Win/obj/
 publish/
 **/publish/
 
-# External reference clones
-ani-cli/
 RELEASE_NOTES.md
