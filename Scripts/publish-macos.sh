@@ -1,12 +1,12 @@
 #!/bin/bash
-# Author: Ilgaz Mehmetoğlu
-# Summary: Publishes Koware CLI for macOS and creates a DMG installer.
+# Author: Ilgaz Mehmetoglu
+# Summary: Publishes Koware for macOS as a folder-based runtime bundle and creates a DMG installer.
 
-set -e
+set -euo pipefail
 
 # Configuration
 CONFIGURATION="${CONFIGURATION:-Release}"
-RUNTIME="${RUNTIME:-osx-arm64}"  # osx-arm64 for Apple Silicon, osx-x64 for Intel, universal for both
+RUNTIME="${RUNTIME:-osx-arm64}"  # osx-arm64, osx-x64, or universal
 SELF_CONTAINED="${SELF_CONTAINED:-true}"
 COPY_TO_DESKTOP="${COPY_TO_DESKTOP:-false}"
 COPY_TO_REPO_ROOT="${COPY_TO_REPO_ROOT:-false}"
@@ -17,13 +17,84 @@ DMG_OUTPUT_DIR="${DMG_OUTPUT_DIR:-$REPO_ROOT/publish}"
 
 # App metadata
 APP_NAME="Koware"
-APP_VERSION=$(grep -oP '(?<=<Version>)[^<]+' "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj" || echo "0.0.0")
+APP_VERSION=$(sed -n 's/.*<Version>\(.*\)<\/Version>.*/\1/p' "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj")
 VOLUME_NAME="Koware Installer"
 
 # Colors for output
 info() { echo -e "\033[36m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
-err()  { echo -e "\033[31m[ERR ]\033[0m $1"; }
+err()  { echo -e "\033[31m[ERR ]\033[0m $1"; exit 1; }
+
+publish_bundle() {
+    local rid="$1"
+    local target_root="$2"
+    local cli_proj="$REPO_ROOT/Koware.Cli/Koware.Cli.csproj"
+    local reader_proj="$REPO_ROOT/Koware.Reader/Koware.Reader.csproj"
+    local cli_dir="$target_root/$rid"
+    local reader_dir="$cli_dir/reader"
+
+    mkdir -p "$cli_dir" "$reader_dir"
+
+    local cli_args=(
+        publish "$cli_proj"
+        -c "$CONFIGURATION"
+        -r "$rid"
+        -o "$cli_dir"
+    )
+
+    local reader_args=(
+        publish "$reader_proj"
+        -c "$CONFIGURATION"
+        -r "$rid"
+        -o "$reader_dir"
+    )
+
+    if [ "$SELF_CONTAINED" = "true" ]; then
+        cli_args+=("--self-contained" "true")
+        reader_args+=("--self-contained" "true")
+    else
+        cli_args+=("--self-contained" "false")
+        reader_args+=("--self-contained" "false")
+    fi
+
+    info "Publishing CLI bundle for $rid"
+    echo "dotnet ${cli_args[*]}"
+    dotnet "${cli_args[@]}"
+
+    info "Publishing reader bundle for $rid"
+    echo "dotnet ${reader_args[*]}"
+    dotnet "${reader_args[@]}"
+}
+
+write_portable_launcher() {
+    local output_path="$1"
+
+    cat > "$output_path" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_ROOT="$SCRIPT_DIR/lib/koware"
+ARCH="$(uname -m)"
+
+case "$ARCH" in
+    arm64|aarch64) PRIMARY_RID="osx-arm64"; FALLBACK_RID="osx-x64" ;;
+    x86_64) PRIMARY_RID="osx-x64"; FALLBACK_RID="osx-arm64" ;;
+    *) PRIMARY_RID=""; FALLBACK_RID="" ;;
+esac
+
+for rid in "$PRIMARY_RID" "$FALLBACK_RID"; do
+    if [ -n "$rid" ] && [ -x "$APP_ROOT/$rid/Koware.Cli" ]; then
+        exec "$APP_ROOT/$rid/Koware.Cli" "$@"
+    fi
+done
+
+echo "No compatible Koware runtime bundle found in $APP_ROOT." >&2
+exit 1
+EOF
+
+    chmod +x "$output_path"
+}
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -45,156 +116,109 @@ while [[ $# -gt 0 ]]; do
             echo "  --copy-to-repo-root   Copy the DMG to the repository root after build"
             exit 0
             ;;
-        *) err "Unknown option: $1"; exit 1 ;;
+        *) err "Unknown option: $1" ;;
     esac
 done
 
-info "Publishing Koware CLI for macOS"
+info "Publishing Koware for macOS"
 info "  Runtime: $RUNTIME"
 info "  Configuration: $CONFIGURATION"
 info "  Self-contained: $SELF_CONTAINED"
 info "  Version: $APP_VERSION"
-
-if [[ "$RUNTIME" == "universal" ]] && ! command -v lipo >/dev/null 2>&1; then
-    err "lipo (Xcode Command Line Tools) is required for universal builds."
-fi
-
-DMG_NAME="Koware-${APP_VERSION}-${RUNTIME}.dmg"
-
-# Clean output directory
-if [ -d "$OUTPUT_DIR" ]; then
-    info "Cleaning $OUTPUT_DIR"
-    rm -rf "$OUTPUT_DIR"
-fi
-mkdir -p "$OUTPUT_DIR"
-
-# Publish CLI
-CLI_PROJ="$REPO_ROOT/Koware.Cli/Koware.Cli.csproj"
-info "Publishing Koware.Cli..."
 
 TARGET_RIDS=("$RUNTIME")
 if [[ "$RUNTIME" == "universal" ]]; then
     TARGET_RIDS=("osx-arm64" "osx-x64")
 fi
 
-if [[ "$RUNTIME" == "universal" ]]; then
-    BUILD_DIR="$OUTPUT_DIR/cli-build"
-    CLI_DIR="$OUTPUT_DIR/cli"
-    rm -rf "$BUILD_DIR" "$CLI_DIR"
-    mkdir -p "$BUILD_DIR" "$CLI_DIR"
+DMG_NAME="${APP_NAME}-${APP_VERSION}-${RUNTIME}.dmg"
+BUNDLE_ROOT="$OUTPUT_DIR/bundle"
 
-    for rid in "${TARGET_RIDS[@]}"; do
-        PUBLISH_ARGS=(
-            "publish" "$CLI_PROJ"
-            "-c" "$CONFIGURATION"
-            "-r" "$rid"
-            "-o" "$BUILD_DIR/$rid"
-            "/p:PublishSingleFile=true"
-            "/p:IncludeNativeLibrariesForSelfExtract=true"
-            "/p:EnableCompressionInSingleFile=true"
-        )
-
-        if [ "$SELF_CONTAINED" = "true" ]; then
-            PUBLISH_ARGS+=("--self-contained" "true")
-        else
-            PUBLISH_ARGS+=("--self-contained" "false")
-        fi
-
-        echo "dotnet ${PUBLISH_ARGS[*]}"
-        dotnet "${PUBLISH_ARGS[@]}"
-    done
-
-    lipo -create "$BUILD_DIR/osx-arm64/Koware.Cli" "$BUILD_DIR/osx-x64/Koware.Cli" -output "$CLI_DIR/koware"
-    chmod +x "$CLI_DIR/koware"
-
-    if [ -f "$BUILD_DIR/osx-arm64/appsettings.json" ]; then
-        cp "$BUILD_DIR/osx-arm64/appsettings.json" "$CLI_DIR/"
-    elif [ -f "$BUILD_DIR/osx-x64/appsettings.json" ]; then
-        cp "$BUILD_DIR/osx-x64/appsettings.json" "$CLI_DIR/"
-    fi
-
-    rm -rf "$BUILD_DIR"
-    info "CLI executable ready: $CLI_DIR/koware"
-else
-    PUBLISH_ARGS=(
-        "publish" "$CLI_PROJ"
-        "-c" "$CONFIGURATION"
-        "-r" "$RUNTIME"
-        "-o" "$OUTPUT_DIR/cli"
-        "/p:PublishSingleFile=true"
-        "/p:IncludeNativeLibrariesForSelfExtract=true"
-        "/p:EnableCompressionInSingleFile=true"
-    )
-
-    if [ "$SELF_CONTAINED" = "true" ]; then
-        PUBLISH_ARGS+=("--self-contained" "true")
-    else
-        PUBLISH_ARGS+=("--self-contained" "false")
-    fi
-
-    echo "dotnet ${PUBLISH_ARGS[*]}"
-    dotnet "${PUBLISH_ARGS[@]}"
-
-    # Rename the executable to 'koware' for macOS convention
-    CLI_EXE="$OUTPUT_DIR/cli/Koware.Cli"
-    if [ -f "$CLI_EXE" ]; then
-        mv "$CLI_EXE" "$OUTPUT_DIR/cli/koware"
-        chmod +x "$OUTPUT_DIR/cli/koware"
-        info "CLI executable ready: $OUTPUT_DIR/cli/koware"
-    else
-        err "CLI executable not found at $CLI_EXE"
-        exit 1
-    fi
+if [ -d "$OUTPUT_DIR" ]; then
+    info "Cleaning $OUTPUT_DIR"
+    rm -rf "$OUTPUT_DIR"
 fi
 
-# Create DMG staging directory
+mkdir -p "$OUTPUT_DIR"
+
+for rid in "${TARGET_RIDS[@]}"; do
+    publish_bundle "$rid" "$BUNDLE_ROOT"
+done
+
 DMG_STAGING="$OUTPUT_DIR/dmg-staging"
-mkdir -p "$DMG_STAGING"
+mkdir -p "$DMG_STAGING/lib"
+cp -R "$BUNDLE_ROOT" "$DMG_STAGING/lib/koware"
 
-# Copy CLI to staging
-cp -r "$OUTPUT_DIR/cli/"* "$DMG_STAGING/"
+write_portable_launcher "$DMG_STAGING/koware"
 
-# Create a simple install script
 cat > "$DMG_STAGING/install.sh" << 'EOF'
 #!/bin/bash
-# Koware macOS Installer
-# This script installs koware to /usr/local/bin
-
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="/usr/local/bin"
+SOURCE_ROOT="$SCRIPT_DIR/lib/koware"
+INSTALL_ROOT="/usr/local/lib/koware"
+BIN_DIR="/usr/local/bin"
+TEMP_WRAPPER="$(mktemp)"
 
-echo "Installing Koware to $INSTALL_DIR..."
+cat > "$TEMP_WRAPPER" << 'WRAPPER'
+#!/bin/bash
+set -euo pipefail
 
-# Check if we have write permission
-if [ ! -w "$INSTALL_DIR" ]; then
-    echo "Administrator privileges required. Please enter your password:"
-    sudo mkdir -p "$INSTALL_DIR"
-    sudo cp "$SCRIPT_DIR/koware" "$INSTALL_DIR/"
-    sudo chmod +x "$INSTALL_DIR/koware"
+APP_ROOT="/usr/local/lib/koware"
+ARCH="$(uname -m)"
+
+case "$ARCH" in
+    arm64|aarch64) PRIMARY_RID="osx-arm64"; FALLBACK_RID="osx-x64" ;;
+    x86_64) PRIMARY_RID="osx-x64"; FALLBACK_RID="osx-arm64" ;;
+    *) PRIMARY_RID=""; FALLBACK_RID="" ;;
+esac
+
+for rid in "$PRIMARY_RID" "$FALLBACK_RID"; do
+    if [ -n "$rid" ] && [ -x "$APP_ROOT/$rid/Koware.Cli" ]; then
+        exec "$APP_ROOT/$rid/Koware.Cli" "$@"
+    fi
+done
+
+echo "No compatible Koware runtime bundle found in $APP_ROOT." >&2
+exit 1
+WRAPPER
+
+chmod +x "$TEMP_WRAPPER"
+
+copy_payload() {
+    mkdir -p "$INSTALL_ROOT" "$BIN_DIR"
+    rm -rf "$INSTALL_ROOT"
+    mkdir -p "$INSTALL_ROOT"
+    cp -R "$SOURCE_ROOT"/. "$INSTALL_ROOT/"
+    cp "$TEMP_WRAPPER" "$BIN_DIR/koware"
+    chmod +x "$BIN_DIR/koware"
+}
+
+echo "Installing Koware to $INSTALL_ROOT..."
+
+if [ -w "/usr/local" ]; then
+    copy_payload
 else
-    mkdir -p "$INSTALL_DIR"
-    cp "$SCRIPT_DIR/koware" "$INSTALL_DIR/"
-    chmod +x "$INSTALL_DIR/koware"
+    echo "Administrator privileges required. Please enter your password:"
+    sudo mkdir -p "$INSTALL_ROOT" "$BIN_DIR"
+    sudo rm -rf "$INSTALL_ROOT"
+    sudo mkdir -p "$INSTALL_ROOT"
+    sudo cp -R "$SOURCE_ROOT"/. "$INSTALL_ROOT/"
+    sudo cp "$TEMP_WRAPPER" "$BIN_DIR/koware"
+    sudo chmod +x "$BIN_DIR/koware"
 fi
 
-# Copy appsettings.json to a config location
-CONFIG_DIR="$HOME/.config/koware"
-mkdir -p "$CONFIG_DIR"
-if [ -f "$SCRIPT_DIR/appsettings.json" ]; then
-    cp "$SCRIPT_DIR/appsettings.json" "$CONFIG_DIR/"
-fi
+rm -f "$TEMP_WRAPPER"
 
 echo ""
-echo "✓ Koware installed successfully!"
+echo "Koware installed successfully."
 echo ""
 echo "You can now run 'koware' from any terminal."
 echo "Try 'koware --help' to get started."
 EOF
 chmod +x "$DMG_STAGING/install.sh"
 
-# Create README for the DMG
 cat > "$DMG_STAGING/README.txt" << EOF
 Koware - Version $APP_VERSION
 ================================
@@ -205,31 +229,23 @@ Option 1: Run the installer (recommended)
   Double-click 'install.sh' or run it from Terminal:
   $ ./install.sh
 
-Option 2: Manual installation
-  Copy 'koware' to a directory in your PATH:
-  $ sudo cp koware /usr/local/bin/
-  $ sudo chmod +x /usr/local/bin/koware
-
-Option 3: Run from anywhere
-  You can run koware directly from this folder:
+Option 2: Run from this DMG folder
   $ ./koware --help
 
 USAGE:
   koware --help          Show help
   koware --version       Show version
+  koware read "<title>"  Uses the bundled reader on macOS
 
 For more information, visit the project repository.
 EOF
 
-# Create DMG
 info "Creating DMG: $DMG_NAME"
 mkdir -p "$DMG_OUTPUT_DIR"
 DMG_PATH="$DMG_OUTPUT_DIR/$DMG_NAME"
 
-# Remove existing DMG if present
 [ -f "$DMG_PATH" ] && rm -f "$DMG_PATH"
 
-# Create DMG using hdiutil
 hdiutil create \
     -volname "$VOLUME_NAME" \
     -srcfolder "$DMG_STAGING" \
@@ -239,14 +255,12 @@ hdiutil create \
 
 info "DMG created: $DMG_PATH"
 
-# Copy to repo root if requested
 if [ "$COPY_TO_REPO_ROOT" = "true" ]; then
     TARGET="$REPO_ROOT/$DMG_NAME"
     cp "$DMG_PATH" "$TARGET"
     info "Copied DMG to repo root: $TARGET"
 fi
 
-# Copy to Desktop if requested
 if [ "$COPY_TO_DESKTOP" = "true" ]; then
     DESKTOP="$HOME/Desktop"
     if [ -d "$DESKTOP" ]; then
@@ -258,10 +272,4 @@ if [ "$COPY_TO_DESKTOP" = "true" ]; then
     fi
 fi
 
-# Show output summary
-echo ""
-info "Build complete!"
-echo "  DMG: $DMG_PATH"
-echo "  Size: $(du -h "$DMG_PATH" | cut -f1)"
-echo ""
-info "To install, open the DMG and run install.sh"
+info "DMG packaging complete."
