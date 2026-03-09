@@ -63,8 +63,8 @@ rm -rf "$DMG_TEMP"
 mkdir -p "$DMG_TEMP"
 mkdir -p "$OUTPUT_PARENT"
 
-# Copy contents
-cp -r "$SOURCE_DIR/"* "$DMG_TEMP/"
+# Copy contents, including dotfiles such as .VolumeIcon.icns.
+cp -R "$SOURCE_DIR"/. "$DMG_TEMP/"
 
 # Create a styled DMG
 rm -f "$OUTPUT_PATH"
@@ -79,7 +79,18 @@ hdiutil create -srcfolder "$DMG_TEMP" -volname "$VOLUME_NAME" -fs HFS+ \
 # Mount the writable DMG
 info "Mounting DMG for styling..."
 MOUNT_POINT=$(hdiutil attach -readwrite -noverify -noautoopen "$TEMP_DMG" | \
-    grep -E '^/dev/' | tail -1 | awk '{print $NF}')
+    awk '/^\/dev\// {
+        for (i = 1; i <= NF; i++) {
+            if ($i ~ /^\/Volumes\//) {
+                mount = $i
+                for (j = i + 1; j <= NF; j++) {
+                    mount = mount " " $j
+                }
+                print mount
+                exit
+            }
+        }
+    }')
 
 if [ -z "$MOUNT_POINT" ]; then
     err "Failed to mount DMG"

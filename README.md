@@ -204,7 +204,6 @@ Download the DMG from the [releases page](https://github.com/S1mplector/Koware/r
 
 #### Option 2: Build the Installer.app DMG (recommended)
 ```bash
-chmod +x Scripts/publish-macos.sh
 chmod +x Scripts/build-installer-app.sh
 ./Scripts/build-installer-app.sh
 

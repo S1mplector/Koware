@@ -41,7 +41,7 @@ xcode-select --install
 
 ```bash
 # Build and copy the macOS installer (for convenience, not meant for production)
-cd ~/Desktop/Files/Projects/Koware && ./Scripts/build-installer-app.sh && cp ./publish/Koware-Installer-1.0.0-osx-arm64.dmg ~/Desktop/
+cd ~/Desktop/Files/Projects/Koware && ./Scripts/build-installer-app.sh --runtime osx-arm64
 ```
 ---
 
