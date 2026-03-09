@@ -356,84 +356,43 @@ public sealed class SqliteMangaListStore : IMangaListStore
         await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         var existing = await GetByTitleInternalAsync(connection, mangaTitle, cancellationToken);
-        var chapterInt = (int)Math.Ceiling(chapterNumber);
+        var now = DateTimeOffset.UtcNow;
+        var progress = ListProgressTracker.ComputeMangaUpdate(existing, chapterNumber, totalChapters, now);
 
         if (existing is null)
         {
-            // Auto-add to list as "reading"
             await using var insertCmd = connection.CreateCommand();
-            var now = DateTimeOffset.UtcNow.UtcDateTime.ToString("O");
             insertCmd.CommandText = $"""
                 INSERT INTO {TableName} (manga_id, manga_title, status, total_chapters, chapters_read, score, notes, added_at, updated_at, completed_at)
-                VALUES ($mangaId, $mangaTitle, 'reading', $totalChapters, $chaptersRead, NULL, NULL, $now, $now, NULL);
+                VALUES ($mangaId, $mangaTitle, $status, $totalChapters, $chaptersRead, NULL, NULL, $now, $now, $completedAt);
                 """;
             insertCmd.Parameters.AddWithValue("$mangaId", mangaId);
             insertCmd.Parameters.AddWithValue("$mangaTitle", mangaTitle);
-            insertCmd.Parameters.AddWithValue("$totalChapters", totalChapters.HasValue ? totalChapters.Value : DBNull.Value);
-            insertCmd.Parameters.AddWithValue("$chaptersRead", chapterInt);
-            insertCmd.Parameters.AddWithValue("$now", now);
+            insertCmd.Parameters.AddWithValue("$status", StatusToString(progress.Status));
+            insertCmd.Parameters.AddWithValue("$totalChapters", progress.TotalChapters.HasValue ? progress.TotalChapters.Value : DBNull.Value);
+            insertCmd.Parameters.AddWithValue("$chaptersRead", progress.ChaptersRead);
+            insertCmd.Parameters.AddWithValue("$now", now.UtcDateTime.ToString("O"));
+            insertCmd.Parameters.AddWithValue("$completedAt", progress.CompletedAt.HasValue ? progress.CompletedAt.Value.UtcDateTime.ToString("O") : DBNull.Value);
             await insertCmd.ExecuteNonQueryAsync(cancellationToken);
             return;
         }
 
-        // Update chapters read if this is a higher chapter
-        var newChaptersRead = Math.Max(existing.ChaptersRead, chapterInt);
-        var newTotalChapters = totalChapters ?? existing.TotalChapters;
-        var now2 = DateTimeOffset.UtcNow.UtcDateTime.ToString("O");
-
-        // Determine status transitions
-        var shouldStartReading = existing.Status is MangaReadStatus.PlanToRead or MangaReadStatus.OnHold;
-        var shouldComplete = newTotalChapters.HasValue && 
-                            newChaptersRead >= newTotalChapters.Value && 
-                            (existing.Status == MangaReadStatus.Reading || shouldStartReading);
-
         await using var updateCmd = connection.CreateCommand();
-        if (shouldComplete)
-        {
-            updateCmd.CommandText = $"""
-                UPDATE {TableName}
-                SET chapters_read = $chaptersRead, 
-                    total_chapters = $totalChapters,
-                    status = 'completed',
-                    completed_at = $now,
-                    updated_at = $now
-                WHERE id = $id;
-                """;
-            updateCmd.Parameters.AddWithValue("$id", existing.Id);
-            updateCmd.Parameters.AddWithValue("$chaptersRead", newChaptersRead);
-            updateCmd.Parameters.AddWithValue("$totalChapters", newTotalChapters.HasValue ? newTotalChapters.Value : DBNull.Value);
-            updateCmd.Parameters.AddWithValue("$now", now2);
-        }
-        else if (shouldStartReading)
-        {
-            updateCmd.CommandText = $"""
-                UPDATE {TableName}
-                SET chapters_read = $chaptersRead, 
-                    total_chapters = COALESCE($totalChapters, total_chapters),
-                    status = 'reading',
-                    updated_at = $now
-                WHERE id = $id;
-                """;
-            updateCmd.Parameters.AddWithValue("$id", existing.Id);
-            updateCmd.Parameters.AddWithValue("$chaptersRead", newChaptersRead);
-            updateCmd.Parameters.AddWithValue("$totalChapters", newTotalChapters.HasValue ? newTotalChapters.Value : DBNull.Value);
-            updateCmd.Parameters.AddWithValue("$now", now2);
-        }
-        else
-        {
-            updateCmd.CommandText = $"""
-                UPDATE {TableName}
-                SET chapters_read = $chaptersRead, 
-                    total_chapters = COALESCE($totalChapters, total_chapters),
-                    updated_at = $now
-                WHERE id = $id;
-                """;
-            updateCmd.Parameters.AddWithValue("$id", existing.Id);
-            updateCmd.Parameters.AddWithValue("$chaptersRead", newChaptersRead);
-            updateCmd.Parameters.AddWithValue("$totalChapters", newTotalChapters.HasValue ? newTotalChapters.Value : DBNull.Value);
-            updateCmd.Parameters.AddWithValue("$now", now2);
-        }
-
+        updateCmd.CommandText = $"""
+            UPDATE {TableName}
+            SET chapters_read = $chaptersRead,
+                total_chapters = $totalChapters,
+                status = $status,
+                completed_at = $completedAt,
+                updated_at = $updatedAt
+            WHERE id = $id;
+            """;
+        updateCmd.Parameters.AddWithValue("$id", existing.Id);
+        updateCmd.Parameters.AddWithValue("$chaptersRead", progress.ChaptersRead);
+        updateCmd.Parameters.AddWithValue("$totalChapters", progress.TotalChapters.HasValue ? progress.TotalChapters.Value : DBNull.Value);
+        updateCmd.Parameters.AddWithValue("$status", StatusToString(progress.Status));
+        updateCmd.Parameters.AddWithValue("$completedAt", progress.CompletedAt.HasValue ? progress.CompletedAt.Value.UtcDateTime.ToString("O") : DBNull.Value);
+        updateCmd.Parameters.AddWithValue("$updatedAt", now.UtcDateTime.ToString("O"));
         await updateCmd.ExecuteNonQueryAsync(cancellationToken);
     }
 

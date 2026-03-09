@@ -356,86 +356,43 @@ public sealed class SqliteAnimeListStore : IAnimeListStore
         await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         var existing = await GetByTitleInternalAsync(connection, animeTitle, cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var progress = ListProgressTracker.ComputeAnimeUpdate(existing, episodeNumber, totalEpisodes, now);
 
         if (existing is null)
         {
-            // Auto-add to list as "watching"
             await using var insertCmd = connection.CreateCommand();
-            var now = DateTimeOffset.UtcNow.UtcDateTime.ToString("O");
             insertCmd.CommandText = $"""
                 INSERT INTO {TableName} (anime_id, anime_title, status, total_episodes, episodes_watched, score, notes, added_at, updated_at, completed_at)
-                VALUES ($animeId, $animeTitle, 'watching', $totalEpisodes, $episodesWatched, NULL, NULL, $now, $now, NULL);
+                VALUES ($animeId, $animeTitle, $status, $totalEpisodes, $episodesWatched, NULL, NULL, $now, $now, $completedAt);
                 """;
             insertCmd.Parameters.AddWithValue("$animeId", animeId);
             insertCmd.Parameters.AddWithValue("$animeTitle", animeTitle);
-            insertCmd.Parameters.AddWithValue("$totalEpisodes", totalEpisodes.HasValue ? totalEpisodes.Value : DBNull.Value);
-            insertCmd.Parameters.AddWithValue("$episodesWatched", episodeNumber);
-            insertCmd.Parameters.AddWithValue("$now", now);
+            insertCmd.Parameters.AddWithValue("$status", StatusToString(progress.Status));
+            insertCmd.Parameters.AddWithValue("$totalEpisodes", progress.TotalEpisodes.HasValue ? progress.TotalEpisodes.Value : DBNull.Value);
+            insertCmd.Parameters.AddWithValue("$episodesWatched", progress.EpisodesWatched);
+            insertCmd.Parameters.AddWithValue("$now", now.UtcDateTime.ToString("O"));
+            insertCmd.Parameters.AddWithValue("$completedAt", progress.CompletedAt.HasValue ? progress.CompletedAt.Value.UtcDateTime.ToString("O") : DBNull.Value);
             await insertCmd.ExecuteNonQueryAsync(cancellationToken);
             return;
         }
 
-        // Update episodes watched if this is a higher episode
-        var newEpisodesWatched = Math.Max(existing.EpisodesWatched, episodeNumber);
-        var newTotalEpisodes = totalEpisodes ?? existing.TotalEpisodes;
-        var now2 = DateTimeOffset.UtcNow.UtcDateTime.ToString("O");
-
-        // Determine status transitions:
-        // - Plan to Watch / On Hold → Watching (user started/resumed watching)
-        // - Watching → Completed (user finished all episodes)
-        var shouldStartWatching = existing.Status is AnimeWatchStatus.PlanToWatch or AnimeWatchStatus.OnHold;
-        var shouldComplete = newTotalEpisodes.HasValue && 
-                            newEpisodesWatched >= newTotalEpisodes.Value && 
-                            (existing.Status == AnimeWatchStatus.Watching || shouldStartWatching);
-
         await using var updateCmd = connection.CreateCommand();
-        if (shouldComplete)
-        {
-            updateCmd.CommandText = $"""
-                UPDATE {TableName}
-                SET episodes_watched = $episodesWatched, 
-                    total_episodes = $totalEpisodes,
-                    status = 'completed',
-                    completed_at = $now,
-                    updated_at = $now
-                WHERE id = $id;
-                """;
-            updateCmd.Parameters.AddWithValue("$id", existing.Id);
-            updateCmd.Parameters.AddWithValue("$episodesWatched", newEpisodesWatched);
-            updateCmd.Parameters.AddWithValue("$totalEpisodes", newTotalEpisodes.HasValue ? newTotalEpisodes.Value : DBNull.Value);
-            updateCmd.Parameters.AddWithValue("$now", now2);
-        }
-        else if (shouldStartWatching)
-        {
-            // Transition from Plan to Watch / On Hold → Watching
-            updateCmd.CommandText = $"""
-                UPDATE {TableName}
-                SET episodes_watched = $episodesWatched, 
-                    total_episodes = COALESCE($totalEpisodes, total_episodes),
-                    status = 'watching',
-                    updated_at = $now
-                WHERE id = $id;
-                """;
-            updateCmd.Parameters.AddWithValue("$id", existing.Id);
-            updateCmd.Parameters.AddWithValue("$episodesWatched", newEpisodesWatched);
-            updateCmd.Parameters.AddWithValue("$totalEpisodes", newTotalEpisodes.HasValue ? newTotalEpisodes.Value : DBNull.Value);
-            updateCmd.Parameters.AddWithValue("$now", now2);
-        }
-        else
-        {
-            updateCmd.CommandText = $"""
-                UPDATE {TableName}
-                SET episodes_watched = $episodesWatched, 
-                    total_episodes = COALESCE($totalEpisodes, total_episodes),
-                    updated_at = $now
-                WHERE id = $id;
-                """;
-            updateCmd.Parameters.AddWithValue("$id", existing.Id);
-            updateCmd.Parameters.AddWithValue("$episodesWatched", newEpisodesWatched);
-            updateCmd.Parameters.AddWithValue("$totalEpisodes", newTotalEpisodes.HasValue ? newTotalEpisodes.Value : DBNull.Value);
-            updateCmd.Parameters.AddWithValue("$now", now2);
-        }
-
+        updateCmd.CommandText = $"""
+            UPDATE {TableName}
+            SET episodes_watched = $episodesWatched,
+                total_episodes = $totalEpisodes,
+                status = $status,
+                completed_at = $completedAt,
+                updated_at = $updatedAt
+            WHERE id = $id;
+            """;
+        updateCmd.Parameters.AddWithValue("$id", existing.Id);
+        updateCmd.Parameters.AddWithValue("$episodesWatched", progress.EpisodesWatched);
+        updateCmd.Parameters.AddWithValue("$totalEpisodes", progress.TotalEpisodes.HasValue ? progress.TotalEpisodes.Value : DBNull.Value);
+        updateCmd.Parameters.AddWithValue("$status", StatusToString(progress.Status));
+        updateCmd.Parameters.AddWithValue("$completedAt", progress.CompletedAt.HasValue ? progress.CompletedAt.Value.UtcDateTime.ToString("O") : DBNull.Value);
+        updateCmd.Parameters.AddWithValue("$updatedAt", now.UtcDateTime.ToString("O"));
         await updateCmd.ExecuteNonQueryAsync(cancellationToken);
     }
 

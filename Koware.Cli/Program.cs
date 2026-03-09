@@ -5829,10 +5829,11 @@ static async Task<int> ReadSelectedMangaAsync(
     try
     {
         var mangaList = services.GetRequiredService<IMangaListStore>();
+        var trackedChapter = ListProgressTracker.ResolveRecordedChapterNumber(selectedChapter.Number, readResult.LastChapter);
         await mangaList.RecordChapterReadAsync(
             selectedManga.Id.Value,
             selectedManga.Title,
-            selectedChapter.Number,
+            trackedChapter,
             chapters.Count,
             cancellationToken);
     }
@@ -7080,10 +7081,11 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
     {
         var mangaList = services.GetRequiredService<IMangaListStore>();
         var totalChapters = chapters.Count;
+        var trackedChapter = ListProgressTracker.ResolveRecordedChapterNumber(selectedChapter.Number, readResult.LastChapter);
         await mangaList.RecordChapterReadAsync(
             selectedManga.Id.Value,
             selectedManga.Title,
-            selectedChapter.Number,
+            trackedChapter,
             totalChapters,
             cancellationToken);
     }
