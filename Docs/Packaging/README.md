@@ -1,6 +1,6 @@
 # Koware Packaging Guide
 
-This file provides detailed instructions for packaging Koware for distribution on Windows and macOS.
+This file provides detailed instructions for packaging Koware for distribution on Windows and macOS. 
 
 ## Table of Contents
 
