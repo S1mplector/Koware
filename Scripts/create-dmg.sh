@@ -1,16 +1,16 @@
 #!/bin/bash
 # Author: Ilgaz Mehmetoğlu
-# Summary: Creates a styled DMG installer for Koware using only native macOS tools.
+# Summary: Low-level helper that turns an existing staging directory into a styled DMG.
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/lib/macos-packaging.sh"
 
 # Configuration
 APP_NAME="Koware"
-APP_VERSION=$(grep -oP '(?<=<Version>)[^<]+' "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj" 2>/dev/null || \
-              sed -n 's/.*<Version>\(.*\)<\/Version>.*/\1/p' "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj")
+APP_VERSION="$(macos_read_app_version "$REPO_ROOT")"
 RUNTIME="${RUNTIME:-osx-arm64}"
 SOURCE_DIR="${SOURCE_DIR:-$REPO_ROOT/publish/macos/dmg-staging}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/publish}"
@@ -24,7 +24,7 @@ err()  { echo -e "\033[31m[ERR ]\033[0m $1"; exit 1; }
 
 # Check if source exists
 if [ ! -d "$SOURCE_DIR" ]; then
-    err "Source directory not found: $SOURCE_DIR\nRun publish-macos.sh first."
+    err "Source directory not found: $SOURCE_DIR"
 fi
 
 info "Creating DMG for Koware v$APP_VERSION"

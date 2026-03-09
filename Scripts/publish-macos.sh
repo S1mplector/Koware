@@ -12,89 +12,19 @@ COPY_TO_DESKTOP="${COPY_TO_DESKTOP:-false}"
 COPY_TO_REPO_ROOT="${COPY_TO_REPO_ROOT:-false}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/lib/macos-packaging.sh"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/publish/macos}"
 DMG_OUTPUT_DIR="${DMG_OUTPUT_DIR:-$REPO_ROOT/publish}"
 
 # App metadata
 APP_NAME="Koware"
-APP_VERSION=$(sed -n 's/.*<Version>\(.*\)<\/Version>.*/\1/p' "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj")
+APP_VERSION="$(macos_read_app_version "$REPO_ROOT")"
 VOLUME_NAME="Koware Installer"
 
 # Colors for output
 info() { echo -e "\033[36m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 err()  { echo -e "\033[31m[ERR ]\033[0m $1"; exit 1; }
-
-publish_bundle() {
-    local rid="$1"
-    local target_root="$2"
-    local cli_proj="$REPO_ROOT/Koware.Cli/Koware.Cli.csproj"
-    local reader_proj="$REPO_ROOT/Koware.Reader/Koware.Reader.csproj"
-    local cli_dir="$target_root/$rid"
-    local reader_dir="$cli_dir/reader"
-
-    mkdir -p "$cli_dir" "$reader_dir"
-
-    local cli_args=(
-        publish "$cli_proj"
-        -c "$CONFIGURATION"
-        -r "$rid"
-        -o "$cli_dir"
-    )
-
-    local reader_args=(
-        publish "$reader_proj"
-        -c "$CONFIGURATION"
-        -r "$rid"
-        -o "$reader_dir"
-    )
-
-    if [ "$SELF_CONTAINED" = "true" ]; then
-        cli_args+=("--self-contained" "true")
-        reader_args+=("--self-contained" "true")
-    else
-        cli_args+=("--self-contained" "false")
-        reader_args+=("--self-contained" "false")
-    fi
-
-    info "Publishing CLI bundle for $rid"
-    echo "dotnet ${cli_args[*]}"
-    dotnet "${cli_args[@]}"
-
-    info "Publishing reader bundle for $rid"
-    echo "dotnet ${reader_args[*]}"
-    dotnet "${reader_args[@]}"
-}
-
-write_portable_launcher() {
-    local output_path="$1"
-
-    cat > "$output_path" << 'EOF'
-#!/bin/bash
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_ROOT="$SCRIPT_DIR/lib/koware"
-ARCH="$(uname -m)"
-
-case "$ARCH" in
-    arm64|aarch64) PRIMARY_RID="osx-arm64"; FALLBACK_RID="osx-x64" ;;
-    x86_64) PRIMARY_RID="osx-x64"; FALLBACK_RID="osx-arm64" ;;
-    *) PRIMARY_RID=""; FALLBACK_RID="" ;;
-esac
-
-for rid in "$PRIMARY_RID" "$FALLBACK_RID"; do
-    if [ -n "$rid" ] && [ -x "$APP_ROOT/$rid/Koware.Cli" ]; then
-        exec "$APP_ROOT/$rid/Koware.Cli" "$@"
-    fi
-done
-
-echo "No compatible Koware runtime bundle found in $APP_ROOT." >&2
-exit 1
-EOF
-
-    chmod +x "$output_path"
-}
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -126,10 +56,7 @@ info "  Configuration: $CONFIGURATION"
 info "  Self-contained: $SELF_CONTAINED"
 info "  Version: $APP_VERSION"
 
-TARGET_RIDS=("$RUNTIME")
-if [[ "$RUNTIME" == "universal" ]]; then
-    TARGET_RIDS=("osx-arm64" "osx-x64")
-fi
+macos_set_target_rids "$RUNTIME"
 
 DMG_NAME="${APP_NAME}-${APP_VERSION}-${RUNTIME}.dmg"
 BUNDLE_ROOT="$OUTPUT_DIR/bundle"
@@ -142,14 +69,15 @@ fi
 mkdir -p "$OUTPUT_DIR"
 
 for rid in "${TARGET_RIDS[@]}"; do
-    publish_bundle "$rid" "$BUNDLE_ROOT"
+    info "Publishing CLI bundle for $rid"
+    macos_publish_runtime_bundle "$REPO_ROOT" "$CONFIGURATION" "$rid" "$BUNDLE_ROOT" "$SELF_CONTAINED"
 done
 
 DMG_STAGING="$OUTPUT_DIR/dmg-staging"
 mkdir -p "$DMG_STAGING/lib"
 cp -R "$BUNDLE_ROOT" "$DMG_STAGING/lib/koware"
 
-write_portable_launcher "$DMG_STAGING/koware"
+macos_write_runtime_launcher "$DMG_STAGING/koware" "lib/koware" "relative_to_script"
 
 cat > "$DMG_STAGING/install.sh" << 'EOF'
 #!/bin/bash
@@ -160,31 +88,7 @@ SOURCE_ROOT="$SCRIPT_DIR/lib/koware"
 INSTALL_ROOT="/usr/local/lib/koware"
 BIN_DIR="/usr/local/bin"
 TEMP_WRAPPER="$(mktemp)"
-
-cat > "$TEMP_WRAPPER" << 'WRAPPER'
-#!/bin/bash
-set -euo pipefail
-
-APP_ROOT="/usr/local/lib/koware"
-ARCH="$(uname -m)"
-
-case "$ARCH" in
-    arm64|aarch64) PRIMARY_RID="osx-arm64"; FALLBACK_RID="osx-x64" ;;
-    x86_64) PRIMARY_RID="osx-x64"; FALLBACK_RID="osx-arm64" ;;
-    *) PRIMARY_RID=""; FALLBACK_RID="" ;;
-esac
-
-for rid in "$PRIMARY_RID" "$FALLBACK_RID"; do
-    if [ -n "$rid" ] && [ -x "$APP_ROOT/$rid/Koware.Cli" ]; then
-        exec "$APP_ROOT/$rid/Koware.Cli" "$@"
-    fi
-done
-
-echo "No compatible Koware runtime bundle found in $APP_ROOT." >&2
-exit 1
-WRAPPER
-
-chmod +x "$TEMP_WRAPPER"
+macos_write_runtime_launcher "$TEMP_WRAPPER" "/usr/local/lib/koware"
 
 copy_payload() {
     mkdir -p "$INSTALL_ROOT" "$BIN_DIR"
@@ -244,14 +148,7 @@ info "Creating DMG: $DMG_NAME"
 mkdir -p "$DMG_OUTPUT_DIR"
 DMG_PATH="$DMG_OUTPUT_DIR/$DMG_NAME"
 
-[ -f "$DMG_PATH" ] && rm -f "$DMG_PATH"
-
-hdiutil create \
-    -volname "$VOLUME_NAME" \
-    -srcfolder "$DMG_STAGING" \
-    -ov \
-    -format UDZO \
-    "$DMG_PATH"
+macos_create_udzo_dmg "$VOLUME_NAME" "$DMG_STAGING" "$DMG_PATH"
 
 info "DMG created: $DMG_PATH"
 

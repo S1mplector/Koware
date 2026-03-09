@@ -6,12 +6,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/lib/macos-packaging.sh"
 
 # Configuration
 RUNTIME="${RUNTIME:-osx-arm64}"
 CONFIGURATION="${CONFIGURATION:-Release}"
 APP_NAME="Koware"
-APP_VERSION=$(sed -n 's/.*<Version>\(.*\)<\/Version>.*/\1/p' "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj")
+APP_VERSION="$(macos_read_app_version "$REPO_ROOT")"
 PKG_IDENTIFIER="com.koware.cli"
 INSTALL_LOCATION="/usr/local"
 COPY_TO_DESKTOP="${COPY_TO_DESKTOP:-false}"
@@ -27,39 +28,17 @@ info() { echo -e "\033[36m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 err()  { echo -e "\033[31m[ERR ]\033[0m $1"; exit 1; }
 
-publish_bundle() {
-    local rid="$1"
-    local app_dir="$PKG_ROOT/lib/koware/$rid"
-    local reader_dir="$app_dir/reader"
-    local cli_proj="$REPO_ROOT/Koware.Cli/Koware.Cli.csproj"
-    local reader_proj="$REPO_ROOT/Koware.Reader/Koware.Reader.csproj"
-
-    mkdir -p "$app_dir" "$reader_dir"
-
-    info "Publishing CLI bundle for $rid"
-    dotnet publish "$cli_proj" \
-        -c "$CONFIGURATION" \
-        -r "$rid" \
-        -o "$app_dir" \
-        --self-contained true
-
-    info "Publishing reader bundle for $rid"
-    dotnet publish "$reader_proj" \
-        -c "$CONFIGURATION" \
-        -r "$rid" \
-        -o "$reader_dir" \
-        --self-contained true
-}
-
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         --runtime) RUNTIME="$2"; shift 2 ;;
+        --config) CONFIGURATION="$2"; shift 2 ;;
         --copy-to-desktop) COPY_TO_DESKTOP="true"; shift ;;
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
             echo "  --runtime <rid>       Runtime identifier (osx-arm64, osx-x64, universal). Default: osx-arm64"
+            echo "  --config <cfg>        Build configuration (Release, Debug). Default: Release"
             echo "  --copy-to-desktop     Copy the PKG to ~/Desktop after build"
             exit 0
             ;;
@@ -78,38 +57,14 @@ mkdir -p "$PKG_SCRIPTS"
 mkdir -p "$PKG_RESOURCES"
 mkdir -p "$OUTPUT_DIR"
 
-TARGET_RIDS=("$RUNTIME")
-if [[ "$RUNTIME" == "universal" ]]; then
-    TARGET_RIDS=("osx-arm64" "osx-x64")
-fi
+macos_set_target_rids "$RUNTIME"
 
 for rid in "${TARGET_RIDS[@]}"; do
-    publish_bundle "$rid"
+    info "Publishing CLI bundle for $rid"
+    macos_publish_runtime_bundle "$REPO_ROOT" "$CONFIGURATION" "$rid" "$PKG_ROOT/lib/koware"
 done
 
-cat > "$PKG_ROOT/bin/koware" << 'EOF'
-#!/bin/bash
-set -euo pipefail
-
-APP_ROOT="/usr/local/lib/koware"
-ARCH="$(uname -m)"
-
-case "$ARCH" in
-    arm64|aarch64) PRIMARY_RID="osx-arm64"; FALLBACK_RID="osx-x64" ;;
-    x86_64) PRIMARY_RID="osx-x64"; FALLBACK_RID="osx-arm64" ;;
-    *) PRIMARY_RID=""; FALLBACK_RID="" ;;
-esac
-
-for rid in "$PRIMARY_RID" "$FALLBACK_RID"; do
-    if [ -n "$rid" ] && [ -x "$APP_ROOT/$rid/Koware.Cli" ]; then
-        exec "$APP_ROOT/$rid/Koware.Cli" "$@"
-    fi
-done
-
-echo "No compatible Koware runtime bundle found in $APP_ROOT." >&2
-exit 1
-EOF
-chmod +x "$PKG_ROOT/bin/koware"
+macos_write_runtime_launcher "$PKG_ROOT/bin/koware" "/usr/local/lib/koware"
 
 cat > "$PKG_SCRIPTS/postinstall" << 'EOF'
 #!/bin/bash

@@ -6,11 +6,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/lib/macos-packaging.sh"
 
 # Configuration
 RUNTIME="${RUNTIME:-osx-arm64}"
 CONFIGURATION="${CONFIGURATION:-Release}"
-APP_VERSION=$(sed -n 's/.*<Version>\(.*\)<\/Version>.*/\1/p' "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj")
+APP_VERSION="$(macos_read_app_version "$REPO_ROOT")"
 COPY_TO_DESKTOP="${COPY_TO_DESKTOP:-false}"
 
 info() { echo -e "\033[36m[INFO]\033[0m $1"; }
@@ -47,11 +48,13 @@ warn_cmd "SetFile" "Xcode Command Line Tools (for DMG icon)" >/dev/null || true
 while [[ $# -gt 0 ]]; do
     case $1 in
         --runtime) RUNTIME="$2"; shift 2 ;;
+        --config) CONFIGURATION="$2"; shift 2 ;;
         --copy-to-desktop) COPY_TO_DESKTOP="true"; shift ;;
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
             echo "  --runtime <rid>       Runtime identifier (osx-arm64, osx-x64, universal). Default: osx-arm64"
+            echo "  --config <cfg>        Build configuration (Release, Debug). Default: Release"
             echo "  --copy-to-desktop     Copy the DMG to ~/Desktop after build"
             exit 0
             ;;
@@ -72,10 +75,7 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 mkdir -p "$OUTPUT_DIR"
 
-TARGET_RIDS=("$RUNTIME")
-if [[ "$RUNTIME" == "universal" ]]; then
-    TARGET_RIDS=("osx-arm64" "osx-x64")
-fi
+macos_set_target_rids "$RUNTIME"
 
 publish_app() {
     local project="$1"
@@ -88,21 +88,10 @@ publish_app() {
     if [[ "$RUNTIME" == "universal" ]]; then
         for rid in "${TARGET_RIDS[@]}"; do
             local rid_dir="$output_dir/$rid"
-            mkdir -p "$rid_dir"
-            dotnet publish "$project" \
-                -c "$CONFIGURATION" \
-                -r "$rid" \
-                -o "$rid_dir" \
-                --self-contained true
-            chmod +x "$rid_dir/$exe_name" 2>/dev/null || true
+            macos_publish_project "$project" "$CONFIGURATION" "$rid" "$rid_dir" "true" "$exe_name"
         done
     else
-        dotnet publish "$project" \
-            -c "$CONFIGURATION" \
-            -r "$RUNTIME" \
-            -o "$output_dir" \
-            --self-contained true
-        chmod +x "$output_dir/$exe_name" 2>/dev/null || true
+        macos_publish_project "$project" "$CONFIGURATION" "$RUNTIME" "$output_dir" "true" "$exe_name"
     fi
 }
 
@@ -113,23 +102,7 @@ publish_cli_bundle() {
     mkdir -p "$output_dir"
 
     for rid in "${TARGET_RIDS[@]}"; do
-        local cli_dir="$output_dir/$rid"
-        local reader_dir="$cli_dir/reader"
-        mkdir -p "$cli_dir" "$reader_dir"
-
-        dotnet publish "$REPO_ROOT/Koware.Cli/Koware.Cli.csproj" \
-            -c "$CONFIGURATION" \
-            -r "$rid" \
-            -o "$cli_dir" \
-            --self-contained true
-        chmod +x "$cli_dir/Koware.Cli" 2>/dev/null || true
-
-        dotnet publish "$REPO_ROOT/Koware.Reader/Koware.Reader.csproj" \
-            -c "$CONFIGURATION" \
-            -r "$rid" \
-            -o "$reader_dir" \
-            --self-contained true
-        chmod +x "$reader_dir/Koware.Reader" 2>/dev/null || true
+        macos_publish_runtime_bundle "$REPO_ROOT" "$CONFIGURATION" "$rid" "$output_dir"
     done
 }
 
@@ -228,6 +201,7 @@ EOF
 # Copy the CLI runtime bundle to Resources
 mkdir -p "$APP_BUNDLE/Contents/Resources/cli"
 cp -R "$PUBLISH_DIR"/. "$APP_BUNDLE/Contents/Resources/cli/"
+macos_write_runtime_launcher "$APP_BUNDLE/Contents/Resources/koware-wrapper" "/usr/local/lib/koware"
 
 # Copy Player and Reader to Resources
 if [[ "$RUNTIME" == "universal" ]]; then
@@ -497,28 +471,7 @@ cp -R "$CLI_DIR"/. "$LIB_INSTALL_ROOT/$CLI_RID/"
 chmod +x "$LIB_INSTALL_ROOT/$CLI_RID/Koware.Cli" 2>/dev/null || true
 chmod +x "$LIB_INSTALL_ROOT/$CLI_RID/reader/Koware.Reader" 2>/dev/null || true
 
-cat > "$INSTALL_DIR/koware" << 'WRAPPER'
-#!/bin/bash
-set -euo pipefail
-
-APP_ROOT="/usr/local/lib/koware"
-ARCH="$(uname -m)"
-
-case "$ARCH" in
-    arm64|aarch64) PRIMARY_RID="osx-arm64"; FALLBACK_RID="osx-x64" ;;
-    x86_64) PRIMARY_RID="osx-x64"; FALLBACK_RID="osx-arm64" ;;
-    *) PRIMARY_RID=""; FALLBACK_RID="" ;;
-esac
-
-for rid in "$PRIMARY_RID" "$FALLBACK_RID"; do
-    if [ -n "$rid" ] && [ -x "$APP_ROOT/$rid/Koware.Cli" ]; then
-        exec "$APP_ROOT/$rid/Koware.Cli" "$@"
-    fi
-done
-
-echo "No compatible Koware runtime bundle found in $APP_ROOT." >&2
-exit 1
-WRAPPER
+cp "$RESOURCES_DIR/koware-wrapper" "$INSTALL_DIR/koware"
 chmod +x "$INSTALL_DIR/koware"
 
 # 2. Create Koware.app bundle in /Applications
@@ -562,30 +515,8 @@ if [ -f "$RESOURCES_DIR/AppIcon.icns" ]; then
 fi
 
 # Create CLI launcher inside app bundle
-cat > "$APP_DIR/Contents/MacOS/koware" << 'CLIWRAPPER'
-#!/bin/bash
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_ROOT="$(cd "$SCRIPT_DIR/../Resources/cli" && pwd)"
-ARCH="$(uname -m)"
-
-case "$ARCH" in
-    arm64|aarch64) PRIMARY_RID="osx-arm64"; FALLBACK_RID="osx-x64" ;;
-    x86_64) PRIMARY_RID="osx-x64"; FALLBACK_RID="osx-arm64" ;;
-    *) PRIMARY_RID=""; FALLBACK_RID="" ;;
-esac
-
-for rid in "$PRIMARY_RID" "$FALLBACK_RID"; do
-    if [ -n "$rid" ] && [ -x "$APP_ROOT/$rid/Koware.Cli" ]; then
-        exec "$APP_ROOT/$rid/Koware.Cli" "$@"
-    fi
-done
-
-echo "No compatible Koware runtime bundle found in $APP_ROOT." >&2
-exit 1
-CLIWRAPPER
-chmod +x "$APP_DIR/Contents/MacOS/koware"
+cp "$RESOURCES_DIR/koware-wrapper" "$APP_DIR/Contents/Resources/koware-wrapper"
+macos_write_runtime_launcher "$APP_DIR/Contents/MacOS/koware" "../Resources/cli" "relative_to_script"
 
 # Create Info.plist
 cat > "$APP_DIR/Contents/Info.plist" << PLIST
@@ -764,14 +695,7 @@ fi
 
 # Create DMG
 DMG_PATH="$OUTPUT_DIR/$DMG_NAME"
-rm -f "$DMG_PATH"
-
-hdiutil create \
-    -volname "Koware Installer" \
-    -srcfolder "$DMG_STAGING" \
-    -ov \
-    -format UDZO \
-    "$DMG_PATH"
+macos_create_udzo_dmg "Koware Installer" "$DMG_STAGING" "$DMG_PATH"
 
 info "DMG created: $DMG_PATH"
 
