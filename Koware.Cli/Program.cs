@@ -2471,7 +2471,7 @@ static async Task<int> HandleContinueMangaAsync(string[] args, IServiceProvider 
     var readArgs = new List<string> { 
         "read", entry.MangaTitle, 
         "--chapter", targetChapter.ToString(System.Globalization.CultureInfo.InvariantCulture), 
-        "--index", "1", 
+        "--manga-id", entry.MangaId,
         "--non-interactive",
         "--start-page", startPage.ToString()
     };
@@ -2965,7 +2965,7 @@ static async Task<int> HandleMangaHistoryAsync(string[] args, IServiceProvider s
                 var readArgs = new List<string> { 
                     "read", entry.MangaTitle, 
                     "--chapter", chapter.ToString(System.Globalization.CultureInfo.InvariantCulture), 
-                    "--index", "1", 
+                    "--manga-id", entry.MangaId,
                     "--non-interactive"
                 };
                 var cliDefaults = services.GetRequiredService<IOptions<DefaultCliOptions>>().Value;
@@ -3631,8 +3631,8 @@ static async Task<int> HandleMangaListAsync(string[] args, IServiceProvider serv
             {
                 readArgs.AddRange(new[] { "--start-page", startPage.ToString() });
             }
-            readArgs.Add("--index");
-            readArgs.Add("1");
+            readArgs.Add("--manga-id");
+            readArgs.Add(entry.MangaId);
             readArgs.Add("--non-interactive");
             
             await HandleReadAsync(readArgs.ToArray(), svc, log, defaults, ct);
@@ -4011,6 +4011,81 @@ static string Truncate(string value, int max)
 {
     if (string.IsNullOrEmpty(value) || value.Length <= max) return value;
     return value[..(max - 1)] + "…";
+}
+
+static bool MangaIdsMatch(string? left, string? right)
+{
+    if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+    {
+        return false;
+    }
+
+    if (string.Equals(left, right, StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    static string CoreId(string id)
+    {
+        var idx = id.LastIndexOf(':');
+        return idx >= 0 && idx + 1 < id.Length ? id[(idx + 1)..] : id;
+    }
+
+    return string.Equals(CoreId(left), CoreId(right), StringComparison.OrdinalIgnoreCase);
+}
+
+static Manga BuildSyntheticMangaFromId(string mangaId, string? title = null)
+{
+    var effectiveTitle = string.IsNullOrWhiteSpace(title) ? mangaId : title.Trim();
+    var coreId = mangaId;
+    var idx = mangaId.LastIndexOf(':');
+    if (idx >= 0 && idx + 1 < mangaId.Length)
+    {
+        coreId = mangaId[(idx + 1)..];
+    }
+
+    Uri detailPage;
+    if (mangaId.StartsWith("nhentai:", StringComparison.OrdinalIgnoreCase))
+    {
+        detailPage = new Uri($"https://nhentai.net/g/{Uri.EscapeDataString(coreId)}/");
+    }
+    else
+    {
+        detailPage = new Uri($"https://allmanga.to/manga/{Uri.EscapeDataString(coreId)}");
+    }
+
+    return new Manga(
+        new MangaId(mangaId),
+        effectiveTitle,
+        synopsis: null,
+        coverImage: null,
+        detailPage,
+        chapters: Array.Empty<Chapter>());
+}
+
+static string BuildSyntheticChapterId(string mangaId, float chapterNumber)
+{
+    string? providerSlug = null;
+    var coreMangaId = mangaId;
+    var idx = mangaId.IndexOf(':');
+    if (idx > 0)
+    {
+        var possibleSlug = mangaId[..idx];
+        if (!possibleSlug.All(char.IsDigit))
+        {
+            providerSlug = possibleSlug.ToLowerInvariant();
+            if (idx + 1 < mangaId.Length)
+            {
+                coreMangaId = mangaId[(idx + 1)..];
+            }
+        }
+    }
+
+    var chapterRaw = chapterNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    var coreChapterId = $"{coreMangaId}:ch-{chapterRaw}";
+    return string.IsNullOrWhiteSpace(providerSlug)
+        ? coreChapterId
+        : $"{providerSlug}:{coreChapterId}";
 }
 
 /// <summary>
@@ -6834,6 +6909,7 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
     var queryParts = new List<string>();
     float? chapterNumber = null;
     int? preferredIndex = null;
+    string? preferredMangaId = null;
     var nonInteractive = false;
     int startPage = 1;
 
@@ -6862,6 +6938,13 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
             }
             logger.LogWarning("--index must be a positive integer.");
             return 1;
+        }
+
+        if (arg.Equals("--manga-id", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            preferredMangaId = args[i + 1];
+            i++;
+            continue;
         }
 
         if (arg.Equals("--start-page", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
@@ -6908,7 +6991,7 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
         throw;
     }
 
-    if (results.Count == 0)
+    if (results.Count == 0 && string.IsNullOrWhiteSpace(preferredMangaId))
     {
         logger.LogWarning("No manga found for query: {Query}", query);
         return 1;
@@ -6916,7 +6999,19 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
 
     // Select manga
     Manga selectedManga;
-    if (preferredIndex.HasValue)
+    var selectedById = !string.IsNullOrWhiteSpace(preferredMangaId)
+        ? results.FirstOrDefault(m => MangaIdsMatch(m.Id.Value, preferredMangaId))
+        : null;
+
+    if (selectedById is not null)
+    {
+        selectedManga = selectedById;
+    }
+    else if (!string.IsNullOrWhiteSpace(preferredMangaId))
+    {
+        selectedManga = BuildSyntheticMangaFromId(preferredMangaId, query);
+    }
+    else if (preferredIndex.HasValue)
     {
         var idx = preferredIndex.Value - 1;
         if (idx < 0 || idx >= results.Count)
@@ -6971,8 +7066,23 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
 
     if (chapters.Count == 0)
     {
-        logger.LogWarning("No chapters found for {Title}.", selectedManga.Title);
-        return 1;
+        if (!string.IsNullOrWhiteSpace(preferredMangaId) && chapterNumber.HasValue)
+        {
+            // Continue/list flow can still proceed with a concrete chapter id,
+            // even if provider chapter listing temporarily fails.
+            var syntheticId = BuildSyntheticChapterId(preferredMangaId, chapterNumber.Value);
+            var syntheticChapter = new Chapter(
+                new ChapterId(syntheticId),
+                $"Chapter {chapterNumber.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+                chapterNumber.Value,
+                selectedManga.DetailPage);
+            chapters = new[] { syntheticChapter };
+        }
+        else
+        {
+            logger.LogWarning("No chapters found for {Title}.", selectedManga.Title);
+            return 1;
+        }
     }
 
     // Select chapter
@@ -8561,9 +8671,18 @@ static async Task<(float? ChapterNumber, int StartPage)> ResolveNextChapterAsync
     try
     {
         var searchResults = await catalog.SearchAsync(entry.MangaTitle, cancellationToken);
-        var manga = searchResults.FirstOrDefault(m => 
-            m.Title.Equals(entry.MangaTitle, StringComparison.OrdinalIgnoreCase)) 
-            ?? searchResults.FirstOrDefault();
+        Manga? manga;
+        if (!string.IsNullOrWhiteSpace(entry.MangaId))
+        {
+            manga = searchResults.FirstOrDefault(m => MangaIdsMatch(m.Id.Value, entry.MangaId))
+                ?? searchResults.FirstOrDefault(m => m.Title.Equals(entry.MangaTitle, StringComparison.OrdinalIgnoreCase))
+                ?? BuildSyntheticMangaFromId(entry.MangaId, entry.MangaTitle);
+        }
+        else
+        {
+            manga = searchResults.FirstOrDefault(m => m.Title.Equals(entry.MangaTitle, StringComparison.OrdinalIgnoreCase))
+                ?? searchResults.FirstOrDefault();
+        }
         
         if (manga is null)
         {
