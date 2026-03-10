@@ -2169,8 +2169,13 @@ static async Task<int> HandleRemoteManifestAutoconfigAsync(string? providerName,
         return 1;
     }
     
+    var hasListFlag = listOnly
+        || providerName?.Equals("--list", StringComparison.OrdinalIgnoreCase) == true;
+    var configureAllProfiles = providerName?.Equals("--all", StringComparison.OrdinalIgnoreCase) == true;
+    var configureDefaultsOnly = providerName?.Equals("--defaults", StringComparison.OrdinalIgnoreCase) == true;
+
     // List mode
-    if (listOnly || providerName == "--list")
+    if (hasListFlag)
     {
         Console.WriteLine();
         Console.WriteLine("Available remote providers:");
@@ -2187,25 +2192,53 @@ static async Task<int> HandleRemoteManifestAutoconfigAsync(string? providerName,
         }
         Console.WriteLine();
         Console.WriteLine("Notes:");
-        Console.WriteLine("  - Running 'koware provider autoconfig' configures default profiles only.");
-        Console.WriteLine("  - Use specific keys (left column) to apply optional profiles.");
+        Console.WriteLine("  - Running 'koware provider autoconfig' configures one primary profile per provider family.");
+        Console.WriteLine("  - Use '--all' to configure every profile/variant, or '--defaults' for legacy default-only behavior.");
+        Console.WriteLine("  - Use specific keys (left column) to apply a single profile.");
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  koware provider autoconfig <name>           Configure from remote manifest");
-        Console.WriteLine("  koware provider autoconfig --all            Configure every profile (default + optional)");
+        Console.WriteLine("  koware provider autoconfig --all            Configure every profile/variant");
+        Console.WriteLine("  koware provider autoconfig --defaults       Configure default=true profiles only");
         Console.WriteLine("  koware provider autoconfig <url>            Analyze website and generate config");
         return 0;
     }
     
     // Determine which providers to configure
-    var toConfig = providerName?.Equals("--all", StringComparison.OrdinalIgnoreCase) == true
+    var toConfig = configureAllProfiles
         ? providers.Select(p => p.Key).ToList()
-        : string.IsNullOrWhiteSpace(providerName)
+        : configureDefaultsOnly
             ? providers
                 .Where(p => IsDefaultRemoteProvider(p.Value as JsonObject))
                 .Select(p => p.Key)
                 .ToList()
-            : new List<string> { providerName.ToLowerInvariant() };
+        : string.IsNullOrWhiteSpace(providerName)
+            ? SelectPrimaryRemoteProviders(providers)
+            : providerName.StartsWith("--", StringComparison.Ordinal)
+                ? new List<string>()
+                : new List<string> { providerName.ToLowerInvariant() };
+
+    if (string.IsNullOrWhiteSpace(providerName) && !configureAllProfiles && !configureDefaultsOnly)
+    {
+        Console.WriteLine("Configuring one primary profile per provider family.");
+    }
+    else if (configureDefaultsOnly)
+    {
+        Console.WriteLine("Configuring default=true profiles only (legacy mode).");
+    }
+
+    if (!string.IsNullOrWhiteSpace(providerName) &&
+        providerName.StartsWith("--", StringComparison.Ordinal) &&
+        !configureAllProfiles &&
+        !configureDefaultsOnly &&
+        !hasListFlag)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"{Icons.Warning} Unknown option: {providerName}");
+        Console.ResetColor();
+        Console.WriteLine("Use '--list' to view keys, '--all' for all profiles, or '--defaults' for default-only.");
+        return 1;
+    }
     
     // Load existing config
     var configJson = File.Exists(configPath)
@@ -2329,6 +2362,65 @@ static bool IsDefaultRemoteProvider(JsonObject? providerInfo)
     }
 
     return true;
+}
+
+static bool IsVariantRemoteProvider(string key, JsonObject? providerInfo)
+{
+    var normalizedKey = key.Trim();
+    if (normalizedKey.Contains("-alt", StringComparison.OrdinalIgnoreCase) ||
+        normalizedKey.Contains("-www", StringComparison.OrdinalIgnoreCase) ||
+        normalizedKey.Contains("data-saver", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    var name = providerInfo?["name"]?.GetValue<string>() ?? string.Empty;
+    if (name.Contains('('))
+    {
+        return true;
+    }
+
+    var description = providerInfo?["description"]?.GetValue<string>() ?? string.Empty;
+    return description.Contains("optional", StringComparison.OrdinalIgnoreCase);
+}
+
+static List<string> SelectPrimaryRemoteProviders(JsonObject providers)
+{
+    var providersBySection = new Dictionary<string, List<(string Key, JsonObject? Info)>>(StringComparer.OrdinalIgnoreCase);
+
+    foreach (var (key, value) in providers)
+    {
+        var info = value as JsonObject;
+        var displayName = info?["name"]?.GetValue<string>() ?? key;
+        var section = ResolveRemoteProviderSection(key, info, displayName);
+
+        if (!providersBySection.TryGetValue(section, out var sectionEntries))
+        {
+            sectionEntries = new List<(string Key, JsonObject? Info)>();
+            providersBySection[section] = sectionEntries;
+        }
+
+        sectionEntries.Add((key, info));
+    }
+
+    var selected = new List<(string Section, string Key)>();
+    foreach (var section in providersBySection.Keys.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+    {
+        var bestKey = providersBySection[section]
+            .OrderByDescending(candidate => IsDefaultRemoteProvider(candidate.Info))
+            .ThenBy(candidate => IsVariantRemoteProvider(candidate.Key, candidate.Info) ? 1 : 0)
+            .ThenBy(candidate => candidate.Key, StringComparer.OrdinalIgnoreCase)
+            .First()
+            .Key;
+
+        selected.Add((section, bestKey));
+    }
+
+    return selected
+        .OrderBy(item => item.Section, StringComparer.OrdinalIgnoreCase)
+        .ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+        .Select(item => item.Key)
+        .ToList();
 }
 
 static string ResolveRemoteProviderSection(string key, JsonObject? providerInfo, string displayName)
@@ -10579,8 +10671,9 @@ static List<string> GetHelpLines(string command, CliMode mode)
             lines.Add("    --dry-run           Analyze without saving");
             lines.Add("");
             lines.Add("Autoconfig from remote manifest:");
-            lines.Add("  koware provider autoconfig             Auto-configure default profiles");
-            lines.Add("  koware provider autoconfig --all       Configure default + optional profiles");
+            lines.Add("  koware provider autoconfig             Configure one primary profile per provider family");
+            lines.Add("  koware provider autoconfig --all       Configure every profile/variant");
+            lines.Add("  koware provider autoconfig --defaults  Configure default=true profiles only (legacy)");
             lines.Add("  koware provider autoconfig allanime    Configure specific");
             lines.Add("  koware provider autoconfig --list      List available");
             lines.Add("  (Use key names from --list output)");
@@ -10889,7 +10982,9 @@ static int HandleHelp(string[] args, CliMode mode)
             Console.WriteLine();
             Console.WriteLine("Quick start:");
             Console.WriteLine("  koware provider autoconfig <url>   Analyze a website and generate config");
-            Console.WriteLine("  koware provider autoconfig         Auto-configure from remote manifest");
+            Console.WriteLine("  koware provider autoconfig         Configure one primary profile per provider family");
+            Console.WriteLine("  koware provider autoconfig --all   Configure every remote profile/variant");
+            Console.WriteLine("  koware provider autoconfig --defaults  Configure default=true profiles only");
             Console.WriteLine();
             Console.WriteLine("Run 'koware provider help' for full options.");
             break;
