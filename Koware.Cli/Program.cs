@@ -4081,11 +4081,25 @@ static string BuildSyntheticChapterId(string mangaId, float chapterNumber)
         }
     }
 
-    var chapterRaw = chapterNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    var chapterRaw = FormatChapterNumberForProvider(chapterNumber);
     var coreChapterId = $"{coreMangaId}:ch-{chapterRaw}";
     return string.IsNullOrWhiteSpace(providerSlug)
         ? coreChapterId
         : $"{providerSlug}:{coreChapterId}";
+}
+
+static string FormatChapterNumberForProvider(float chapterNumber)
+{
+    if (float.IsNaN(chapterNumber) || float.IsInfinity(chapterNumber))
+    {
+        return chapterNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    // Normalize binary float artifacts from persisted history (e.g. 41.099998 -> 41.1).
+    var rounded = Math.Round((decimal)chapterNumber, 3, MidpointRounding.AwayFromZero);
+    return rounded == decimal.Truncate(rounded)
+        ? rounded.ToString("0", System.Globalization.CultureInfo.InvariantCulture)
+        : rounded.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
 }
 
 static string StripProviderPrefix(string id)
@@ -4118,7 +4132,7 @@ static async Task<IReadOnlyCollection<ChapterPage>> TryLoadPagesFromMangaIdFallb
     ILogger logger,
     CancellationToken cancellationToken)
 {
-    var chapterNumberRaw = selectedChapter.Number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    var chapterNumberRaw = FormatChapterNumberForProvider(selectedChapter.Number);
     var candidateChapterIds = new List<string>();
 
     void AddCandidate(string? id)
@@ -7684,12 +7698,41 @@ static string GenerateReaderHtml(IReadOnlyCollection<ChapterPage> pages, string 
 /// <returns>Full path to reader executable, or null if not found.</returns>
 static string? ResolveReaderExecutable(ReaderOptions options)
 {
-    var command = options.Command;
+    var command = string.IsNullOrWhiteSpace(options.Command)
+        ? null
+        : options.Command.Trim();
+    if (!string.IsNullOrWhiteSpace(command) && command.All(char.IsControl))
+    {
+        command = null;
+    }
+
     var isDefaultReader = string.IsNullOrWhiteSpace(command) || 
         command.Equals("Koware.Reader.Win.exe", StringComparison.OrdinalIgnoreCase) ||
         command.Equals("Koware.Reader.Win", StringComparison.OrdinalIgnoreCase) ||
         command.Equals("Koware.Reader.exe", StringComparison.OrdinalIgnoreCase) ||
         command.Equals("Koware.Reader", StringComparison.OrdinalIgnoreCase);
+
+    // Respect explicit reader overrides before platform defaults.
+    if (!isDefaultReader)
+    {
+        if (Path.IsPathRooted(command!) && File.Exists(command))
+        {
+            return command;
+        }
+
+        var overrideAppDir = AppContext.BaseDirectory;
+        var appCandidate = Path.Combine(overrideAppDir, command!);
+        if (File.Exists(appCandidate))
+        {
+            return appCandidate;
+        }
+
+        var resolvedOverride = ResolveExecutablePath(command!.Replace(".exe", string.Empty, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(resolvedOverride))
+        {
+            return resolvedOverride;
+        }
+    }
     
     if (OperatingSystem.IsLinux())
     {

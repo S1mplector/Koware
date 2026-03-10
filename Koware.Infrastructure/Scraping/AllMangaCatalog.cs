@@ -340,7 +340,7 @@ public sealed class AllMangaCatalog : IMangaCatalog
         var idx = idValue.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase);
 
         var mangaId = idx > 0 ? idValue[..idx] : idValue;
-        var number = chapter.Number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var number = FormatChapterNumber(chapter.Number);
 
         if (idx >= 0 && idx + marker.Length < idValue.Length)
         {
@@ -348,6 +348,20 @@ public sealed class AllMangaCatalog : IMangaCatalog
         }
 
         return (mangaId, number);
+    }
+
+    private static string FormatChapterNumber(float number)
+    {
+        if (float.IsNaN(number) || float.IsInfinity(number))
+        {
+            return number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        // Normalize persisted float noise (e.g. 41.0999984741211 -> 41.1).
+        var rounded = Math.Round((decimal)number, 3, MidpointRounding.AwayFromZero);
+        return rounded == decimal.Truncate(rounded)
+            ? rounded.ToString("0", System.Globalization.CultureInfo.InvariantCulture)
+            : rounded.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private Uri BuildApiUri(string gql, object variables)
