@@ -4,8 +4,11 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Linq;
+using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using Koware.Application.Abstractions;
 using Koware.Domain.Models;
@@ -373,6 +376,11 @@ public sealed class AllMangaCatalog : IMangaCatalog
 
     private async Task<HttpResponseMessage> SendWithRetryAsync(Uri uri, CancellationToken cancellationToken)
     {
+        if (CanUseCurlFallback())
+        {
+            return await SendWithCurlRetryAsync(uri, cancellationToken);
+        }
+
         const int maxAttempts = 3;
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -402,5 +410,130 @@ public sealed class AllMangaCatalog : IMangaCatalog
 
         // Should never hit because we return on maxAttempts
         throw new InvalidOperationException("Retry handler failed unexpectedly.");
+    }
+
+    private static bool CanUseCurlFallback()
+    {
+        return OperatingSystem.IsMacOS() && File.Exists("/usr/bin/curl");
+    }
+
+    private async Task<HttpResponseMessage> SendWithCurlRetryAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 3;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                if (attempt == 1)
+                {
+                    _logger.LogDebug("Using curl fallback transport for AllManga request on macOS.");
+                }
+
+                return await SendWithCurlAsync(uri, cancellationToken);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && attempt < maxAttempts)
+            {
+                _logger.LogDebug("curl request to {Uri} timed out on attempt {Attempt}/{MaxAttempts}. Retrying...", uri, attempt, maxAttempts);
+            }
+            catch (HttpRequestException ex) when (attempt < maxAttempts)
+            {
+                _logger.LogDebug(ex, "curl request to {Uri} failed on attempt {Attempt}/{MaxAttempts}. Retrying...", uri, attempt, maxAttempts);
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt), cancellationToken);
+        }
+
+        throw new HttpRequestException($"curl fallback failed for {uri}.");
+    }
+
+    private async Task<HttpResponseMessage> SendWithCurlAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        var referer = string.IsNullOrWhiteSpace(_options.Referer) ? "https://example.com/" : _options.Referer;
+
+        using var process = new Process();
+        var start = new ProcessStartInfo
+        {
+            FileName = "/usr/bin/curl",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+
+        // Force HTTP/1.1 and bypass the .NET parser path that intermittently
+        // crashes on malformed upstream headers on some macOS runtime builds.
+        start.ArgumentList.Add("--http1.1");
+        start.ArgumentList.Add("--silent");
+        start.ArgumentList.Add("--show-error");
+        start.ArgumentList.Add("--location");
+        start.ArgumentList.Add("--fail");
+        start.ArgumentList.Add("--compressed");
+        start.ArgumentList.Add("--max-time");
+        start.ArgumentList.Add("20");
+        start.ArgumentList.Add("--connect-timeout");
+        start.ArgumentList.Add("10");
+
+        start.ArgumentList.Add("-H");
+        start.ArgumentList.Add($"Referer: {referer}");
+        start.ArgumentList.Add("-H");
+        start.ArgumentList.Add($"Origin: {referer.TrimEnd('/')}");
+
+        if (!string.IsNullOrWhiteSpace(_options.UserAgent))
+        {
+            start.ArgumentList.Add("-H");
+            start.ArgumentList.Add($"User-Agent: {_options.UserAgent}");
+        }
+
+        start.ArgumentList.Add("-H");
+        start.ArgumentList.Add("Accept: application/json, */*");
+        start.ArgumentList.Add("-H");
+        start.ArgumentList.Add("Accept-Language: en-US,en;q=0.9");
+        start.ArgumentList.Add(uri.ToString());
+
+        process.StartInfo = start;
+        if (!process.Start())
+        {
+            throw new HttpRequestException("Failed to start curl fallback process.");
+        }
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+            throw;
+        }
+
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+
+        if (process.ExitCode != 0)
+        {
+            var detail = string.IsNullOrWhiteSpace(stderr)
+                ? $"curl exited with code {process.ExitCode}"
+                : $"curl exited with code {process.ExitCode}: {stderr.Trim()}";
+            throw new HttpRequestException(detail);
+        }
+
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(stdout, Encoding.UTF8, "application/json"),
+            RequestMessage = new HttpRequestMessage(HttpMethod.Get, uri)
+        };
     }
 }

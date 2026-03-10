@@ -54,6 +54,8 @@ public partial class MainWindow : Window
     private bool _zenMode;
     private readonly DispatcherTimer _zenHideTimer;
     private readonly DispatcherTimer _zenToastTimer;
+    private BookmarkAnchor? _pendingBookmarkRestore;
+    private bool _bookmarkRestoreQueued;
 
     public List<PageInfo> Pages { get; set; } = new();
     public List<ChapterInfo> Chapters { get; set; } = new();
@@ -82,8 +84,16 @@ public partial class MainWindow : Window
     private static string PrefsPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "Koware", "reader-prefs.json");
-    
-    private string PositionKey => $"koware.reader.pos.{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Title ?? ""))[..Math.Min(32, (Title ?? "").Length)]}";
+
+    private static string PositionPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "Koware", "reader-positions.json");
+
+    private static string BookmarkPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "Koware", "reader-bookmarks.json");
+
+    private sealed record BookmarkAnchor(int Page, double OffsetRatio, int TotalPages, long SavedAtMs);
 
     public MainWindow()
     {
@@ -192,17 +202,24 @@ public partial class MainWindow : Window
         // Setup chapter navigation
         InitChapters();
         
-        // Navigate to start page if specified (for resume functionality)
-        if (StartPage > 1 && StartPage <= Pages.Count)
+        // Bookmark has priority over generic chapter resume.
+        var bookmark = LoadBookmark();
+        if (bookmark is not null)
         {
-            _currentPage = StartPage;
-            PageSlider.Value = StartPage;
-            UpdatePageIndicator();
+            _pendingBookmarkRestore = bookmark;
+            SetCurrentPageState(bookmark.Page);
+            UpdateBookmarkButtonState(true);
+        }
+        else if (StartPage > 1 && StartPage <= Pages.Count)
+        {
+            SetCurrentPageState(StartPage);
+            UpdateBookmarkButtonState(false);
         }
         else
         {
-            // Restore position if saved
+            // Restore page-level position when no explicit bookmark exists.
             RestorePosition();
+            UpdateBookmarkButtonState(false);
         }
 
         // Start loading pages
@@ -414,6 +431,9 @@ public partial class MainWindow : Window
                             
                             // Apply theme to page containers
                             SetTheme(_currentTheme);
+
+                            // Apply exact bookmark anchor after layout and images are ready.
+                            QueueBookmarkRestore();
                         }
                     });
                 }
@@ -629,16 +649,8 @@ public partial class MainWindow : Window
     private void NavigateToPage(int page, bool updateSlider = true, bool showToast = false)
     {
         if (page < 1 || page > Pages.Count) return;
-        
-        _currentPage = page;
-        
-        if (updateSlider)
-        {
-            PageSlider.Value = page;
-        }
-        
-        UpdatePageIndicator();
-        UpdateNavButtons();
+
+        SetCurrentPageState(page, updateSlider);
         
         if (showToast)
         {
@@ -659,6 +671,30 @@ public partial class MainWindow : Window
         
         // Save position periodically
         SavePosition();
+    }
+
+    private void SetCurrentPageState(int page, bool updateSlider = true)
+    {
+        _currentPage = page;
+        if (updateSlider)
+        {
+            PageSlider.Value = page;
+        }
+
+        UpdatePageIndicator();
+        UpdateNavButtons();
+    }
+
+    private void UpdateBookmarkButtonState(bool hasBookmark)
+    {
+        if (hasBookmark)
+        {
+            BookmarkButton.Classes.Add("active");
+        }
+        else
+        {
+            BookmarkButton.Classes.Remove("active");
+        }
     }
 
     private void UpdatePageIndicator()
@@ -794,6 +830,12 @@ public partial class MainWindow : Window
                 ToggleZenMode();
                 e.Handled = true;
                 break;
+
+            // Bookmark current viewport anchor
+            case Key.B:
+                SaveBookmark();
+                e.Handled = true;
+                break;
         }
     }
     
@@ -844,9 +886,7 @@ public partial class MainWindow : Window
             
             if (bestPage != _currentPage)
             {
-                _currentPage = bestPage;
-                PageSlider.Value = bestPage;
-                UpdatePageIndicator();
+                SetCurrentPageState(bestPage);
             }
         }
         catch
@@ -1060,6 +1100,11 @@ public partial class MainWindow : Window
     {
         ToggleMode();
     }
+
+    private void OnBookmarkClick(object? sender, RoutedEventArgs e)
+    {
+        SaveBookmark();
+    }
     
     private void RebuildPageLayout()
     {
@@ -1250,7 +1295,7 @@ public partial class MainWindow : Window
         var accentBrush = new SolidColorBrush(Color.Parse(accent));
         
         // Header toolbar buttons
-        foreach (var btn in new[] { RtlButton, DoublePageButton, FitModeButton, ZoomButton, ModeButton, ThemeButton, ZenButton })
+        foreach (var btn in new[] { BookmarkButton, RtlButton, DoublePageButton, FitModeButton, ZoomButton, ModeButton, ThemeButton, ZenButton })
         {
             btn.Background = btnBgBrush;
             btn.BorderBrush = btnBorderBrush;
@@ -1769,33 +1814,323 @@ public partial class MainWindow : Window
             // ignore save errors
         }
     }
+
+    // ===== Chapter Bookmark Persistence =====
+
+    private string BuildPositionKey()
+    {
+        var title = Title ?? string.Empty;
+        var encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(title));
+        if (string.IsNullOrEmpty(encoded))
+        {
+            return "koware.reader.default";
+        }
+
+        var desiredLength = Math.Min(32, title.Length + 10);
+        var safeLength = Math.Clamp(desiredLength, 1, encoded.Length);
+        return encoded[..safeLength];
+    }
+
+    private string BuildBookmarkKey()
+    {
+        var encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Title ?? string.Empty));
+        return string.IsNullOrWhiteSpace(encoded)
+            ? "koware.reader.bookmark.default"
+            : $"koware.reader.bookmark.{encoded}";
+    }
+
+    private void SaveBookmark()
+    {
+        var bookmark = CaptureBookmarkAnchor();
+        PersistBookmark(bookmark);
+        _pendingBookmarkRestore = bookmark;
+        UpdateBookmarkButtonState(true);
+
+        if (bookmark.Page != _currentPage)
+        {
+            SetCurrentPageState(bookmark.Page);
+        }
+
+        var offsetPct = (int)Math.Round(bookmark.OffsetRatio * 100);
+        ShowToast($"Bookmarked: {bookmark.Page}/{Pages.Count} ({offsetPct}%)");
+    }
+
+    private BookmarkAnchor CaptureBookmarkAnchor()
+    {
+        var defaultPage = Math.Clamp(_currentPage, 1, Math.Max(1, Pages.Count));
+        const double viewportAnchorRatio = 0.35;
+        var anchorY = Math.Max(0, ScrollViewer.Viewport.Height * viewportAnchorRatio);
+
+        if (!TryResolveAnchorAtViewportY(anchorY, out var page, out var ratio))
+        {
+            page = defaultPage;
+            ratio = 0;
+        }
+
+        return new BookmarkAnchor(
+            page,
+            Math.Clamp(ratio, 0, 1),
+            Pages.Count,
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+    }
+
+    private bool TryResolveAnchorAtViewportY(double viewportY, out int page, out double offsetRatio)
+    {
+        page = Math.Clamp(_currentPage, 1, Math.Max(1, Pages.Count));
+        offsetRatio = 0;
+
+        double bestDistance = double.MaxValue;
+        int bestPage = page;
+        double bestRatio = 0;
+
+        for (int i = 0; i < _pageImages.Count; i++)
+        {
+            var image = _pageImages[i];
+            if (!image.IsVisible || image.Bounds.Height <= 1)
+            {
+                continue;
+            }
+
+            try
+            {
+                var transform = image.TransformToVisual(ScrollViewer);
+                if (transform is null)
+                {
+                    continue;
+                }
+
+                var topLeft = transform.Value.Transform(new Point(0, 0));
+                var imageTop = topLeft.Y;
+                var imageHeight = Math.Max(1, image.Bounds.Height);
+                var imageBottom = imageTop + imageHeight;
+
+                if (viewportY >= imageTop && viewportY <= imageBottom)
+                {
+                    page = i + 1;
+                    offsetRatio = Math.Clamp((viewportY - imageTop) / imageHeight, 0, 1);
+                    return true;
+                }
+
+                var imageCenter = imageTop + (imageHeight / 2);
+                var distance = Math.Abs(imageCenter - viewportY);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    bestPage = i + 1;
+                    bestRatio = Math.Clamp((viewportY - imageTop) / imageHeight, 0, 1);
+                }
+            }
+            catch
+            {
+                // skip invalid transforms
+            }
+        }
+
+        if (bestDistance < double.MaxValue)
+        {
+            page = bestPage;
+            offsetRatio = bestRatio;
+            return true;
+        }
+
+        return false;
+    }
+
+    private void QueueBookmarkRestore()
+    {
+        if (_bookmarkRestoreQueued || _pendingBookmarkRestore is null)
+        {
+            return;
+        }
+
+        _bookmarkRestoreQueued = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _bookmarkRestoreQueued = false;
+            if (_pendingBookmarkRestore is not { } bookmark)
+            {
+                return;
+            }
+
+            if (TryApplyBookmark(bookmark))
+            {
+                _pendingBookmarkRestore = null;
+                UpdateBookmarkButtonState(true);
+                SavePosition();
+                var offsetPct = (int)Math.Round(bookmark.OffsetRatio * 100);
+                ShowToast($"Resumed bookmark: {bookmark.Page}/{Pages.Count} ({offsetPct}%)");
+                return;
+            }
+
+            // If dimensions are still settling, try again on the next render frame.
+            if (_loadedCount < Pages.Count)
+            {
+                QueueBookmarkRestore();
+                return;
+            }
+
+            _pendingBookmarkRestore = null;
+            NavigateToPage(bookmark.Page, showToast: true);
+        }, DispatcherPriority.Render);
+    }
+
+    private bool TryApplyBookmark(BookmarkAnchor bookmark)
+    {
+        if (bookmark.Page < 1 || bookmark.Page > Pages.Count || bookmark.Page - 1 >= _pageImages.Count)
+        {
+            return false;
+        }
+
+        var image = _pageImages[bookmark.Page - 1];
+        if (image.Bounds.Height <= 1 || ScrollViewer.Viewport.Height <= 1)
+        {
+            return false;
+        }
+
+        var transform = image.TransformToVisual(ScrollViewer);
+        if (transform is null)
+        {
+            return false;
+        }
+
+        var previousTracking = _isScrollTracking;
+        try
+        {
+            const double viewportAnchorRatio = 0.35;
+            var topLeft = transform.Value.Transform(new Point(0, 0));
+            var absoluteY = ScrollViewer.Offset.Y + topLeft.Y + (image.Bounds.Height * Math.Clamp(bookmark.OffsetRatio, 0, 1));
+            var targetY = absoluteY - (ScrollViewer.Viewport.Height * viewportAnchorRatio);
+            var maxY = Math.Max(0, ScrollViewer.Extent.Height - ScrollViewer.Viewport.Height);
+            var clampedY = Math.Clamp(targetY, 0, maxY);
+
+            _isScrollTracking = false;
+            ScrollViewer.Offset = new Vector(ScrollViewer.Offset.X, clampedY);
+            SetCurrentPageState(bookmark.Page);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            _isScrollTracking = previousTracking;
+        }
+    }
+
+    private void PersistBookmark(BookmarkAnchor bookmark)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(BookmarkPath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            Dictionary<string, JsonElement> bookmarks = new();
+            if (File.Exists(BookmarkPath))
+            {
+                try
+                {
+                    var existing = File.ReadAllText(BookmarkPath);
+                    bookmarks = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(existing) ?? new();
+                }
+                catch
+                {
+                    // ignore malformed bookmark store
+                }
+            }
+
+            var key = BuildBookmarkKey();
+            var bookmarkData = new
+            {
+                page = bookmark.Page,
+                offsetRatio = bookmark.OffsetRatio,
+                total = bookmark.TotalPages,
+                savedAt = bookmark.SavedAtMs
+            };
+
+            using var bookmarkDoc = JsonDocument.Parse(JsonSerializer.Serialize(bookmarkData));
+            bookmarks[key] = bookmarkDoc.RootElement.Clone();
+
+            File.WriteAllText(BookmarkPath, JsonSerializer.Serialize(bookmarks));
+        }
+        catch
+        {
+            // ignore bookmark save errors
+        }
+    }
+
+    private BookmarkAnchor? LoadBookmark()
+    {
+        try
+        {
+            if (!File.Exists(BookmarkPath))
+            {
+                return null;
+            }
+
+            var json = File.ReadAllText(BookmarkPath);
+            using var doc = JsonDocument.Parse(json);
+            var key = BuildBookmarkKey();
+            if (!doc.RootElement.TryGetProperty(key, out var bookmark))
+            {
+                return null;
+            }
+
+            if (!bookmark.TryGetProperty("page", out var pageEl) || !pageEl.TryGetInt32(out var page))
+            {
+                return null;
+            }
+
+            var total = bookmark.TryGetProperty("total", out var totalEl) && totalEl.TryGetInt32(out var totalPages)
+                ? totalPages
+                : Pages.Count;
+
+            if (total != Pages.Count || page < 1 || page > Pages.Count)
+            {
+                return null;
+            }
+
+            var ratio = bookmark.TryGetProperty("offsetRatio", out var ratioEl) && ratioEl.TryGetDouble(out var offsetRatio)
+                ? offsetRatio
+                : 0;
+
+            var savedAt = bookmark.TryGetProperty("savedAt", out var savedAtEl) && savedAtEl.TryGetInt64(out var savedAtMs)
+                ? savedAtMs
+                : 0;
+
+            return new BookmarkAnchor(page, Math.Clamp(ratio, 0, 1), total, savedAt);
+        }
+        catch
+        {
+            return null;
+        }
+    }
     
     private void SavePosition()
     {
         try
         {
-            var posPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "Koware", "reader-positions.json");
-            
-            var dir = Path.GetDirectoryName(posPath);
+            var dir = Path.GetDirectoryName(PositionPath);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             {
                 Directory.CreateDirectory(dir);
             }
             
             Dictionary<string, JsonElement> positions = new();
-            if (File.Exists(posPath))
+            if (File.Exists(PositionPath))
             {
                 try
                 {
-                    var existing = File.ReadAllText(posPath);
+                    var existing = File.ReadAllText(PositionPath);
                     positions = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(existing) ?? new();
                 }
                 catch { }
             }
             
-            var key = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Title ?? ""))[..Math.Min(32, (Title ?? "").Length + 10)];
+            var key = BuildPositionKey();
             var posData = new
             {
                 page = _currentPage,
@@ -1808,7 +2143,7 @@ public partial class MainWindow : Window
             using var newDoc = JsonDocument.Parse(updatedJson);
             positions[key] = newDoc.RootElement.Clone();
             
-            File.WriteAllText(posPath, JsonSerializer.Serialize(positions));
+            File.WriteAllText(PositionPath, JsonSerializer.Serialize(positions));
         }
         catch
         {
@@ -1820,16 +2155,12 @@ public partial class MainWindow : Window
     {
         try
         {
-            var posPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "Koware", "reader-positions.json");
+            if (!File.Exists(PositionPath)) return;
             
-            if (!File.Exists(posPath)) return;
-            
-            var json = File.ReadAllText(posPath);
+            var json = File.ReadAllText(PositionPath);
             using var doc = JsonDocument.Parse(json);
             
-            var key = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Title ?? ""))[..Math.Min(32, (Title ?? "").Length + 10)];
+            var key = BuildPositionKey();
             
             if (doc.RootElement.TryGetProperty(key, out var pos))
             {

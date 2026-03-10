@@ -256,6 +256,20 @@
                             <TextBlock Text="Chapters" VerticalAlignment="Center" FontWeight="SemiBold" />
                         </StackPanel>
                     </Button>
+
+                    <!-- Bookmark button -->
+                    <Button x:Name="BookmarkButton" Classes="toolbar-sm"
+                            Click="OnBookmarkClick"
+                            ToolTip.Tip="Save bookmark at current viewport (B)">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="Bookmark" VerticalAlignment="Center" />
+                            <Viewbox Width="14" Height="14" Stretch="Uniform">
+                                <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                      StrokeThickness="2"
+                                      Data="M6 3h12v18l-6-4-6 4z" />
+                            </Viewbox>
+                        </StackPanel>
+                    </Button>
                     
                     <!-- RTL button -->
                     <Button x:Name="RtlButton" Classes="toolbar-sm"
@@ -641,6 +655,12 @@
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="Z" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
                                 <TextBlock Text="Toggle Zen mode (hide UI)" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="B" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Bookmark current viewport position" Foreground="#ccc" />
                             </StackPanel>
                         </Border>
                         
