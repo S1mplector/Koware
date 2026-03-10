@@ -22,6 +22,7 @@ public static class InfrastructureServiceCollectionExtensions
             services.Configure<NineAnimeOptions>(configuration.GetSection("NineAnime"));
             services.Configure<HanimeOptions>(configuration.GetSection("Hanime"));
             services.Configure<NhentaiOptions>(configuration.GetSection("Nhentai"));
+            services.Configure<MangaDexOptions>(configuration.GetSection("MangaDex"));
         }
         else
         {
@@ -31,6 +32,7 @@ public static class InfrastructureServiceCollectionExtensions
             services.Configure<NineAnimeOptions>(_ => { });
             services.Configure<HanimeOptions>(_ => { });
             services.Configure<NhentaiOptions>(_ => { });
+            services.Configure<MangaDexOptions>(_ => { });
         }
 
         services.AddHttpClient<AllAnimeCatalog>((sp, client) =>
@@ -125,12 +127,28 @@ public static class InfrastructureServiceCollectionExtensions
             client.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/plain, */*");
         }).ConfigurePrimaryHttpMessageHandler(CreateDefaultHandler);
 
+        services.AddHttpClient<MangaDexCatalog>((sp, client) =>
+        {
+            var options = sp.GetRequiredService<IOptions<MangaDexOptions>>().Value;
+            if (!string.IsNullOrWhiteSpace(options.ApiBase) && Uri.TryCreate(options.ApiBase.Trim(), UriKind.Absolute, out var apiBaseUri))
+            {
+                client.BaseAddress = apiBaseUri;
+            }
+            if (!string.IsNullOrWhiteSpace(options.Referer) && Uri.TryCreate(options.Referer.Trim(), UriKind.Absolute, out var refererUri))
+            {
+                client.DefaultRequestHeaders.Referrer = refererUri;
+            }
+            ConfigureCommonClient(client, options.UserAgent);
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/plain, */*");
+        }).ConfigurePrimaryHttpMessageHandler(CreateDefaultHandler);
+
         services.AddSingleton<AllAnimeCatalog>();
         services.AddSingleton<AllMangaCatalog>();
         services.AddSingleton<HiAnimeCatalog>();
         services.AddSingleton<NineAnimeCatalog>();
         services.AddSingleton<HanimeCatalog>();
         services.AddSingleton<NhentaiCatalog>();
+        services.AddSingleton<MangaDexCatalog>();
         services.AddSingleton<IAnimeCatalog>(sp => sp.GetRequiredService<AllAnimeCatalog>());
         services.AddSingleton<IMangaCatalog>(sp => sp.GetRequiredService<AllMangaCatalog>());
         return services;

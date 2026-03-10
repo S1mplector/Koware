@@ -198,6 +198,7 @@ static IHost BuildHost(string[] args)
         var builtIns = new List<AggregateMangaCatalog.BuiltInMangaProvider>();
         var allMangaOptions = sp.GetRequiredService<IOptions<AllMangaOptions>>().Value;
         var nhentaiOptions = sp.GetRequiredService<IOptions<NhentaiOptions>>().Value;
+        var mangaDexOptions = sp.GetRequiredService<IOptions<MangaDexOptions>>().Value;
 
         if (allMangaOptions.IsConfigured)
         {
@@ -213,6 +214,14 @@ static IHost BuildHost(string[] args)
                 "nhentai",
                 "nhentai",
                 sp.GetRequiredService<NhentaiCatalog>()));
+        }
+
+        if (mangaDexOptions.IsConfigured)
+        {
+            builtIns.Add(new AggregateMangaCatalog.BuiltInMangaProvider(
+                "mangadex",
+                "MangaDex",
+                sp.GetRequiredService<MangaDexCatalog>()));
         }
 
         var store = sp.GetRequiredService<IProviderStore>();
@@ -429,6 +438,7 @@ static async Task<bool> CheckProvidersConfiguredAsync(IServiceProvider services,
     var hanime = services.GetRequiredService<IOptions<HanimeOptions>>().Value;
     var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
     var nhentai = services.GetRequiredService<IOptions<NhentaiOptions>>().Value;
+    var mangaDex = services.GetRequiredService<IOptions<MangaDexOptions>>().Value;
     var providerStore = services.GetRequiredService<IProviderStore>();
 
     bool hasConfiguredProvider;
@@ -437,7 +447,7 @@ static async Task<bool> CheckProvidersConfiguredAsync(IServiceProvider services,
     if (mode == CliMode.Manga)
     {
         var activeDynamic = await providerStore.GetActiveAsync(ProviderType.Manga, cancellationToken);
-        hasConfiguredProvider = allManga.IsConfigured || nhentai.IsConfigured || activeDynamic is not null;
+        hasConfiguredProvider = allManga.IsConfigured || nhentai.IsConfigured || mangaDex.IsConfigured || activeDynamic is not null;
         modeLabel = "manga";
     }
     else
@@ -468,6 +478,7 @@ static async Task WarnIfNoProvidersConfiguredAsync(IServiceProvider services, Ca
     var hanime = services.GetRequiredService<IOptions<HanimeOptions>>().Value;
     var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
     var nhentai = services.GetRequiredService<IOptions<NhentaiOptions>>().Value;
+    var mangaDex = services.GetRequiredService<IOptions<MangaDexOptions>>().Value;
     var providerStore = services.GetRequiredService<IProviderStore>();
 
     // Check if ANY provider is configured
@@ -480,6 +491,7 @@ static async Task WarnIfNoProvidersConfiguredAsync(IServiceProvider services, Ca
         hanime.IsConfigured ||
         allManga.IsConfigured ||
         nhentai.IsConfigured ||
+        mangaDex.IsConfigured ||
         activeAnimeDynamic is not null ||
         activeMangaDynamic is not null;
 
@@ -847,6 +859,7 @@ static async Task<int> HandleDoctorAsync(string[] args, IServiceProvider service
     var hanimeOptions = services.GetRequiredService<IOptions<HanimeOptions>>();
     var mangaOptions = services.GetRequiredService<IOptions<AllMangaOptions>>();
     var nhentaiOptions = services.GetRequiredService<IOptions<NhentaiOptions>>();
+    var mangaDexOptions = services.GetRequiredService<IOptions<MangaDexOptions>>();
     var configPath = GetUserConfigFilePath();
 
     var engine = new DiagnosticsEngine(
@@ -857,6 +870,7 @@ static async Task<int> HandleDoctorAsync(string[] args, IServiceProvider service
         mangaOptions,
         hanimeOptions,
         nhentaiOptions,
+        mangaDexOptions,
         configPath);
 
     if (!jsonOutput)
@@ -1418,8 +1432,9 @@ static async Task<int> HandleProviderAsync(string[] args, IServiceProvider servi
             var hanime = services.GetRequiredService<IOptions<HanimeOptions>>().Value;
             var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
             var nhentai = services.GetRequiredService<IOptions<NhentaiOptions>>().Value;
+            var mangaDex = services.GetRequiredService<IOptions<MangaDexOptions>>().Value;
             var providerToTest = args.Length > 2 ? args[2] : null;
-            return await HandleProviderTestAsync(providerToTest, allAnime, hiAnime, nineAnime, hanime, allManga, nhentai, services);
+            return await HandleProviderTestAsync(providerToTest, allAnime, hiAnime, nineAnime, hanime, allManga, nhentai, mangaDex, services);
         }
     }
     
@@ -1438,6 +1453,7 @@ static async Task<int> HandleProviderInteractiveAsync(IServiceProvider services,
     var hanime = services.GetRequiredService<IOptions<HanimeOptions>>().Value;
     var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
     var nhentai = services.GetRequiredService<IOptions<NhentaiOptions>>().Value;
+    var mangaDex = services.GetRequiredService<IOptions<MangaDexOptions>>().Value;
     
     while (true)
     {
@@ -1468,7 +1484,7 @@ static async Task<int> HandleProviderInteractiveAsync(IServiceProvider services,
         switch (result.Selected.Id)
         {
             case "providers":
-                await HandleProviderListAsync(allAnime, hiAnime, nineAnime, hanime, allManga, nhentai, services);
+                await HandleProviderListAsync(allAnime, hiAnime, nineAnime, hanime, allManga, nhentai, mangaDex, services);
                 break;
                 
             case "add":
@@ -1481,7 +1497,7 @@ static async Task<int> HandleProviderInteractiveAsync(IServiceProvider services,
                 break;
                 
             case "test":
-                await HandleProviderTestAsync(null, allAnime, hiAnime, nineAnime, hanime, allManga, nhentai, services);
+                await HandleProviderTestAsync(null, allAnime, hiAnime, nineAnime, hanime, allManga, nhentai, mangaDex, services);
                 break;
                 
             case "edit":
@@ -1503,6 +1519,7 @@ static async Task<int> HandleProviderListAsync(
     HanimeOptions hanime,
     AllMangaOptions allManga,
     NhentaiOptions nhentai,
+    MangaDexOptions mangaDex,
     IServiceProvider services)
 {
     var providerStore = services.GetRequiredService<IProviderStore>();
@@ -1564,6 +1581,15 @@ static async Task<int> HandleProviderListAsync(
             nhentai.IsConfigured ? (nhentai.Enabled ? "Ready" : "Disabled") : "Not configured",
             nhentai.BaseUrl ?? "https://nhentai.net",
             nhentai.Enabled,
+            false
+        ));
+
+        providers.Add(new ProviderItem(
+            "MangaDex",
+            "Manga",
+            mangaDex.IsConfigured ? (mangaDex.Enabled ? "Ready" : "Disabled") : "Not configured",
+            mangaDex.WebBase ?? "https://mangadex.org",
+            mangaDex.Enabled,
             false
         ));
         
@@ -1730,6 +1756,7 @@ static async Task<int> HandleProviderTestAsync(
     HanimeOptions hanime,
     AllMangaOptions allManga,
     NhentaiOptions nhentai,
+    MangaDexOptions mangaDex,
     IServiceProvider services)
 {
     var providers = new Dictionary<string, (bool configured, string? endpoint, string endpointField, string? referer, string? userAgent, bool isDynamic)>(StringComparer.OrdinalIgnoreCase)
@@ -1741,6 +1768,7 @@ static async Task<int> HandleProviderTestAsync(
         ["nineanime"] = (nineAnime.IsConfigured, nineAnime.BaseUrl, "BaseUrl", nineAnime.EffectiveReferer, nineAnime.UserAgent, false),
         ["hanime"] = (hanime.IsConfigured, hanime.EffectiveSearchApiUrl, "SearchApiUrl", hanime.EffectiveReferer, hanime.UserAgent, false),
         ["nhentai"] = (nhentai.IsConfigured, $"{nhentai.EffectiveApiBase.TrimEnd('/')}/galleries/search?query=naruto&page=1", "ApiBase", nhentai.EffectiveReferer, nhentai.UserAgent, false),
+        ["mangadex"] = (mangaDex.IsConfigured, $"{(mangaDex.ApiBase ?? "https://api.mangadex.org").TrimEnd('/')}/manga?title=naruto&limit=1", "ApiBase", mangaDex.Referer, mangaDex.UserAgent, false),
     };
     
     // Add dynamic providers from autoconfig
@@ -2319,6 +2347,7 @@ static string ResolveRemoteProviderSection(string key, JsonObject? providerInfo,
         "9anime" or "nineanime" => "NineAnime",
         "hanime" => "Hanime",
         "nhentai" => "Nhentai",
+        "mangadex" => "MangaDex",
         "gogoanime" => "GogoAnime",
         _ => displayName
     };
@@ -4038,20 +4067,26 @@ static Manga BuildSyntheticMangaFromId(string mangaId, string? title = null)
 {
     var effectiveTitle = string.IsNullOrWhiteSpace(title) ? mangaId : title.Trim();
     var coreId = mangaId;
+    var providerSlug = "allmanga";
     var idx = mangaId.LastIndexOf(':');
     if (idx >= 0 && idx + 1 < mangaId.Length)
     {
+        providerSlug = mangaId[..idx].ToLowerInvariant();
         coreId = mangaId[(idx + 1)..];
     }
 
     Uri detailPage;
-    if (mangaId.StartsWith("nhentai:", StringComparison.OrdinalIgnoreCase))
+    switch (providerSlug)
     {
-        detailPage = new Uri($"https://nhentai.net/g/{Uri.EscapeDataString(coreId)}/");
-    }
-    else
-    {
-        detailPage = new Uri($"https://allmanga.to/manga/{Uri.EscapeDataString(coreId)}");
+        case "nhentai":
+            detailPage = new Uri($"https://nhentai.net/g/{Uri.EscapeDataString(coreId)}/");
+            break;
+        case "mangadex":
+            detailPage = new Uri($"https://mangadex.org/title/{Uri.EscapeDataString(coreId)}");
+            break;
+        default:
+            detailPage = new Uri($"https://allmanga.to/manga/{Uri.EscapeDataString(coreId)}");
+            break;
     }
 
     return new Manga(
@@ -4122,6 +4157,28 @@ static string StripProviderPrefix(string id)
     }
 
     return id[(idx + 1)..];
+}
+
+static string ResolveMangaProviderSlug(string mangaId, string fallback = "allmanga")
+{
+    if (string.IsNullOrWhiteSpace(mangaId))
+    {
+        return fallback;
+    }
+
+    var idx = mangaId.IndexOf(':');
+    if (idx <= 0)
+    {
+        return fallback;
+    }
+
+    var possibleSlug = mangaId[..idx];
+    if (possibleSlug.All(char.IsDigit))
+    {
+        return fallback;
+    }
+
+    return possibleSlug.ToLowerInvariant();
 }
 
 static async Task<IReadOnlyCollection<ChapterPage>> TryLoadPagesFromMangaIdFallbackAsync(
@@ -4648,6 +4705,7 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
     {
         var allManga = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
         var nhentai = services.GetRequiredService<IOptions<NhentaiOptions>>().Value;
+        var mangaDex = services.GetRequiredService<IOptions<MangaDexOptions>>().Value;
 
         if (allManga.IsConfigured)
         {
@@ -4669,6 +4727,17 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
                 true,
                 nhentai.Enabled,
                 nhentai.BaseUrl ?? "nhentai.net"));
+        }
+
+        if (mangaDex.IsConfigured)
+        {
+            choices.Add(new ExploreProviderChoice(
+                "MangaDex",
+                "mangadex",
+                ProviderType.Manga,
+                true,
+                mangaDex.Enabled,
+                mangaDex.WebBase ?? "mangadex.org"));
         }
     }
     else
@@ -4799,6 +4868,7 @@ static async Task<List<ExploreProviderContext>> BuildExploreProviderContextsAsyn
                 {
                     "allmanga" => services.GetRequiredService<AllMangaCatalog>(),
                     "nhentai" => services.GetRequiredService<NhentaiCatalog>(),
+                    "mangadex" => services.GetRequiredService<MangaDexCatalog>(),
                     _ => null
                 };
 
@@ -4810,11 +4880,13 @@ static async Task<List<ExploreProviderContext>> BuildExploreProviderContextsAsyn
 
                 var allMangaOptions = services.GetRequiredService<IOptions<AllMangaOptions>>().Value;
                 var nhentaiOptions = services.GetRequiredService<IOptions<NhentaiOptions>>().Value;
+                var mangaDexOptions = services.GetRequiredService<IOptions<MangaDexOptions>>().Value;
 
                 string? referrer = provider.Slug.ToLowerInvariant() switch
                 {
                     "allmanga" => allMangaOptions.Referer,
                     "nhentai" => nhentaiOptions.EffectiveReferer,
+                    "mangadex" => mangaDexOptions.Referer,
                     _ => null
                 };
 
@@ -4822,6 +4894,7 @@ static async Task<List<ExploreProviderContext>> BuildExploreProviderContextsAsyn
                 {
                     "allmanga" => allMangaOptions.UserAgent,
                     "nhentai" => nhentaiOptions.UserAgent,
+                    "mangadex" => mangaDexOptions.UserAgent,
                     _ => null
                 };
 
@@ -7289,6 +7362,21 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
     // Launch reader with navigation support
     var readerOptions = services.GetRequiredService<IOptions<ReaderOptions>>().Value;
     var allMangaOptions = services.GetService<IOptions<AllMangaOptions>>()?.Value;
+    var nhentaiOptions = services.GetService<IOptions<NhentaiOptions>>()?.Value;
+    var mangaDexOptions = services.GetService<IOptions<MangaDexOptions>>()?.Value;
+    var currentProvider = ResolveMangaProviderSlug(selectedManga.Id.Value);
+    var defaultReferrer = currentProvider switch
+    {
+        "nhentai" => nhentaiOptions?.EffectiveReferer,
+        "mangadex" => mangaDexOptions?.Referer,
+        _ => allMangaOptions?.Referer
+    };
+    var defaultUserAgent = currentProvider switch
+    {
+        "nhentai" => nhentaiOptions?.UserAgent,
+        "mangadex" => mangaDexOptions?.UserAgent,
+        _ => allMangaOptions?.UserAgent
+    };
     var displayTitle = $"{selectedManga.Title} - Chapter {selectedChapter.Number}";
 
     var readResult = await ReadWithNavigationAsync(
@@ -7299,8 +7387,8 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
         pages,
         mangaCatalog,
         logger,
-        allMangaOptions?.Referer,
-        allMangaOptions?.UserAgent,
+        defaultReferrer,
+        defaultUserAgent,
         displayTitle,
         cancellationToken,
         startPage);
@@ -7309,9 +7397,10 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
     try
     {
         var readHistory = services.GetRequiredService<IReadHistoryStore>();
+        var providerSlug = ResolveMangaProviderSlug(selectedManga.Id.Value);
         var entry = new ReadHistoryEntry
         {
-            Provider = "allmanga",
+            Provider = providerSlug,
             MangaId = selectedManga.Id.Value,
             MangaTitle = selectedManga.Title,
             ChapterNumber = readResult.LastChapter,
@@ -10520,6 +10609,7 @@ static List<string> GetHelpLines(string command, CliMode mode)
             lines.Add("  - Hanime configuration status");
             lines.Add("  - AllManga configuration status");
             lines.Add("  - nhentai configuration status");
+            lines.Add("  - MangaDex configuration status");
             lines.Add("  - DNS resolution for provider domains");
             lines.Add("  - HTTP connectivity test");
             lines.Add("");
@@ -10748,7 +10838,7 @@ static int HandleHelp(string[] args, CliMode mode)
             Console.WriteLine("Examples:");
             Console.WriteLine("  koware read \"one piece\" --chapter 1");
             Console.WriteLine("  koware read \"chainsaw man\" --index 1 --chapter 10");
-            Console.WriteLine("Behavior: searches allmanga.to, fetches chapter pages, and launches the reader.");
+            Console.WriteLine("Behavior: searches configured manga providers, fetches chapter pages, and launches the reader.");
             break;
         case "last":
             PrintTopicHeader("last", "Show the most recent watched/read entry.");

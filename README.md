@@ -372,6 +372,14 @@ The command fetches `providers.json` plus the referenced config files, merges th
     "Referer": "https://your-manga-source.example",
     "TranslationType": "sub"
   },
+  "MangaDex": {
+    "Enabled": true,
+    "ApiBase": "https://api.mangadex.org",
+    "WebBase": "https://mangadex.org",
+    "Referer": "https://mangadex.org",
+    "TranslatedLanguage": "en",
+    "UseDataSaver": false
+  },
   "GogoAnime": {
     "Enabled": false,
     "ApiBase": "https://api.your-alt-source.example",
@@ -394,6 +402,7 @@ The command fetches `providers.json` plus the referenced config files, merges th
 **Per source**
 
 - `AllAnime` / `AllManga`: Require `BaseHost`, `ApiBase`, `Referer`, and `TranslationType`.
+- `MangaDex`: Uses `ApiBase` + `WebBase`; supports `TranslatedLanguage` and `UseDataSaver`.
 - `GogoAnime`: Uses `SiteBase` for page URLs and `ApiBase` for API calls.
 
 ### Finding Sources

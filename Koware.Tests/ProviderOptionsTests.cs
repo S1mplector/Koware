@@ -315,6 +315,49 @@ public class ProviderOptionsTests
 
     #endregion
 
+    #region MangaDexOptions Tests
+
+    [Fact]
+    public void MangaDexOptions_IsConfigured_ReturnsFalse_WhenNotEnabled()
+    {
+        var options = new MangaDexOptions
+        {
+            Enabled = false
+        };
+
+        Assert.False(options.IsConfigured);
+    }
+
+    [Fact]
+    public void MangaDexOptions_IsConfigured_ReturnsTrue_WhenEnabledAndRequiredFieldsPresent()
+    {
+        var options = new MangaDexOptions
+        {
+            Enabled = true,
+            ApiBase = "https://api.mangadex.org",
+            WebBase = "https://mangadex.org",
+            Referer = "https://mangadex.org"
+        };
+
+        Assert.True(options.IsConfigured);
+    }
+
+    [Fact]
+    public void MangaDexOptions_Defaults_AreReasonable()
+    {
+        var options = new MangaDexOptions();
+
+        Assert.False(options.Enabled);
+        Assert.Equal("https://api.mangadex.org", options.ApiBase);
+        Assert.Equal("https://mangadex.org", options.WebBase);
+        Assert.Equal("https://mangadex.org", options.Referer);
+        Assert.Equal("en", options.TranslatedLanguage);
+        Assert.False(options.UseDataSaver);
+        Assert.False(options.IncludeNsfw);
+    }
+
+    #endregion
+
     #region NhentaiOptions Tests
 
     [Fact]
