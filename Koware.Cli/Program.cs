@@ -1,5 +1,13 @@
 // Author: Ilgaz Mehmetoğlu
 // Entry point and command routing for the Koware CLI, including playback orchestration and configuration handling.
+// This file contains the main program logic for the Koware CLI application. It sets up dependency injection, configuration, and logging, and routes commands to their respective handlers. It also includes the core logic for executing a scrape plan, launching the player, and updating watch history. The CLI supports both anime and manga modes, with dynamic provider configuration and user-friendly error handling.
+// The CLI is designed to be extensible and maintainable, with a focus on providing a smooth user experience for discovering and consuming anime and manga content from various providers. It also includes features like auto-sync, theming, and a doctor command for troubleshooting.
+// The code is organized into several main sections:
+// 1. Host Building: Configures the dependency injection container, loads configuration files, and registers services.
+// 2. Command Routing: The main RunAsync method that dispatches commands based on the first argument and handles top-level error handling and cancellation.
+// 3. Provider Checking: Utility methods to check if providers are configured and show warnings if not.
+// 4. Playback Orchestration: The ExecuteAndPlayAsync method that takes a scrape plan, resolves streams, launches the player, and updates history, with support for retrying with different quality and navigating to next/previous episodes.
+/// The code uses modern C# features and follows best practices for asynchronous programming, dependency injection, and error handling. It also includes detailed logging and user-friendly console output to guide users through the CLI experience
 
 using System.Diagnostics;
 using System.Reflection;
@@ -2287,9 +2295,14 @@ static async Task<int> HandleRemoteManifestAutoconfigAsync(string? providerName,
             var sectionName = ResolveRemoteProviderSection(key, providerInfo, displayName);
             
             // Merge config (preserves user overrides for fields not in remote)
-            var existingSection = configJson[sectionName] as JsonObject ?? new JsonObject();
+            // while avoiding case-only duplicate keys that break Microsoft.Extensions.Configuration.
+            var existingSection = MergeAndNormalizeSectionCaseInsensitive(configJson, sectionName);
             foreach (var (field, value) in config)
             {
+                if (TryGetJsonKeyCaseInsensitive(existingSection, field, out var existingField))
+                {
+                    existingSection.Remove(existingField);
+                }
                 existingSection[field] = value?.DeepClone();
             }
             configJson[sectionName] = existingSection;
@@ -2421,6 +2434,52 @@ static List<string> SelectPrimaryRemoteProviders(JsonObject providers)
         .ThenBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
         .Select(item => item.Key)
         .ToList();
+}
+
+static JsonObject MergeAndNormalizeSectionCaseInsensitive(JsonObject root, string sectionName)
+{
+    var mergedSection = new JsonObject();
+    var matchingSectionKeys = root
+        .Select(entry => entry.Key)
+        .Where(key => key.Equals(sectionName, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    foreach (var key in matchingSectionKeys)
+    {
+        if (root[key] is JsonObject section)
+        {
+            foreach (var (field, value) in section)
+            {
+                if (TryGetJsonKeyCaseInsensitive(mergedSection, field, out var existingField))
+                {
+                    mergedSection[existingField] = value?.DeepClone();
+                }
+                else
+                {
+                    mergedSection[field] = value?.DeepClone();
+                }
+            }
+        }
+
+        root.Remove(key);
+    }
+
+    return mergedSection;
+}
+
+static bool TryGetJsonKeyCaseInsensitive(JsonObject obj, string key, out string existingKey)
+{
+    foreach (var (candidateKey, _) in obj)
+    {
+        if (candidateKey.Equals(key, StringComparison.OrdinalIgnoreCase))
+        {
+            existingKey = candidateKey;
+            return true;
+        }
+    }
+
+    existingKey = string.Empty;
+    return false;
 }
 
 static string ResolveRemoteProviderSection(string key, JsonObject? providerInfo, string displayName)
@@ -4554,6 +4613,17 @@ static async Task<int> HandleExploreAsync(string[] args, IServiceProvider servic
                                     a.Equals("-p", StringComparison.OrdinalIgnoreCase));
     var skipProviderSelect = args.Any(a => a.Equals("--quick", StringComparison.OrdinalIgnoreCase) ||
                                            a.Equals("-q", StringComparison.OrdinalIgnoreCase));
+    var jsonOutput = args.Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+    var nonInteractiveRequested = args.Any(a => a.Equals("--non-interactive", StringComparison.OrdinalIgnoreCase) ||
+                                                a.Equals("-n", StringComparison.OrdinalIgnoreCase));
+
+    if (!TryParseExploreLimit(args, out var outputLimit, out var limitError))
+    {
+        Console.WriteLine(limitError);
+        return 1;
+    }
+
+    var nonInteractive = nonInteractiveRequested || jsonOutput || !IsInteractiveConsole();
 
     var providerChoices = await BuildExploreProviderChoicesAsync(mode, services, cancellationToken);
     if (providerChoices.Count == 0)
@@ -4565,7 +4635,7 @@ static async Task<int> HandleExploreAsync(string[] args, IServiceProvider servic
 
     // Auto-select all active providers if --quick or direct query provided
     List<ExploreProviderChoice> selectedProviders;
-    if (skipProviderSelect || !string.IsNullOrWhiteSpace(directQuery) || popularMode)
+    if (skipProviderSelect || nonInteractive || !string.IsNullOrWhiteSpace(directQuery) || popularMode)
     {
         selectedProviders = providerChoices.Where(p => p.IsActive).ToList();
         if (selectedProviders.Count == 0)
@@ -4601,6 +4671,21 @@ static async Task<int> HandleExploreAsync(string[] args, IServiceProvider servic
         : await BuildAnimeStatusLookupAsync(services, cancellationToken);
 
     var providerSummary = BuildProviderSummary(providerContexts.Select(p => p.Info.Name));
+
+    if (nonInteractive)
+    {
+        return await RunExploreNonInteractiveAsync(
+            mode,
+            directQuery,
+            popularMode,
+            filters,
+            providerContexts,
+            statusLookup,
+            logger,
+            cancellationToken,
+            jsonOutput,
+            outputLimit);
+    }
 
     // If direct query or popular mode provided, skip the menu
     if (!string.IsNullOrWhiteSpace(directQuery) || popularMode)
@@ -4792,6 +4877,20 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
 {
     var providerStore = services.GetRequiredService<IProviderStore>();
     var choices = new List<ExploreProviderChoice>();
+    var choiceIndexByKey = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+    void AddChoice(ExploreProviderChoice choice)
+    {
+        var key = BuildExploreProviderDedupKey(choice);
+        if (choiceIndexByKey.TryGetValue(key, out var index))
+        {
+            choices[index] = MergeExploreProviderChoices(choices[index], choice);
+            return;
+        }
+
+        choiceIndexByKey[key] = choices.Count;
+        choices.Add(choice);
+    }
 
     if (mode == CliMode.Manga)
     {
@@ -4801,7 +4900,7 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
 
         if (allManga.IsConfigured)
         {
-            choices.Add(new ExploreProviderChoice(
+            AddChoice(new ExploreProviderChoice(
                 "AllManga",
                 "allmanga",
                 ProviderType.Manga,
@@ -4812,7 +4911,7 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
 
         if (nhentai.IsConfigured)
         {
-            choices.Add(new ExploreProviderChoice(
+            AddChoice(new ExploreProviderChoice(
                 "nhentai",
                 "nhentai",
                 ProviderType.Manga,
@@ -4823,7 +4922,7 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
 
         if (mangaDex.IsConfigured)
         {
-            choices.Add(new ExploreProviderChoice(
+            AddChoice(new ExploreProviderChoice(
                 "MangaDex",
                 "mangadex",
                 ProviderType.Manga,
@@ -4841,7 +4940,7 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
 
         if (allAnime.IsConfigured)
         {
-            choices.Add(new ExploreProviderChoice(
+            AddChoice(new ExploreProviderChoice(
                 "AllAnime",
                 "allanime",
                 ProviderType.Anime,
@@ -4852,7 +4951,7 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
 
         if (hiAnime.IsConfigured)
         {
-            choices.Add(new ExploreProviderChoice(
+            AddChoice(new ExploreProviderChoice(
                 "HiAnime",
                 "hianime",
                 ProviderType.Anime,
@@ -4863,7 +4962,7 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
 
         if (nineAnime.IsConfigured)
         {
-            choices.Add(new ExploreProviderChoice(
+            AddChoice(new ExploreProviderChoice(
                 "9anime",
                 "9anime",
                 ProviderType.Anime,
@@ -4874,7 +4973,7 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
 
         if (hanime.IsConfigured)
         {
-            choices.Add(new ExploreProviderChoice(
+            AddChoice(new ExploreProviderChoice(
                 "Hanime",
                 "hanime",
                 ProviderType.Anime,
@@ -4896,7 +4995,7 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
             continue;
         }
 
-        choices.Add(new ExploreProviderChoice(
+        AddChoice(new ExploreProviderChoice(
             dp.Name,
             dp.Slug,
             dp.Type,
@@ -4905,7 +5004,83 @@ static async Task<List<ExploreProviderChoice>> BuildExploreProviderChoicesAsync(
             dp.BaseHost));
     }
 
-    return choices;
+    return choices
+        .OrderByDescending(c => c.IsActive)
+        .ThenByDescending(c => c.IsBuiltIn)
+        .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+        .ToList();
+}
+
+static ExploreProviderChoice MergeExploreProviderChoices(ExploreProviderChoice existing, ExploreProviderChoice incoming)
+{
+    var incomingPreferred = ScoreExploreProviderChoice(incoming) > ScoreExploreProviderChoice(existing);
+    var preferred = incomingPreferred ? incoming : existing;
+    var secondary = incomingPreferred ? existing : incoming;
+
+    var mergedSlug = CanonicalizeExploreProviderSlug(preferred.Slug);
+    if (string.IsNullOrWhiteSpace(mergedSlug))
+    {
+        mergedSlug = CanonicalizeExploreProviderSlug(secondary.Slug);
+    }
+
+    if (string.IsNullOrWhiteSpace(mergedSlug))
+    {
+        mergedSlug = string.IsNullOrWhiteSpace(preferred.Slug) ? secondary.Slug : preferred.Slug;
+    }
+
+    return preferred with
+    {
+        Name = string.IsNullOrWhiteSpace(preferred.Name) ? secondary.Name : preferred.Name,
+        Slug = mergedSlug,
+        IsActive = existing.IsActive || incoming.IsActive,
+        Host = string.IsNullOrWhiteSpace(preferred.Host) ? secondary.Host : preferred.Host
+    };
+}
+
+static int ScoreExploreProviderChoice(ExploreProviderChoice choice)
+{
+    var score = 0;
+    if (choice.IsBuiltIn) score += 4;
+    if (choice.IsActive) score += 2;
+    if (!string.IsNullOrWhiteSpace(choice.Host)) score += 1;
+    if (!string.IsNullOrWhiteSpace(choice.Slug)) score += 1;
+    return score;
+}
+
+static string BuildExploreProviderDedupKey(ExploreProviderChoice choice)
+{
+    var slug = CanonicalizeExploreProviderSlug(choice.Slug);
+    if (!string.IsNullOrWhiteSpace(slug))
+    {
+        return $"slug:{slug}";
+    }
+
+    var name = CanonicalizeExploreProviderSlug(choice.Name);
+    if (!string.IsNullOrWhiteSpace(name))
+    {
+        return $"name:{choice.Type}:{name}";
+    }
+
+    var host = choice.Host?.Trim().ToLowerInvariant();
+    return string.IsNullOrWhiteSpace(host)
+        ? $"fallback:{choice.Type}"
+        : $"host:{choice.Type}:{host}";
+}
+
+static string CanonicalizeExploreProviderSlug(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return string.Empty;
+    }
+
+    var normalized = value.Trim().ToLowerInvariant();
+    return normalized switch
+    {
+        "nineanime" => "9anime",
+        "manga-dex" => "mangadex",
+        _ => normalized
+    };
 }
 
 static MultiSelectResult<ExploreProviderChoice> SelectExploreProviders(IReadOnlyList<ExploreProviderChoice> providers, CliMode mode)
@@ -5128,6 +5303,44 @@ static string ShowExploreMenu(CliMode mode, string providerSummary)
     return result.Cancelled ? "exit" : result.Selected!.Id;
 }
 
+static bool IsInteractiveConsole()
+{
+    try
+    {
+        return !Console.IsInputRedirected && !Console.IsOutputRedirected;
+    }
+    catch
+    {
+        return false;
+    }
+}
+
+static bool TryParseExploreLimit(string[] args, out int limit, out string? error)
+{
+    const int defaultLimit = 20;
+    limit = defaultLimit;
+    error = null;
+
+    for (var i = 1; i < args.Length; i++)
+    {
+        if (!args[i].Equals("--limit", StringComparison.OrdinalIgnoreCase))
+        {
+            continue;
+        }
+
+        if (i + 1 >= args.Length || !int.TryParse(args[i + 1], out var parsedLimit) || parsedLimit < 1)
+        {
+            error = "Value for --limit must be a positive integer.";
+            return false;
+        }
+
+        limit = Math.Min(parsedLimit, 200);
+        i++;
+    }
+
+    return true;
+}
+
 /// <summary>
 /// Parse a direct search query from explore args (non-flag arguments after "explore").
 /// </summary>
@@ -5135,11 +5348,11 @@ static string? ParseExploreQuery(string[] args)
 {
     var flagsWithValues = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "--genre", "--year", "--status", "--sort", "--score", "--country"
+        "--genre", "--year", "--status", "--sort", "--score", "--country", "--limit"
     };
     var standaloneFlags = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "--popular", "-p", "--quick", "-q", "--json"
+        "--popular", "-p", "--quick", "-q", "--json", "--non-interactive", "-n"
     };
 
     var queryParts = new List<string>();
@@ -5232,6 +5445,157 @@ static async Task<int> RunExploreSessionAsync(
     var selectedEntry = selection.Selected;
     return await HandleExploreEntryActionAsync(mode, selectedEntry, providerContexts, statusLookup, services, logger, defaults, cancellationToken);
 }
+
+static async Task<int> RunExploreNonInteractiveAsync(
+    CliMode mode,
+    string? directQuery,
+    bool popularMode,
+    SearchFilters filters,
+    IReadOnlyList<ExploreProviderContext> providerContexts,
+    ListStatusLookup statusLookup,
+    ILogger logger,
+    CancellationToken cancellationToken,
+    bool jsonOutput,
+    int outputLimit)
+{
+    if (!popularMode && string.IsNullOrWhiteSpace(directQuery))
+    {
+        Console.WriteLine("Non-interactive explore requires a query or --popular.");
+        Console.WriteLine("Try: koware explore \"one piece\" --non-interactive");
+        return 1;
+    }
+
+    var view = popularMode ? ExploreView.Popular : ExploreView.Search;
+    List<ExploreEntry> entries;
+    try
+    {
+        entries = await FetchExploreEntriesAsync(
+            mode,
+            view,
+            directQuery,
+            filters,
+            providerContexts,
+            statusLookup,
+            logger,
+            cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Explore failed in non-interactive mode");
+        Console.WriteLine("Explore failed.");
+        return 1;
+    }
+
+    return RenderExploreEntriesNonInteractive(mode, view, directQuery, entries, jsonOutput, outputLimit);
+}
+
+static int RenderExploreEntriesNonInteractive(
+    CliMode mode,
+    ExploreView view,
+    string? query,
+    IReadOnlyList<ExploreEntry> entries,
+    bool jsonOutput,
+    int outputLimit)
+{
+    var limitedEntries = entries
+        .OrderBy(e => e.Title, StringComparer.OrdinalIgnoreCase)
+        .ThenBy(e => e.ProviderName, StringComparer.OrdinalIgnoreCase)
+        .Take(outputLimit)
+        .ToList();
+
+    if (jsonOutput)
+    {
+        var payload = new
+        {
+            mode = mode == CliMode.Manga ? "manga" : "anime",
+            view = view == ExploreView.Popular ? "popular" : "search",
+            query = view == ExploreView.Search ? query : null,
+            count = entries.Count,
+            returned = limitedEntries.Count,
+            entries = limitedEntries.Select(entry => new
+            {
+                title = entry.Title,
+                provider = new { name = entry.ProviderName, slug = entry.ProviderSlug },
+                id = mode == CliMode.Manga ? entry.Manga?.Id.Value : entry.Anime?.Id.Value,
+                synopsis = entry.Synopsis,
+                detail = entry.DetailUrl,
+                count = entry.Count,
+                status = FormatExploreStatus(entry.Status)
+            })
+        };
+
+        Console.WriteLine(JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        return 0;
+    }
+
+    if (entries.Count == 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine(view == ExploreView.Search
+            ? $"No results for \"{query}\"."
+            : "No popular entries found.");
+        Console.ResetColor();
+        return 0;
+    }
+
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine(view == ExploreView.Search
+        ? $"Explore results for \"{query}\" ({entries.Count} total, showing {limitedEntries.Count})"
+        : $"Explore popular results ({entries.Count} total, showing {limitedEntries.Count})");
+    Console.ResetColor();
+    Console.WriteLine();
+
+    foreach (var entry in limitedEntries)
+    {
+        Console.WriteLine($"  {entry.Title} [{entry.ProviderName}]");
+
+        var details = new List<string>();
+        if (entry.Count.HasValue)
+        {
+            details.Add($"{(mode == CliMode.Manga ? "chapters" : "episodes")}: {entry.Count.Value}");
+        }
+
+        var status = FormatExploreStatus(entry.Status);
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            details.Add($"status: {status}");
+        }
+
+        if (details.Count > 0)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine($"    {string.Join(" | ", details)}");
+            Console.ResetColor();
+        }
+
+        if (!string.IsNullOrWhiteSpace(entry.DetailUrl))
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine($"    {entry.DetailUrl}");
+            Console.ResetColor();
+        }
+    }
+
+    if (entries.Count > limitedEntries.Count)
+    {
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"Showing first {limitedEntries.Count} result(s). Use --limit <n> to show more.");
+        Console.ResetColor();
+    }
+
+    return 0;
+}
+
+static string? FormatExploreStatus(ItemStatus status) => status switch
+{
+    ItemStatus.Watched => "completed",
+    ItemStatus.InProgress => "in-progress",
+    ItemStatus.New => "planned",
+    ItemStatus.Downloaded => "downloaded",
+    _ => null
+};
 
 /// <summary>
 /// Show explore history (continue watching/reading).
@@ -10212,7 +10576,7 @@ static void PrintUsage()
 {
     WriteHeader($"Koware CLI {GetVersionLabel()}");
     Console.WriteLine("Usage:");
-    WriteCommand("explore [query] [--popular] [-q]", "Interactive explorer with search, popular, and history.", ConsoleColor.Cyan);
+    WriteCommand("explore [query] [--popular] [-q] [--non-interactive] [--json]", "Interactive explorer with search, popular, and history.", ConsoleColor.Cyan);
     WriteCommand("stream <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Show plan + streams, no player.", ConsoleColor.Cyan);
     WriteCommand("watch <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Pick a stream and play (alias: play).", ConsoleColor.Green);
     WriteCommand("play <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Same as watch.", ConsoleColor.Green);
@@ -10251,6 +10615,9 @@ static List<string> GetHelpLines(string command, CliMode mode)
             lines.Add("  <query>        Direct search (skips menu): koware explore \"naruto\"");
             lines.Add("  --popular, -p  Go straight to popular/trending entries");
             lines.Add("  --quick, -q    Skip provider selection (use all active)");
+            lines.Add("  --non-interactive, -n  Disable TUI; print results to stdout");
+            lines.Add("  --json         Output structured JSON (implies non-interactive)");
+            lines.Add("  --limit <n>    Max results for non-interactive output (default: 20)");
             lines.Add("  --genre <g>    Filter by genre");
             lines.Add("  --year <y>     Filter by year");
             lines.Add("");
@@ -10275,6 +10642,8 @@ static List<string> GetHelpLines(string command, CliMode mode)
             lines.Add("  koware explore \"demon slayer\"     # Direct search");
             lines.Add("  koware explore --popular          # Browse trending");
             lines.Add("  koware explore -q \"bleach\"        # Quick search (skip provider select)");
+            lines.Add("  koware explore \"bleach\" -n --limit 10");
+            lines.Add("  koware explore --popular --json");
             break;
 
         case "search":
@@ -10829,13 +11198,18 @@ static int HandleHelp(string[] args, CliMode mode)
     {
         case "explore":
             PrintTopicHeader("explore", "Interactive catalog explorer with providers, search, and actions.");
-            Console.WriteLine("Usage: koware explore");
+            Console.WriteLine("Usage: koware explore [query] [--popular] [-q] [--non-interactive] [--json]");
             Console.WriteLine("Mode : explores anime or manga based on current mode (use 'koware mode' to switch).");
             Console.WriteLine();
             Console.WriteLine("Flow:");
             Console.WriteLine("  • Select one or more providers");
             Console.WriteLine("  • Choose Search or Popular");
             Console.WriteLine("  • View details and take actions (watch/read, add to list)");
+            Console.WriteLine();
+            Console.WriteLine("Non-interactive mode:");
+            Console.WriteLine("  • Use --non-interactive (or --json) to print results without TUI");
+            Console.WriteLine("  • Requires a query or --popular");
+            Console.WriteLine("  • Use --limit <n> to control output size");
             Console.WriteLine();
             Console.WriteLine("Tips:");
             Console.WriteLine("  • Type to filter results (fzf-style)");
