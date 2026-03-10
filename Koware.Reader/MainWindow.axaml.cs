@@ -55,7 +55,13 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _zenHideTimer;
     private readonly DispatcherTimer _zenToastTimer;
     private BookmarkAnchor? _pendingBookmarkRestore;
+    private BookmarkAnchor? _activeBookmark;
     private bool _bookmarkRestoreQueued;
+    private bool _bookmarkPlacementMode;
+    private Point _lastPointerPosition;
+    private Border? _bookmarkMarkerVisual;
+    private Border? _bookmarkCursorGhostVisual;
+    private readonly List<Canvas> _bookmarkLayers = new();
 
     public List<PageInfo> Pages { get; set; } = new();
     public List<ChapterInfo> Chapters { get; set; } = new();
@@ -93,7 +99,7 @@ public partial class MainWindow : Window
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "Koware", "reader-bookmarks.json");
 
-    private sealed record BookmarkAnchor(int Page, double OffsetRatio, int TotalPages, long SavedAtMs);
+    private sealed record BookmarkAnchor(int Page, double OffsetRatio, double HorizontalRatio, int TotalPages, long SavedAtMs);
 
     public MainWindow()
     {
@@ -154,6 +160,10 @@ public partial class MainWindow : Window
             _zenToastTimer.Stop();
             ZenToast.IsVisible = false;
         };
+
+        _bookmarkCursorGhostVisual = CreateBookmarkVisual(isGhost: true);
+        _bookmarkCursorGhostVisual.IsVisible = false;
+        BookmarkOverlayCanvas.Children.Add(_bookmarkCursorGhostVisual);
     }
     
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
@@ -207,17 +217,20 @@ public partial class MainWindow : Window
         if (bookmark is not null)
         {
             _pendingBookmarkRestore = bookmark;
+            _activeBookmark = bookmark;
             SetCurrentPageState(bookmark.Page);
             UpdateBookmarkButtonState(true);
         }
         else if (StartPage > 1 && StartPage <= Pages.Count)
         {
+            _activeBookmark = null;
             SetCurrentPageState(StartPage);
             UpdateBookmarkButtonState(false);
         }
         else
         {
             // Restore page-level position when no explicit bookmark exists.
+            _activeBookmark = null;
             RestorePosition();
             UpdateBookmarkButtonState(false);
         }
@@ -338,6 +351,7 @@ public partial class MainWindow : Window
     {
         var totalPages = Pages.Count;
         _loadedCount = 0;
+        _bookmarkLayers.Clear();
 
         try
         {
@@ -377,13 +391,20 @@ public partial class MainWindow : Window
                 // Bind overlay size to image size
                 sepiaOverlay.Bind(WidthProperty, new Avalonia.Data.Binding("Bounds.Width") { Source = image });
                 sepiaOverlay.Bind(HeightProperty, new Avalonia.Data.Binding("Bounds.Height") { Source = image });
+
+                var bookmarkLayer = new Canvas
+                {
+                    IsHitTestVisible = false
+                };
                 
                 grid.Children.Add(image);
                 grid.Children.Add(sepiaOverlay);
+                grid.Children.Add(bookmarkLayer);
                 
                 _pageImages.Add(image);
                 _sepiaOverlays.Add(sepiaOverlay);
                 _pageGrids.Add(grid);
+                _bookmarkLayers.Add(bookmarkLayer);
                 container.Child = grid;
                 PagesContainer.Children.Add(container);
                 _pagePlaceholders[page.PageNumber] = container;
@@ -408,6 +429,10 @@ public partial class MainWindow : Window
                             {
                                 _pageImages[index].Source = bitmap;
                                 ApplyFitMode(_pageImages[index]);
+                                if (_activeBookmark?.Page == page.PageNumber)
+                                {
+                                    RefreshBookmarkVisual();
+                                }
                             }
                             else
                             {
@@ -434,6 +459,7 @@ public partial class MainWindow : Window
 
                             // Apply exact bookmark anchor after layout and images are ready.
                             QueueBookmarkRestore();
+                            RefreshBookmarkVisual();
                         }
                     });
                 }
@@ -596,6 +622,8 @@ public partial class MainWindow : Window
         {
             ApplyFitMode(image);
         }
+
+        RefreshBookmarkVisual();
     }
 
     private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
@@ -689,11 +717,26 @@ public partial class MainWindow : Window
     {
         if (hasBookmark)
         {
-            BookmarkButton.Classes.Add("active");
+            if (!BookmarkButton.Classes.Contains("active"))
+            {
+                BookmarkButton.Classes.Add("active");
+            }
         }
         else
         {
             BookmarkButton.Classes.Remove("active");
+        }
+
+        if (_bookmarkPlacementMode)
+        {
+            if (!BookmarkButton.Classes.Contains("placing"))
+            {
+                BookmarkButton.Classes.Add("placing");
+            }
+        }
+        else
+        {
+            BookmarkButton.Classes.Remove("placing");
         }
     }
 
@@ -748,7 +791,11 @@ public partial class MainWindow : Window
                 break;
                 
             case Key.Escape:
-                if (_chaptersOpen)
+                if (_bookmarkPlacementMode)
+                {
+                    CancelBookmarkPlacement(showToast: true);
+                }
+                else if (_chaptersOpen)
                 {
                     ToggleChaptersPanel(false);
                 }
@@ -831,9 +878,16 @@ public partial class MainWindow : Window
                 e.Handled = true;
                 break;
 
-            // Bookmark current viewport anchor
+            // Bookmark placement mode
             case Key.B:
-                SaveBookmark();
+                if (_bookmarkPlacementMode)
+                {
+                    CancelBookmarkPlacement(showToast: true);
+                }
+                else
+                {
+                    BeginBookmarkPlacement();
+                }
                 e.Handled = true;
                 break;
         }
@@ -1103,7 +1157,39 @@ public partial class MainWindow : Window
 
     private void OnBookmarkClick(object? sender, RoutedEventArgs e)
     {
-        SaveBookmark();
+        if (_bookmarkPlacementMode)
+        {
+            CancelBookmarkPlacement(showToast: true);
+        }
+        else
+        {
+            BeginBookmarkPlacement();
+        }
+    }
+
+    private void OnReaderPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!_bookmarkPlacementMode)
+        {
+            return;
+        }
+
+        if (!e.GetCurrentPoint(ScrollViewer).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        var viewportPoint = e.GetPosition(ScrollViewer);
+        if (!TryCaptureBookmarkAtViewportPoint(viewportPoint, out var bookmark))
+        {
+            ShowToast("Click directly on a page to place bookmark");
+            e.Handled = true;
+            return;
+        }
+
+        SaveBookmark(bookmark);
+        CancelBookmarkPlacement(showToast: false);
+        e.Handled = true;
     }
     
     private void RebuildPageLayout()
@@ -1564,12 +1650,17 @@ public partial class MainWindow : Window
 
     private void OnWindowPointerMoved(object? sender, PointerEventArgs e)
     {
+        _lastPointerPosition = e.GetPosition(this);
+        if (_bookmarkPlacementMode)
+        {
+            UpdateBookmarkGhostPosition(_lastPointerPosition);
+        }
+
         if (_zenMode)
         {
             // In zen mode, only show UI when hovering near the top (header area)
-            var pos = e.GetPosition(this);
             var headerHeight = HeaderBar.Bounds.Height + 20; // Add some margin
-            if (pos.Y <= headerHeight)
+            if (_lastPointerPosition.Y <= headerHeight)
             {
                 SetUiVisibility(true);
                 _zenHideTimer.Stop();
@@ -1839,11 +1930,57 @@ public partial class MainWindow : Window
             : $"koware.reader.bookmark.{encoded}";
     }
 
-    private void SaveBookmark()
+    private void BeginBookmarkPlacement()
     {
-        var bookmark = CaptureBookmarkAnchor();
+        _bookmarkPlacementMode = true;
+        if (_bookmarkCursorGhostVisual is not null)
+        {
+            _bookmarkCursorGhostVisual.IsVisible = true;
+            UpdateBookmarkGhostPosition(_lastPointerPosition);
+        }
+
+        Cursor = new Cursor(StandardCursorType.Cross);
+        UpdateBookmarkButtonState(_activeBookmark is not null);
+        ShowToast("Click on a page to place bookmark");
+    }
+
+    private void CancelBookmarkPlacement(bool showToast)
+    {
+        _bookmarkPlacementMode = false;
+        if (_bookmarkCursorGhostVisual is not null)
+        {
+            _bookmarkCursorGhostVisual.IsVisible = false;
+        }
+
+        Cursor = null;
+        UpdateBookmarkButtonState(_activeBookmark is not null);
+
+        if (showToast)
+        {
+            ShowToast("Bookmark placement cancelled");
+        }
+    }
+
+    private void UpdateBookmarkGhostPosition(Point position)
+    {
+        if (_bookmarkCursorGhostVisual is null)
+        {
+            return;
+        }
+
+        const double offsetX = 8;
+        const double offsetY = -6;
+        Canvas.SetLeft(_bookmarkCursorGhostVisual, position.X + offsetX);
+        Canvas.SetTop(_bookmarkCursorGhostVisual, position.Y + offsetY);
+    }
+
+    private void SaveBookmark(BookmarkAnchor? explicitBookmark = null)
+    {
+        var bookmark = explicitBookmark ?? CaptureBookmarkAnchor();
         PersistBookmark(bookmark);
         _pendingBookmarkRestore = bookmark;
+        _activeBookmark = bookmark;
+        RefreshBookmarkVisual();
         UpdateBookmarkButtonState(true);
 
         if (bookmark.Page != _currentPage)
@@ -1870,8 +2007,55 @@ public partial class MainWindow : Window
         return new BookmarkAnchor(
             page,
             Math.Clamp(ratio, 0, 1),
+            0.5,
             Pages.Count,
             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+    }
+
+    private bool TryCaptureBookmarkAtViewportPoint(Point viewportPoint, out BookmarkAnchor bookmark)
+    {
+        bookmark = CaptureBookmarkAnchor();
+
+        for (int i = 0; i < _pageImages.Count; i++)
+        {
+            var image = _pageImages[i];
+            if (!image.IsVisible || image.Bounds.Width <= 1 || image.Bounds.Height <= 1)
+            {
+                continue;
+            }
+
+            try
+            {
+                var transform = image.TransformToVisual(ScrollViewer);
+                if (transform is null)
+                {
+                    continue;
+                }
+
+                var topLeft = transform.Value.Transform(new Point(0, 0));
+                var imageRect = new Rect(topLeft, image.Bounds.Size);
+                if (!imageRect.Contains(viewportPoint))
+                {
+                    continue;
+                }
+
+                var xRatio = Math.Clamp((viewportPoint.X - imageRect.X) / imageRect.Width, 0, 1);
+                var yRatio = Math.Clamp((viewportPoint.Y - imageRect.Y) / imageRect.Height, 0, 1);
+                bookmark = new BookmarkAnchor(
+                    i + 1,
+                    yRatio,
+                    xRatio,
+                    Pages.Count,
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                return true;
+            }
+            catch
+            {
+                // skip invalid transforms
+            }
+        }
+
+        return false;
     }
 
     private bool TryResolveAnchorAtViewportY(double viewportY, out int page, out double offsetRatio)
@@ -1936,6 +2120,103 @@ public partial class MainWindow : Window
         return false;
     }
 
+    private Border CreateBookmarkVisual(bool isGhost)
+    {
+        var fill = isGhost ? "#80ef4444" : "#ef4444";
+        var stroke = isGhost ? "#99fecaca" : "#7f1d1d";
+        return new Border
+        {
+            Width = 18,
+            Height = 24,
+            IsHitTestVisible = false,
+            Opacity = isGhost ? 0.55 : 1.0,
+            Child = new Avalonia.Controls.Shapes.Path
+            {
+                Data = Geometry.Parse("M6 3h12v18l-6-4-6 4z"),
+                Stretch = Stretch.Fill,
+                Fill = new SolidColorBrush(Color.Parse(fill)),
+                Stroke = new SolidColorBrush(Color.Parse(stroke)),
+                StrokeThickness = 1.6
+            }
+        };
+    }
+
+    private void RefreshBookmarkVisual()
+    {
+        if (_activeBookmark is not { } bookmark)
+        {
+            ClearBookmarkVisual();
+            return;
+        }
+
+        var pageIndex = bookmark.Page - 1;
+        if (pageIndex < 0 || pageIndex >= _bookmarkLayers.Count || pageIndex >= _pageImages.Count || pageIndex >= _pageGrids.Count)
+        {
+            ClearBookmarkVisual();
+            return;
+        }
+
+        var targetLayer = _bookmarkLayers[pageIndex];
+        if (_bookmarkMarkerVisual is null || !ReferenceEquals(_bookmarkMarkerVisual.Parent, targetLayer))
+        {
+            ClearBookmarkVisual();
+            _bookmarkMarkerVisual = CreateBookmarkVisual(isGhost: false);
+            targetLayer.Children.Add(_bookmarkMarkerVisual);
+        }
+
+        PositionBookmarkVisual(bookmark);
+    }
+
+    private void ClearBookmarkVisual()
+    {
+        if (_bookmarkMarkerVisual?.Parent is Panel panel)
+        {
+            panel.Children.Remove(_bookmarkMarkerVisual);
+        }
+
+        _bookmarkMarkerVisual = null;
+    }
+
+    private void PositionBookmarkVisual(BookmarkAnchor bookmark)
+    {
+        if (_bookmarkMarkerVisual is null)
+        {
+            return;
+        }
+
+        var pageIndex = bookmark.Page - 1;
+        if (pageIndex < 0 || pageIndex >= _pageImages.Count || pageIndex >= _pageGrids.Count)
+        {
+            _bookmarkMarkerVisual.IsVisible = false;
+            return;
+        }
+
+        var image = _pageImages[pageIndex];
+        var grid = _pageGrids[pageIndex];
+        if (image.Bounds.Width <= 1 || image.Bounds.Height <= 1)
+        {
+            _bookmarkMarkerVisual.IsVisible = false;
+            return;
+        }
+
+        var transform = image.TransformToVisual(grid);
+        if (transform is null)
+        {
+            _bookmarkMarkerVisual.IsVisible = false;
+            return;
+        }
+
+        var topLeft = transform.Value.Transform(new Point(0, 0));
+        var normalizedX = Math.Clamp(bookmark.HorizontalRatio, 0, 1);
+        var normalizedY = Math.Clamp(bookmark.OffsetRatio, 0, 1);
+        var x = topLeft.X + (image.Bounds.Width * normalizedX) - (_bookmarkMarkerVisual.Width / 2);
+        var y = topLeft.Y + (image.Bounds.Height * normalizedY) - _bookmarkMarkerVisual.Height;
+
+        Canvas.SetLeft(_bookmarkMarkerVisual, x);
+        Canvas.SetTop(_bookmarkMarkerVisual, y);
+        _bookmarkMarkerVisual.IsVisible = true;
+    }
+
     private void QueueBookmarkRestore()
     {
         if (_bookmarkRestoreQueued || _pendingBookmarkRestore is null)
@@ -1955,7 +2236,9 @@ public partial class MainWindow : Window
             if (TryApplyBookmark(bookmark))
             {
                 _pendingBookmarkRestore = null;
+                _activeBookmark = bookmark;
                 UpdateBookmarkButtonState(true);
+                RefreshBookmarkVisual();
                 SavePosition();
                 var offsetPct = (int)Math.Round(bookmark.OffsetRatio * 100);
                 ShowToast($"Resumed bookmark: {bookmark.Page}/{Pages.Count} ({offsetPct}%)");
@@ -1970,6 +2253,9 @@ public partial class MainWindow : Window
             }
 
             _pendingBookmarkRestore = null;
+            _activeBookmark = bookmark;
+            UpdateBookmarkButtonState(true);
+            RefreshBookmarkVisual();
             NavigateToPage(bookmark.Page, showToast: true);
         }, DispatcherPriority.Render);
     }
@@ -2047,6 +2333,7 @@ public partial class MainWindow : Window
             {
                 page = bookmark.Page,
                 offsetRatio = bookmark.OffsetRatio,
+                horizontalRatio = bookmark.HorizontalRatio,
                 total = bookmark.TotalPages,
                 savedAt = bookmark.SavedAtMs
             };
@@ -2097,11 +2384,15 @@ public partial class MainWindow : Window
                 ? offsetRatio
                 : 0;
 
+            var horizontalRatio = bookmark.TryGetProperty("horizontalRatio", out var horizontalRatioEl) && horizontalRatioEl.TryGetDouble(out var xRatio)
+                ? xRatio
+                : 0.5;
+
             var savedAt = bookmark.TryGetProperty("savedAt", out var savedAtEl) && savedAtEl.TryGetInt64(out var savedAtMs)
                 ? savedAtMs
                 : 0;
 
-            return new BookmarkAnchor(page, Math.Clamp(ratio, 0, 1), total, savedAt);
+            return new BookmarkAnchor(page, Math.Clamp(ratio, 0, 1), Math.Clamp(horizontalRatio, 0, 1), total, savedAt);
         }
         catch
         {

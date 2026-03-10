@@ -63,6 +63,16 @@
         <Style Selector="Button.toolbar-sm:pointerover">
             <Setter Property="Background" Value="#1e2d45" />
         </Style>
+        <Style Selector="Button.toolbar-sm.active">
+            <Setter Property="Background" Value="#1e3a5f" />
+            <Setter Property="BorderBrush" Value="#38bdf8" />
+            <Setter Property="Foreground" Value="#38bdf8" />
+        </Style>
+        <Style Selector="Button.toolbar-sm.placing">
+            <Setter Property="Background" Value="#3a1f29" />
+            <Setter Property="BorderBrush" Value="#f87171" />
+            <Setter Property="Foreground" Value="#fca5a5" />
+        </Style>
         
         <!-- Nav buttons -->
         <Style Selector="Button.nav-btn">
@@ -260,7 +270,7 @@
                     <!-- Bookmark button -->
                     <Button x:Name="BookmarkButton" Classes="toolbar-sm"
                             Click="OnBookmarkClick"
-                            ToolTip.Tip="Save bookmark at current viewport (B)">
+                            ToolTip.Tip="Place bookmark (B)">
                         <StackPanel Orientation="Horizontal" Spacing="4">
                             <TextBlock Text="Bookmark" VerticalAlignment="Center" />
                             <Viewbox Width="14" Height="14" Stretch="Uniform">
@@ -423,6 +433,7 @@
                 <ScrollViewer x:Name="ScrollViewer"
                               HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Auto"
+                              PointerPressed="OnReaderPointerPressed"
                               Background="{DynamicResource ReaderBackground}">
                     <StackPanel x:Name="PagesContainer"
                                 HorizontalAlignment="Center"
@@ -660,7 +671,7 @@
                         <Border Classes="shortcut-row">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="B" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
-                                <TextBlock Text="Bookmark current viewport position" Foreground="#ccc" />
+                                <TextBlock Text="Place bookmark at clicked point" Foreground="#ccc" />
                             </StackPanel>
                         </Border>
                         
@@ -834,5 +845,10 @@
                 </ScrollViewer>
             </Grid>
         </Border>
+
+        <Canvas x:Name="BookmarkOverlayCanvas"
+                Grid.RowSpan="3"
+                Panel.ZIndex="120"
+                IsHitTestVisible="False" />
     </Grid>
 </Window>
