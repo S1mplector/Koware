@@ -466,6 +466,7 @@ public sealed class AllMangaCatalog : IMangaCatalog
         start.ArgumentList.Add("--silent");
         start.ArgumentList.Add("--show-error");
         start.ArgumentList.Add("--location");
+        start.ArgumentList.Add("--globoff");
         start.ArgumentList.Add("--fail");
         start.ArgumentList.Add("--compressed");
         start.ArgumentList.Add("--max-time");
@@ -488,7 +489,7 @@ public sealed class AllMangaCatalog : IMangaCatalog
         start.ArgumentList.Add("Accept: application/json, */*");
         start.ArgumentList.Add("-H");
         start.ArgumentList.Add("Accept-Language: en-US,en;q=0.9");
-        start.ArgumentList.Add(uri.ToString());
+        start.ArgumentList.Add(uri.AbsoluteUri);
 
         process.StartInfo = start;
         if (!process.Start())

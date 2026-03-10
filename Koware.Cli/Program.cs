@@ -4088,6 +4088,116 @@ static string BuildSyntheticChapterId(string mangaId, float chapterNumber)
         : $"{providerSlug}:{coreChapterId}";
 }
 
+static string StripProviderPrefix(string id)
+{
+    if (string.IsNullOrWhiteSpace(id))
+    {
+        return id;
+    }
+
+    var idx = id.IndexOf(':');
+    if (idx <= 0)
+    {
+        return id;
+    }
+
+    var possibleSlug = id[..idx];
+    if (possibleSlug.All(char.IsDigit) || idx + 1 >= id.Length)
+    {
+        return id;
+    }
+
+    return id[(idx + 1)..];
+}
+
+static async Task<IReadOnlyCollection<ChapterPage>> TryLoadPagesFromMangaIdFallbackAsync(
+    IServiceProvider services,
+    IMangaCatalog mangaCatalog,
+    Chapter selectedChapter,
+    string preferredMangaId,
+    ILogger logger,
+    CancellationToken cancellationToken)
+{
+    var chapterNumberRaw = selectedChapter.Number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    var candidateChapterIds = new List<string>();
+
+    void AddCandidate(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return;
+        }
+
+        if (candidateChapterIds.Contains(id, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        candidateChapterIds.Add(id);
+    }
+
+    AddCandidate(selectedChapter.Id.Value);
+    AddCandidate(BuildSyntheticChapterId(preferredMangaId, selectedChapter.Number));
+
+    var coreMangaId = StripProviderPrefix(preferredMangaId);
+    if (!string.IsNullOrWhiteSpace(coreMangaId))
+    {
+        AddCandidate(BuildSyntheticChapterId(coreMangaId, selectedChapter.Number));
+        AddCandidate(BuildSyntheticChapterId($"allmanga:{coreMangaId}", selectedChapter.Number));
+    }
+
+    foreach (var candidateId in candidateChapterIds)
+    {
+        var candidateChapter = new Chapter(
+            new ChapterId(candidateId),
+            selectedChapter.Title,
+            selectedChapter.Number,
+            selectedChapter.PageUrl);
+
+        try
+        {
+            var candidatePages = await mangaCatalog.GetPagesAsync(candidateChapter, cancellationToken);
+            if (candidatePages.Count > 0)
+            {
+                return candidatePages;
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Fallback page probe failed for chapter id {ChapterId}.", candidateId);
+        }
+    }
+
+    if (!string.IsNullOrWhiteSpace(coreMangaId))
+    {
+        var allMangaCatalog = services.GetService<AllMangaCatalog>();
+        if (allMangaCatalog is not null)
+        {
+            var directChapter = new Chapter(
+                new ChapterId($"{coreMangaId}:ch-{chapterNumberRaw}"),
+                selectedChapter.Title,
+                selectedChapter.Number,
+                selectedChapter.PageUrl);
+
+            try
+            {
+                var directPages = await allMangaCatalog.GetPagesAsync(directChapter, cancellationToken);
+                if (directPages.Count > 0)
+                {
+                    return directPages;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Direct AllManga fallback failed for manga id {MangaId}.", coreMangaId);
+            }
+        }
+    }
+
+    logger.LogDebug("Fallback page loading did not return any pages for manga id {MangaId}.", preferredMangaId);
+    return Array.Empty<ChapterPage>();
+}
+
 /// <summary>
 /// Print an error message and return exit code 1.
 /// </summary>
@@ -7138,6 +7248,22 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
     {
         pagesStep.Fail("Failed to fetch pages");
         throw;
+    }
+
+    if (pages.Count == 0 && !string.IsNullOrWhiteSpace(preferredMangaId))
+    {
+        var fallbackPages = await TryLoadPagesFromMangaIdFallbackAsync(
+            services,
+            mangaCatalog,
+            selectedChapter,
+            preferredMangaId,
+            logger,
+            cancellationToken);
+
+        if (fallbackPages.Count > 0)
+        {
+            pages = fallbackPages;
+        }
     }
 
     if (pages.Count == 0)
