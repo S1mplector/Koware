@@ -3784,6 +3784,20 @@ static string RenderProgressBar(int current, int? total, int width)
     return new string('█', filled) + new string('░', empty);
 }
 
+static bool UseCatalogNextChapterResolution()
+{
+    var value = Environment.GetEnvironmentVariable("KOWARE_LIST_USE_CATALOG_RESOLVE");
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return false;
+    }
+
+    return value.Equals("1", StringComparison.OrdinalIgnoreCase)
+        || value.Equals("true", StringComparison.OrdinalIgnoreCase)
+        || value.Equals("yes", StringComparison.OrdinalIgnoreCase)
+        || value.Equals("on", StringComparison.OrdinalIgnoreCase);
+}
+
 // ===== Manga List Functions =====
 
 static async Task<int> HandleMangaListAsync(string[] args, IServiceProvider services, ILogger logger, CancellationToken cancellationToken)
@@ -3800,7 +3814,19 @@ static async Task<int> HandleMangaListAsync(string[] args, IServiceProvider serv
         
         Func<MangaListEntry, Task> onRead = async entry =>
         {
-            var (chapterNum, startPage) = await ResolveNextChapterAsync(entry, svc, log, ct);
+            float? chapterNum;
+            int startPage;
+            if (UseCatalogNextChapterResolution())
+            {
+                (chapterNum, startPage) = await ResolveNextChapterAsync(entry, svc, log, ct);
+            }
+            else
+            {
+                var readHistory = svc.GetRequiredService<IReadHistoryStore>();
+                var resumeTarget = await MangaChapterResumeResolver.ResolveAsync(entry, readHistory, ct);
+                chapterNum = resumeTarget.ChapterNumber;
+                startPage = resumeTarget.StartPage;
+            }
             
             var readArgs = new List<string> { "read", entry.MangaTitle };
             if (chapterNum.HasValue)
@@ -7630,21 +7656,30 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
     var query = string.Join(' ', queryParts).Trim();
     var mangaCatalog = services.GetRequiredService<IMangaCatalog>();
 
-    // Search for manga
-    var searchStep = ConsoleStep.Start("Searching manga");
-    IReadOnlyCollection<Manga> results;
-    try
+    var hasPreferredMangaId = !string.IsNullOrWhiteSpace(preferredMangaId);
+    IReadOnlyCollection<Manga> results = Array.Empty<Manga>();
+
+    // Search is only needed when we don't already have a concrete manga id.
+    if (!hasPreferredMangaId || preferredIndex.HasValue)
     {
-        results = await mangaCatalog.SearchAsync(query, cancellationToken);
-        searchStep.Succeed($"Found {results.Count} result(s)");
+        var searchStep = ConsoleStep.Start("Searching manga");
+        try
+        {
+            results = await mangaCatalog.SearchAsync(query, cancellationToken);
+            searchStep.Succeed($"Found {results.Count} result(s)");
+        }
+        catch (Exception)
+        {
+            searchStep.Fail("Search failed");
+            throw;
+        }
     }
-    catch (Exception)
+    else
     {
-        searchStep.Fail("Search failed");
-        throw;
+        logger.LogInformation("Using provided manga id for \"{Query}\" (search skipped).", query);
     }
 
-    if (results.Count == 0 && string.IsNullOrWhiteSpace(preferredMangaId))
+    if (results.Count == 0 && !hasPreferredMangaId)
     {
         logger.LogWarning("No manga found for query: {Query}", query);
         return 1;
@@ -7652,7 +7687,7 @@ static async Task<int> HandleReadAsync(string[] args, IServiceProvider services,
 
     // Select manga
     Manga selectedManga;
-    var selectedById = !string.IsNullOrWhiteSpace(preferredMangaId)
+    var selectedById = hasPreferredMangaId
         ? results.FirstOrDefault(m => MangaIdsMatch(m.Id.Value, preferredMangaId))
         : null;
 
