@@ -2656,7 +2656,7 @@ static async Task<int> HandleContinueMangaAsync(string[] args, IServiceProvider 
         "--start-page", startPage.ToString()
     };
     var defaults = services.GetRequiredService<IOptions<DefaultCliOptions>>().Value;
-    return await HandleReadAsync(readArgs.ToArray(), services, logger, defaults, cancellationToken);
+    return await RunReadCommandAsync(readArgs.ToArray(), services, logger, defaults, cancellationToken);
 }
 
 /// <summary>
@@ -3149,7 +3149,7 @@ static async Task<int> HandleMangaHistoryAsync(string[] args, IServiceProvider s
                     "--non-interactive"
                 };
                 var cliDefaults = services.GetRequiredService<IOptions<DefaultCliOptions>>().Value;
-                await HandleReadAsync(readArgs.ToArray(), services, logger, cliDefaults, cancellationToken);
+                await RunReadCommandAsync(readArgs.ToArray(), services, logger, cliDefaults, cancellationToken);
             },
             cancellationToken: cancellationToken);
         return await historyManager.RunAsync();
@@ -3841,7 +3841,7 @@ static async Task<int> HandleMangaListAsync(string[] args, IServiceProvider serv
             readArgs.Add(entry.MangaId);
             readArgs.Add("--non-interactive");
             
-            await HandleReadAsync(readArgs.ToArray(), svc, log, defaults, ct);
+            await RunReadCommandAsync(readArgs.ToArray(), svc, log, defaults, ct);
         };
 
         var listManager = new Koware.Cli.Console.InteractiveMangaListManager(
@@ -7565,6 +7565,141 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
     Console.ResetColor();
 
     return 0;
+}
+
+static bool ShouldIsolateReadProcess()
+{
+    if (!OperatingSystem.IsMacOS())
+    {
+        return false;
+    }
+
+    var disableIsolation = Environment.GetEnvironmentVariable("KOWARE_DISABLE_READ_ISOLATION");
+    if (string.IsNullOrWhiteSpace(disableIsolation))
+    {
+        return true;
+    }
+
+    return !(disableIsolation.Equals("1", StringComparison.OrdinalIgnoreCase)
+        || disableIsolation.Equals("true", StringComparison.OrdinalIgnoreCase)
+        || disableIsolation.Equals("yes", StringComparison.OrdinalIgnoreCase)
+        || disableIsolation.Equals("on", StringComparison.OrdinalIgnoreCase));
+}
+
+static async Task<int?> TryRunKowareSubprocessAsync(IReadOnlyList<string> commandArgs, ILogger logger, CancellationToken cancellationToken)
+{
+    var startInfos = new List<ProcessStartInfo>();
+    var dedupe = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    void AddStartInfo(string fileName, IEnumerable<string>? prefixArgs = null)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return;
+        }
+
+        var keyBuilder = new List<string> { fileName };
+        if (prefixArgs is not null)
+        {
+            keyBuilder.AddRange(prefixArgs);
+        }
+        keyBuilder.AddRange(commandArgs);
+
+        var key = string.Join('\u001f', keyBuilder);
+        if (!dedupe.Add(key))
+        {
+            return;
+        }
+
+        var start = new ProcessStartInfo
+        {
+            FileName = fileName,
+            UseShellExecute = false
+        };
+
+        if (prefixArgs is not null)
+        {
+            foreach (var arg in prefixArgs)
+            {
+                start.ArgumentList.Add(arg);
+            }
+        }
+
+        foreach (var arg in commandArgs)
+        {
+            start.ArgumentList.Add(arg);
+        }
+
+        startInfos.Add(start);
+    }
+
+    var processPath = Environment.ProcessPath;
+    if (!string.IsNullOrWhiteSpace(processPath) && File.Exists(processPath))
+    {
+        var processName = Path.GetFileNameWithoutExtension(processPath);
+        if (processName.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+        {
+            var entryAssemblyPath = Assembly.GetEntryAssembly()?.Location;
+            if (!string.IsNullOrWhiteSpace(entryAssemblyPath) && File.Exists(entryAssemblyPath))
+            {
+                AddStartInfo(processPath, new[] { entryAssemblyPath });
+            }
+        }
+        else
+        {
+            AddStartInfo(processPath);
+        }
+    }
+
+    var kowarePath = ResolveExecutablePath("koware");
+    if (!string.IsNullOrWhiteSpace(kowarePath))
+    {
+        AddStartInfo(kowarePath);
+    }
+
+    foreach (var startInfo in startInfos)
+    {
+        try
+        {
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                continue;
+            }
+
+            await process.WaitForExitAsync(cancellationToken);
+            return process.ExitCode;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Failed to start isolated read subprocess via {Command}", startInfo.FileName);
+        }
+    }
+
+    return null;
+}
+
+static async Task<int> RunReadCommandAsync(string[] readArgs, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
+{
+    if (ShouldIsolateReadProcess())
+    {
+        var subprocessExitCode = await TryRunKowareSubprocessAsync(readArgs, logger, cancellationToken);
+        if (subprocessExitCode.HasValue)
+        {
+            if (subprocessExitCode.Value != 0)
+            {
+                logger.LogWarning("Read subprocess exited with code {ExitCode}", subprocessExitCode.Value);
+            }
+
+            return subprocessExitCode.Value;
+        }
+    }
+
+    return await HandleReadAsync(readArgs, services, logger, defaults, cancellationToken);
 }
 
 /// <summary>
