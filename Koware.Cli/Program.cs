@@ -29,6 +29,7 @@ using Koware.Cli;
 using Koware.Cli.Configuration;
 using Koware.Cli.Config;
 using Koware.Cli.History;
+using Koware.Cli.Downloads;
 using Koware.Cli.Console;
 using Koware.Cli.Health;
 using Koware.Updater;
@@ -366,7 +367,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandleDownloadAsync(orchestrator, args, services, logger, defaults, cts.Token);
                 }
             case "read":
-                return await HandleReadAsync(args, services, logger, defaults, cts.Token);
+                return await RunReadCommandAsync(args, services, logger, defaults, cts.Token);
             case "last":
                 return await HandleLastAsync(args, services, logger, defaults, cts.Token);
             case "continue":
@@ -6991,7 +6992,7 @@ static string FormatFileSize(long bytes)
         order++;
         len /= 1024;
     }
-    return $"{len:0.##} {sizes[order]}";
+    return len.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + " " + sizes[order];
 }
 
 /// <summary>
@@ -7451,6 +7452,8 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
 
     var allAnimeOptions = services.GetService<IOptions<AllAnimeOptions>>()?.Value;
     var defaultReferrer = allAnimeOptions?.Referer;
+    var downloadStore = services.GetRequiredService<IDownloadStore>();
+    var ffmpegPath = ResolveExecutablePath("ffmpeg");
 
     using var httpClient = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) });
 
@@ -7507,7 +7510,6 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
             var httpUserAgent = allAnimeOptions?.UserAgent;
 
             var isPlaylist = IsPlaylist(stream);
-            var ffmpegPath = ResolveExecutablePath("ffmpeg");
 
             if (isPlaylist && string.IsNullOrWhiteSpace(ffmpegPath))
             {
@@ -7529,7 +7531,6 @@ static async Task<int> HandleDownloadAsync(ScrapeOrchestrator orchestrator, stri
             if (File.Exists(outputPath))
             {
                 var fileInfo = new FileInfo(outputPath);
-                var downloadStore = services.GetRequiredService<IDownloadStore>();
                 await downloadStore.AddAsync(
                     DownloadType.Episode,
                     initial.SelectedAnime.Id.Value,
@@ -7616,6 +7617,9 @@ static async Task<int?> TryRunKowareSubprocessAsync(IReadOnlyList<string> comman
             FileName = fileName,
             UseShellExecute = false
         };
+
+        // Ensure the child process executes read in-process once to avoid isolation loops.
+        start.Environment["KOWARE_DISABLE_READ_ISOLATION"] = "1";
 
         if (prefixArgs is not null)
         {
@@ -8771,6 +8775,7 @@ static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider 
 
     logger.LogInformation("Downloading {Count} chapter(s) to {Dir}", targetChapters.Count, targetDir);
 
+    var downloadStore = services.GetRequiredService<IDownloadStore>();
     var total = targetChapters.Count;
     var index = 0;
     var failedCount = 0;
@@ -8788,7 +8793,7 @@ static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider 
         var chapterLabel = chapter.Number % 1 == 0 ? $"{(int)chapter.Number}" : $"{chapter.Number:0.#}";
         System.Console.Write($"\r  [{bar}] {percent,3}% - Chapter {chapterLabel,-10}");
 
-        var chapterDir = Path.Combine(targetDir, $"Chapter_{chapter.Number:000}");
+        var chapterDir = Path.Combine(targetDir, DownloadPathHelpers.BuildMangaChapterDirectoryName(chapter.Number));
         Directory.CreateDirectory(chapterDir);
 
         try
@@ -8799,7 +8804,7 @@ static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider 
 
             foreach (var page in pages.OrderBy(p => p.PageNumber))
             {
-                var ext = GetImageExtension(page.ImageUrl.ToString());
+                var ext = DownloadPathHelpers.GetImageExtensionFromUrl(page.ImageUrl.ToString());
                 var fileName = $"{page.PageNumber:000}{ext}";
                 var filePath = Path.Combine(chapterDir, fileName);
 
@@ -8835,7 +8840,6 @@ static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider 
             {
                 var chapterDirInfo = new DirectoryInfo(chapterDir);
                 var chapterSize = chapterDirInfo.EnumerateFiles().Sum(f => f.Length);
-                var downloadStore = services.GetRequiredService<IDownloadStore>();
                 await downloadStore.AddAsync(
                     DownloadType.Chapter,
                     selectedManga.Id.Value,
@@ -8872,21 +8876,6 @@ static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider 
     Console.ResetColor();
 
     return 0;
-}
-
-/// <summary>
-/// Get the image file extension from a URL.
-/// </summary>
-static string GetImageExtension(string url)
-{
-    var uri = new Uri(url);
-    var path = uri.AbsolutePath;
-    var ext = Path.GetExtension(path);
-    if (string.IsNullOrWhiteSpace(ext) || ext.Length > 5)
-    {
-        return ".jpg"; // Default to jpg
-    }
-    return ext;
 }
 
 /// <summary>

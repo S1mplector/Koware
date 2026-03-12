@@ -742,13 +742,10 @@ public sealed class InteractiveMangaListManager
                 continue;
             }
 
-            if (result.Entry is null)
+            if (result.Entry is not MangaListEntry entry)
             {
                 continue;
             }
-
-            var entry = _entries.FirstOrDefault(e => e.MangaTitle == (result.Entry as MangaListEntry)?.MangaTitle);
-            if (entry is null) continue;
 
             switch (result.Action)
             {

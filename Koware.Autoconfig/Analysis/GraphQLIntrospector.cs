@@ -284,6 +284,7 @@ public sealed class GraphQLIntrospector : IGraphQLIntrospector
             // Find query type and extract queries
             var queryTypeName = "Query";
             if (schema.TryGetProperty("queryType", out var queryType) &&
+                queryType.ValueKind == JsonValueKind.Object &&
                 queryType.TryGetProperty("name", out var qtn))
             {
                 queryTypeName = qtn.GetString() ?? "Query";
@@ -307,6 +308,7 @@ public sealed class GraphQLIntrospector : IGraphQLIntrospector
             // Find mutation type
             var mutationTypeName = "Mutation";
             if (schema.TryGetProperty("mutationType", out var mutationType) &&
+                mutationType.ValueKind == JsonValueKind.Object &&
                 mutationType.TryGetProperty("name", out var mtn))
             {
                 mutationTypeName = mtn.GetString() ?? "Mutation";

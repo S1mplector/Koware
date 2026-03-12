@@ -15,9 +15,9 @@ public class DownloadStoreTests : IAsyncLifetime
 
     public DownloadStoreTests()
     {
-        // Use a temporary test database - store uses default path
+        // Use a temporary per-test database to avoid cross-test and user-data contamination.
         _testDbPath = Path.Combine(Path.GetTempPath(), $"koware_test_{Guid.NewGuid()}.db");
-        _store = new SqliteDownloadStore();
+        _store = new SqliteDownloadStore(_testDbPath);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;

@@ -70,16 +70,55 @@ public static class KnownGenres
         Supernatural, Thriller
     };
 
+    private static readonly IReadOnlyDictionary<string, string> NormalizedExactLookup =
+        All.ToDictionary(static genre => NormalizeGenreKey(genre), static genre => genre, StringComparer.Ordinal);
+
+    private static readonly IReadOnlyDictionary<string, string> Aliases = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["sol"] = SliceOfLife,
+        ["sci"] = SciFi,
+        ["sf"] = SciFi
+    };
+
     /// <summary>
     /// Try to match a user input to a known genre (case-insensitive, partial match).
     /// </summary>
     public static string? TryMatch(string input)
     {
-        if (string.IsNullOrWhiteSpace(input)) return null;
-        var normalized = input.Trim().ToLowerInvariant().Replace("-", "").Replace(" ", "");
-        return All.FirstOrDefault(g => 
-            g.Replace("-", "").Replace(" ", "").ToLowerInvariant() == normalized ||
-            g.ToLowerInvariant().StartsWith(input.ToLowerInvariant()));
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return null;
+        }
+
+        var trimmed = input.Trim();
+        var normalized = NormalizeGenreKey(trimmed);
+
+        if (normalized.Length == 0)
+        {
+            return null;
+        }
+
+        if (Aliases.TryGetValue(normalized, out var aliasedGenre))
+        {
+            return aliasedGenre;
+        }
+
+        if (NormalizedExactLookup.TryGetValue(normalized, out var exactGenre))
+        {
+            return exactGenre;
+        }
+
+        return All.FirstOrDefault(genre =>
+            NormalizeGenreKey(genre).StartsWith(normalized, StringComparison.Ordinal));
+    }
+
+    private static string NormalizeGenreKey(string value)
+    {
+        return value
+            .Trim()
+            .ToLowerInvariant()
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace(" ", string.Empty, StringComparison.Ordinal);
     }
 }
 
@@ -188,7 +227,7 @@ public sealed record SearchFilters
                     "popular" or "popularity" => SearchSort.Popularity,
                     "score" or "rating" => SearchSort.Score,
                     "recent" or "new" or "latest" => SearchSort.Recent,
-                    "title" or "alphabetical" => SearchSort.Title,
+                    "title" or "alphabetical" or "name" => SearchSort.Title,
                     _ => SearchSort.Default
                 };
                 filters = filters with { Sort = sort };

@@ -2,6 +2,7 @@
 // Tests for InteractiveSelector and related helper utilities.
 using System;
 using Koware.Cli.Console;
+using Koware.Cli.Config;
 using Xunit;
 
 namespace Koware.Tests;
@@ -58,8 +59,8 @@ public class InteractiveSelectorTests
         Assert.Equal(10, options.MaxVisibleItems);
         Assert.True(options.ShowSearch);
         Assert.True(options.ShowPreview);
-        Assert.Equal(ConsoleColor.Cyan, options.HighlightColor);
-        Assert.Equal(ConsoleColor.Yellow, options.SelectedColor);
+        Assert.Equal(Theme.Highlight, options.GetHighlightColor());
+        Assert.Equal(Theme.Selection, options.GetSelectionColor());
         Assert.Null(options.EmptyMessage);
         Assert.Null(options.SecondaryDisplayFunc);
         Assert.Null(options.PreviewFunc);

@@ -39,7 +39,7 @@ public class UtilityTests
             order++;
             len /= 1024;
         }
-        return $"{len:0.##} {sizes[order]}";
+        return len.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + " " + sizes[order];
     }
 
     #endregion

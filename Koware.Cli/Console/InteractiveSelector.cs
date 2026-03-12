@@ -359,10 +359,10 @@ public sealed class SelectorOptions<T>
     public bool ShowPreview { get; init; } = true;
 
     /// <summary>Color for highlighted/matching text.</summary>
-    public ConsoleColor? HighlightColor { get; init; }
+    public ConsoleColor? HighlightColor { get; init; } = Theme.Highlight;
 
     /// <summary>Color for the selected item.</summary>
-    public ConsoleColor? SelectedColor { get; init; }
+    public ConsoleColor? SelectedColor { get; init; } = Theme.Selection;
 
     /// <summary>Get effective highlight color (theme or override).</summary>
     public ConsoleColor GetHighlightColor() => HighlightColor ?? Theme.Highlight;

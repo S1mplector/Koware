@@ -52,8 +52,10 @@ public sealed class ScrapeOrchestrator
         }
 
         var ordered = matches
-            .OrderByDescending(anime => ScoreMatch(normalizedQuery, anime.Title))
-            .ThenBy(anime => anime.Title, StringComparer.OrdinalIgnoreCase)
+            .Select((anime, index) => (Anime: anime, Index: index))
+            .OrderByDescending(x => ScoreMatch(normalizedQuery, x.Anime.Title))
+            .ThenBy(x => x.Index)
+            .Select(x => x.Anime)
             .ToArray();
 
         return ordered;

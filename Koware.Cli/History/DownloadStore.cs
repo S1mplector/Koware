@@ -94,17 +94,22 @@ public sealed class SqliteDownloadStore : IDownloadStore
     private bool _initialized;
 
     public SqliteDownloadStore(IDatabaseConnectionFactory connectionFactory)
+        : this(GetDefaultDatabasePath(), connectionFactory)
     {
-        _connectionFactory = connectionFactory;
-        var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        if (string.IsNullOrWhiteSpace(baseDir))
-        {
-            baseDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        }
+    }
 
-        var kowareDir = Path.Combine(baseDir, "koware");
-        Directory.CreateDirectory(kowareDir);
-        _dbPath = Path.Combine(kowareDir, "history.db");
+    public SqliteDownloadStore(string dbPath, IDatabaseConnectionFactory? connectionFactory = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(dbPath);
+
+        _connectionFactory = connectionFactory ?? new DatabaseConnectionFactory();
+        _dbPath = Path.GetFullPath(dbPath);
+
+        var directory = Path.GetDirectoryName(_dbPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
     }
 
     /// <summary>
@@ -112,6 +117,18 @@ public sealed class SqliteDownloadStore : IDownloadStore
     /// </summary>
     public SqliteDownloadStore() : this(new DatabaseConnectionFactory())
     {
+    }
+
+    private static string GetDefaultDatabasePath()
+    {
+        var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        if (string.IsNullOrWhiteSpace(baseDir))
+        {
+            baseDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+
+        var kowareDir = Path.Combine(baseDir, "koware");
+        return Path.Combine(kowareDir, "history.db");
     }
 
     public async Task<DownloadEntry> AddAsync(DownloadType type, string contentId, string contentTitle, int number, string? quality, string filePath, long fileSizeBytes, CancellationToken cancellationToken = default)

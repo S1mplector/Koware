@@ -361,13 +361,21 @@ public sealed class TerminalBuffer : IDisposable
 
     private static int GetTerminalWidth()
     {
-        try { return System.Console.WindowWidth; }
+        try
+        {
+            var width = System.Console.WindowWidth;
+            return width > 0 ? width : 80;
+        }
         catch { return 80; }
     }
 
     private static int GetTerminalHeight()
     {
-        try { return System.Console.WindowHeight; }
+        try
+        {
+            var height = System.Console.WindowHeight;
+            return height > 0 ? height : 24;
+        }
         catch { return 24; }
     }
 
