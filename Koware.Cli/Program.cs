@@ -8149,7 +8149,16 @@ static int LaunchReader(ReaderOptions options, IReadOnlyCollection<ChapterPage> 
         start.ArgumentList.Add(startPage.ToString());
     }
 
-    return StartProcessAndWait(logger, start, readerPath);
+    var exitCode = StartProcessAndWait(logger, start, readerPath);
+
+    // On macOS, fall back to browser reader when bundled native reader fails to start.
+    if (OperatingSystem.IsMacOS() && !IsNonErrorExitCode(exitCode))
+    {
+        logger.LogWarning("Reader process exited with code {ExitCode}. Falling back to browser reader.", exitCode);
+        return LaunchMacOSBrowserReader(pages, logger, displayTitle);
+    }
+
+    return exitCode;
 }
 
 static async Task<ReadResult> ReadWithNavigationAsync(
@@ -8425,6 +8434,12 @@ static string? ResolveReaderExecutable(ReaderOptions options)
         command = null;
     }
 
+    // Prevent self-recursion/misconfiguration where the reader command points back to the CLI.
+    if (IsKowareCliCommand(command))
+    {
+        command = null;
+    }
+
     var isDefaultReader = string.IsNullOrWhiteSpace(command) || 
         command.Equals("Koware.Reader.Win.exe", StringComparison.OrdinalIgnoreCase) ||
         command.Equals("Koware.Reader.Win", StringComparison.OrdinalIgnoreCase) ||
@@ -8482,9 +8497,15 @@ static string? ResolveReaderExecutable(ReaderOptions options)
         var macReaderCandidates = new[]
         {
             "/Applications/Koware.app/Contents/Resources/reader/Koware.Reader",
-            "/usr/local/bin/koware/reader/Koware.Reader",
+            "/Applications/Koware.app/Contents/Resources/cli/osx-arm64/reader/Koware.Reader",
+            "/Applications/Koware.app/Contents/Resources/cli/osx-x64/reader/Koware.Reader",
+            "/usr/local/lib/koware/osx-arm64/reader/Koware.Reader",
+            "/usr/local/lib/koware/osx-x64/reader/Koware.Reader",
+            "/opt/homebrew/lib/koware/osx-arm64/reader/Koware.Reader",
+            "/opt/homebrew/lib/koware/osx-x64/reader/Koware.Reader",
             Path.Combine(AppContext.BaseDirectory, "..", "Resources", "reader", "Koware.Reader"),
             Path.Combine(AppContext.BaseDirectory, "reader", "Koware.Reader"),
+            Path.Combine(AppContext.BaseDirectory, "..", "reader", "Koware.Reader"),
         };
         
         foreach (var candidate in macReaderCandidates)
@@ -8511,7 +8532,10 @@ static string? ResolveReaderExecutable(ReaderOptions options)
     // Check if it's an absolute path
     if (Path.IsPathRooted(command) && File.Exists(command))
     {
-        return command;
+        if (!IsKowareCliCommand(command))
+        {
+            return command;
+        }
     }
 
     // Check in app directory
@@ -8527,7 +8551,7 @@ static string? ResolveReaderExecutable(ReaderOptions options)
 
     foreach (var candidate in candidates)
     {
-        if (File.Exists(candidate))
+        if (File.Exists(candidate) && !IsKowareCliCommand(candidate))
         {
             return candidate;
         }
@@ -8535,12 +8559,47 @@ static string? ResolveReaderExecutable(ReaderOptions options)
 
     // Check PATH
     var resolved = ResolveExecutablePath(command.Replace(".exe", string.Empty, StringComparison.OrdinalIgnoreCase));
-    if (!string.IsNullOrWhiteSpace(resolved))
+    if (!string.IsNullOrWhiteSpace(resolved) && !IsKowareCliCommand(resolved))
     {
         return resolved;
     }
 
     return null;
+}
+
+static bool IsKowareCliCommand(string? commandOrPath)
+{
+    if (string.IsNullOrWhiteSpace(commandOrPath))
+    {
+        return false;
+    }
+
+    var fileName = Path.GetFileNameWithoutExtension(commandOrPath.Trim()).Trim();
+    if (fileName.Equals("koware", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("Koware.Cli", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    var processPath = Environment.ProcessPath;
+    if (!string.IsNullOrWhiteSpace(processPath))
+    {
+        try
+        {
+            var lhs = Path.GetFullPath(commandOrPath);
+            var rhs = Path.GetFullPath(processPath);
+            if (string.Equals(lhs, rhs, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        catch
+        {
+            // Ignore malformed path input.
+        }
+    }
+
+    return false;
 }
 
 /// <summary>
