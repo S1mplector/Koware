@@ -59,11 +59,14 @@ public class DownloadStoreTests : IAsyncLifetime
         Assert.Equal(DownloadType.Episode, entry.Type);
         Assert.Equal("", entry.ContentId);
         Assert.Equal("", entry.ContentTitle);
-        Assert.Equal(0, entry.Number);
+        Assert.Equal(0d, entry.Number);
         Assert.Null(entry.Quality);
         Assert.Equal("", entry.FilePath);
         Assert.Equal(0, entry.FileSizeBytes);
         Assert.Equal(default, entry.DownloadedAt);
+        Assert.Equal(DownloadState.Completed, entry.State);
+        Assert.Equal(0, entry.CompletedItems);
+        Assert.Equal(0, entry.TotalItems);
         Assert.False(entry.Exists); // File doesn't exist
     }
 
@@ -133,11 +136,32 @@ public class DownloadStoreTests : IAsyncLifetime
         Assert.Equal(DownloadType.Episode, entry.Type);
         Assert.Equal("anime-123", entry.ContentId);
         Assert.Equal("Test Anime", entry.ContentTitle);
-        Assert.Equal(1, entry.Number);
+        Assert.Equal(1d, entry.Number);
         Assert.Equal("1080p", entry.Quality);
         Assert.Equal("/path/to/ep1.mp4", entry.FilePath);
         Assert.Equal(1024 * 1024 * 500, entry.FileSizeBytes);
         Assert.True(entry.DownloadedAt > DateTimeOffset.MinValue);
+    }
+
+    [Fact]
+    public async Task AddAsync_PreservesDecimalChapterNumbersAndState()
+    {
+        var entry = await _store.AddAsync(
+            DownloadType.Chapter,
+            "manga-decimal",
+            "Decimal Manga",
+            10.5,
+            null,
+            "/path/to/chapter-10-5",
+            4096,
+            DownloadState.Partial,
+            completedItems: 18,
+            totalItems: 20);
+
+        Assert.Equal(10.5d, entry.Number, 3);
+        Assert.Equal(DownloadState.Partial, entry.State);
+        Assert.Equal(18, entry.CompletedItems);
+        Assert.Equal(20, entry.TotalItems);
     }
 
     [Fact]
@@ -182,7 +206,7 @@ public class DownloadStoreTests : IAsyncLifetime
 
         Assert.NotNull(result);
         Assert.Equal("anime-456", result!.ContentId);
-        Assert.Equal(5, result.Number);
+        Assert.Equal(5d, result.Number);
     }
 
     [Fact]
@@ -221,9 +245,9 @@ public class DownloadStoreTests : IAsyncLifetime
         var results = await _store.GetForContentAsync("anime-order");
 
         Assert.Equal(3, results.Count);
-        Assert.Equal(1, results[0].Number);
-        Assert.Equal(2, results[1].Number);
-        Assert.Equal(3, results[2].Number);
+        Assert.Equal(1d, results[0].Number);
+        Assert.Equal(2d, results[1].Number);
+        Assert.Equal(3d, results[2].Number);
     }
 
     #endregion
@@ -299,7 +323,7 @@ public class DownloadStoreTests : IAsyncLifetime
         await _store.AddAsync(DownloadType.Episode, "anime1", "Anime 1", 1, null, "/a1e1.mp4", 1000);
         await _store.AddAsync(DownloadType.Episode, "anime1", "Anime 1", 2, null, "/a1e2.mp4", 2000);
         await _store.AddAsync(DownloadType.Episode, "anime2", "Anime 2", 1, null, "/a2e1.mp4", 3000);
-        await _store.AddAsync(DownloadType.Chapter, "manga1", "Manga 1", 1, null, "/m1c1", 500);
+        await _store.AddAsync(DownloadType.Chapter, "manga1", "Manga 1", 1, null, "/m1c1", 500, DownloadState.Partial, 15, 20);
         await _store.AddAsync(DownloadType.Chapter, "manga1", "Manga 1", 2, null, "/m1c2", 500);
 
         var stats = await _store.GetStatsAsync();
@@ -337,11 +361,11 @@ public class DownloadStoreTests : IAsyncLifetime
         var numbers = await _store.GetDownloadedNumbersAsync("anime-nums");
 
         Assert.Equal(3, numbers.Count);
-        Assert.Contains(1, numbers);
-        Assert.Contains(3, numbers);
-        Assert.Contains(5, numbers);
-        Assert.DoesNotContain(2, numbers);
-        Assert.DoesNotContain(4, numbers);
+        Assert.Contains(1d, numbers);
+        Assert.Contains(3d, numbers);
+        Assert.Contains(5d, numbers);
+        Assert.DoesNotContain(2d, numbers);
+        Assert.DoesNotContain(4d, numbers);
     }
 
     [Fact]
@@ -350,6 +374,18 @@ public class DownloadStoreTests : IAsyncLifetime
         var numbers = await _store.GetDownloadedNumbersAsync("nonexistent");
 
         Assert.Empty(numbers);
+    }
+
+    [Fact]
+    public async Task GetDownloadedNumbersAsync_ReturnsDecimalChapterNumbers()
+    {
+        await _store.AddAsync(DownloadType.Chapter, "manga-nums", "Manga", 10.5, null, "/m10_5", 1000);
+        await _store.AddAsync(DownloadType.Chapter, "manga-nums", "Manga", 11, null, "/m11", 1000);
+
+        var numbers = await _store.GetDownloadedNumbersAsync("manga-nums");
+
+        Assert.Contains(10.5d, numbers);
+        Assert.Contains(11d, numbers);
     }
 
     #endregion

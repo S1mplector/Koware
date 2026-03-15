@@ -23,6 +23,16 @@ public enum DownloadType
 }
 
 /// <summary>
+/// Persistent download state.
+/// </summary>
+public enum DownloadState
+{
+    Completed,
+    Partial,
+    Failed
+}
+
+/// <summary>
 /// Represents a downloaded content entry.
 /// </summary>
 public sealed class DownloadEntry
@@ -31,11 +41,15 @@ public sealed class DownloadEntry
     public DownloadType Type { get; init; }
     public string ContentId { get; init; } = string.Empty;
     public string ContentTitle { get; init; } = string.Empty;
-    public int Number { get; init; }
+    public double Number { get; init; }
     public string? Quality { get; init; }
     public string FilePath { get; init; } = string.Empty;
     public long FileSizeBytes { get; init; }
     public DateTimeOffset DownloadedAt { get; init; }
+    public DownloadState State { get; init; } = DownloadState.Completed;
+    public int CompletedItems { get; init; }
+    public int TotalItems { get; init; }
+    public bool IsComplete => State == DownloadState.Completed;
     public bool Exists => File.Exists(FilePath) || Directory.Exists(FilePath);
 }
 
@@ -55,7 +69,10 @@ public sealed record DownloadStats(
 public interface IDownloadStore
 {
     /// <summary>Record a new download.</summary>
-    Task<DownloadEntry> AddAsync(DownloadType type, string contentId, string contentTitle, int number, string? quality, string filePath, long fileSizeBytes, CancellationToken cancellationToken = default);
+    Task<DownloadEntry> AddAsync(DownloadType type, string contentId, string contentTitle, double number, string? quality, string filePath, long fileSizeBytes, CancellationToken cancellationToken = default);
+
+    /// <summary>Record a new download with explicit completion state and item counts.</summary>
+    Task<DownloadEntry> AddAsync(DownloadType type, string contentId, string contentTitle, double number, string? quality, string filePath, long fileSizeBytes, DownloadState state, int completedItems, int totalItems, CancellationToken cancellationToken = default);
 
     /// <summary>Get all downloads for a specific content (anime/manga).</summary>
     Task<IReadOnlyList<DownloadEntry>> GetForContentAsync(string contentId, CancellationToken cancellationToken = default);
@@ -64,7 +81,7 @@ public interface IDownloadStore
     Task<IReadOnlyList<DownloadEntry>> GetAllAsync(DownloadType? typeFilter = null, CancellationToken cancellationToken = default);
 
     /// <summary>Check if a specific episode/chapter is downloaded.</summary>
-    Task<DownloadEntry?> GetAsync(string contentId, int number, CancellationToken cancellationToken = default);
+    Task<DownloadEntry?> GetAsync(string contentId, double number, CancellationToken cancellationToken = default);
 
     /// <summary>Remove a download entry (e.g., when file is deleted).</summary>
     Task<bool> RemoveAsync(long id, CancellationToken cancellationToken = default);
@@ -76,7 +93,7 @@ public interface IDownloadStore
     Task<int> CleanupMissingAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Get downloaded episode/chapter numbers for a content ID.</summary>
-    Task<IReadOnlySet<int>> GetDownloadedNumbersAsync(string contentId, CancellationToken cancellationToken = default);
+    Task<IReadOnlySet<double>> GetDownloadedNumbersAsync(string contentId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -131,7 +148,12 @@ public sealed class SqliteDownloadStore : IDownloadStore
         return Path.Combine(kowareDir, "history.db");
     }
 
-    public async Task<DownloadEntry> AddAsync(DownloadType type, string contentId, string contentTitle, int number, string? quality, string filePath, long fileSizeBytes, CancellationToken cancellationToken = default)
+    public Task<DownloadEntry> AddAsync(DownloadType type, string contentId, string contentTitle, double number, string? quality, string filePath, long fileSizeBytes, CancellationToken cancellationToken = default)
+    {
+        return AddAsync(type, contentId, contentTitle, number, quality, filePath, fileSizeBytes, DownloadState.Completed, 0, 0, cancellationToken);
+    }
+
+    public async Task<DownloadEntry> AddAsync(DownloadType type, string contentId, string contentTitle, double number, string? quality, string filePath, long fileSizeBytes, DownloadState state, int completedItems, int totalItems, CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync(cancellationToken);
 
@@ -139,14 +161,17 @@ public sealed class SqliteDownloadStore : IDownloadStore
 
         // Upsert: update if same content+number exists
         var upsertSql = $@"
-            INSERT INTO {TableName} (type, content_id, content_title, number, quality, file_path, file_size_bytes, downloaded_at)
-            VALUES (@type, @contentId, @contentTitle, @number, @quality, @filePath, @fileSizeBytes, @downloadedAt)
+            INSERT INTO {TableName} (type, content_id, content_title, number, quality, file_path, file_size_bytes, downloaded_at, state, completed_items, total_items)
+            VALUES (@type, @contentId, @contentTitle, @number, @quality, @filePath, @fileSizeBytes, @downloadedAt, @state, @completedItems, @totalItems)
             ON CONFLICT(content_id, number) DO UPDATE SET
                 content_title = excluded.content_title,
                 quality = excluded.quality,
                 file_path = excluded.file_path,
                 file_size_bytes = excluded.file_size_bytes,
-                downloaded_at = excluded.downloaded_at
+                downloaded_at = excluded.downloaded_at,
+                state = excluded.state,
+                completed_items = excluded.completed_items,
+                total_items = excluded.total_items
             RETURNING id";
 
         await using var cmd = new SqliteCommand(upsertSql, connection);
@@ -159,6 +184,9 @@ public sealed class SqliteDownloadStore : IDownloadStore
         cmd.Parameters.AddWithValue("@filePath", filePath);
         cmd.Parameters.AddWithValue("@fileSizeBytes", fileSizeBytes);
         cmd.Parameters.AddWithValue("@downloadedAt", now.ToString("o", CultureInfo.InvariantCulture));
+        cmd.Parameters.AddWithValue("@state", state.ToString());
+        cmd.Parameters.AddWithValue("@completedItems", completedItems);
+        cmd.Parameters.AddWithValue("@totalItems", totalItems);
 
         var id = Convert.ToInt64(await cmd.ExecuteScalarAsync(cancellationToken));
 
@@ -172,7 +200,10 @@ public sealed class SqliteDownloadStore : IDownloadStore
             Quality = quality,
             FilePath = filePath,
             FileSizeBytes = fileSizeBytes,
-            DownloadedAt = now
+            DownloadedAt = now,
+            State = state,
+            CompletedItems = completedItems,
+            TotalItems = totalItems
         };
     }
 
@@ -182,7 +213,7 @@ public sealed class SqliteDownloadStore : IDownloadStore
 
         await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
-        var sql = $"SELECT id, type, content_id, content_title, number, quality, file_path, file_size_bytes, downloaded_at FROM {TableName} WHERE content_id = @contentId ORDER BY number";
+        var sql = $"SELECT id, type, content_id, content_title, number, quality, file_path, file_size_bytes, downloaded_at, state, completed_items, total_items FROM {TableName} WHERE content_id = @contentId ORDER BY number";
         await using var cmd = new SqliteCommand(sql, connection);
         cmd.Parameters.AddWithValue("@contentId", contentId);
 
@@ -203,8 +234,8 @@ public sealed class SqliteDownloadStore : IDownloadStore
         await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
         var sql = typeFilter.HasValue
-            ? $"SELECT id, type, content_id, content_title, number, quality, file_path, file_size_bytes, downloaded_at FROM {TableName} WHERE type = @type ORDER BY downloaded_at DESC"
-            : $"SELECT id, type, content_id, content_title, number, quality, file_path, file_size_bytes, downloaded_at FROM {TableName} ORDER BY downloaded_at DESC";
+            ? $"SELECT id, type, content_id, content_title, number, quality, file_path, file_size_bytes, downloaded_at, state, completed_items, total_items FROM {TableName} WHERE type = @type ORDER BY downloaded_at DESC"
+            : $"SELECT id, type, content_id, content_title, number, quality, file_path, file_size_bytes, downloaded_at, state, completed_items, total_items FROM {TableName} ORDER BY downloaded_at DESC";
 
         await using var cmd = new SqliteCommand(sql, connection);
         if (typeFilter.HasValue)
@@ -222,13 +253,13 @@ public sealed class SqliteDownloadStore : IDownloadStore
         return results;
     }
 
-    public async Task<DownloadEntry?> GetAsync(string contentId, int number, CancellationToken cancellationToken = default)
+    public async Task<DownloadEntry?> GetAsync(string contentId, double number, CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync(cancellationToken);
 
         await using var connection = await _connectionFactory.OpenConnectionAsync(_dbPath, cancellationToken);
 
-        var sql = $"SELECT id, type, content_id, content_title, number, quality, file_path, file_size_bytes, downloaded_at FROM {TableName} WHERE content_id = @contentId AND number = @number";
+        var sql = $"SELECT id, type, content_id, content_title, number, quality, file_path, file_size_bytes, downloaded_at, state, completed_items, total_items FROM {TableName} WHERE content_id = @contentId AND ABS(number - @number) < 0.0001";
         await using var cmd = new SqliteCommand(sql, connection);
         cmd.Parameters.AddWithValue("@contentId", contentId);
         cmd.Parameters.AddWithValue("@number", number);
@@ -305,7 +336,7 @@ public sealed class SqliteDownloadStore : IDownloadStore
         return removed;
     }
 
-    public async Task<IReadOnlySet<int>> GetDownloadedNumbersAsync(string contentId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlySet<double>> GetDownloadedNumbersAsync(string contentId, CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync(cancellationToken);
 
@@ -315,11 +346,11 @@ public sealed class SqliteDownloadStore : IDownloadStore
         await using var cmd = new SqliteCommand(sql, connection);
         cmd.Parameters.AddWithValue("@contentId", contentId);
 
-        var numbers = new HashSet<int>();
+        var numbers = new HashSet<double>();
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            numbers.Add(reader.GetInt32(0));
+            numbers.Add(reader.GetDouble(0));
         }
 
         return numbers;
@@ -342,16 +373,23 @@ public sealed class SqliteDownloadStore : IDownloadStore
                     type TEXT NOT NULL,
                     content_id TEXT NOT NULL,
                     content_title TEXT NOT NULL,
-                    number INTEGER NOT NULL,
+                    number REAL NOT NULL,
                     quality TEXT,
                     file_path TEXT NOT NULL,
                     file_size_bytes INTEGER NOT NULL DEFAULT 0,
                     downloaded_at TEXT NOT NULL,
+                    state TEXT NOT NULL DEFAULT 'Completed',
+                    completed_items INTEGER NOT NULL DEFAULT 0,
+                    total_items INTEGER NOT NULL DEFAULT 0,
                     UNIQUE(content_id, number)
                 )";
 
             await using var cmd = new SqliteCommand(createTableSql, connection);
             await cmd.ExecuteNonQueryAsync(cancellationToken);
+
+            await EnsureColumnExistsAsync(connection, "state", "TEXT NOT NULL DEFAULT 'Completed'", cancellationToken);
+            await EnsureColumnExistsAsync(connection, "completed_items", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+            await EnsureColumnExistsAsync(connection, "total_items", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
 
             // Create indexes
             var indexSql = $@"
@@ -376,11 +414,33 @@ public sealed class SqliteDownloadStore : IDownloadStore
             Type = Enum.Parse<DownloadType>(reader.GetString(1)),
             ContentId = reader.GetString(2),
             ContentTitle = reader.GetString(3),
-            Number = reader.GetInt32(4),
+            Number = reader.GetDouble(4),
             Quality = reader.IsDBNull(5) ? null : reader.GetString(5),
             FilePath = reader.GetString(6),
             FileSizeBytes = reader.GetInt64(7),
-            DownloadedAt = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture)
+            DownloadedAt = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture),
+            State = reader.IsDBNull(9) ? DownloadState.Completed : Enum.Parse<DownloadState>(reader.GetString(9)),
+            CompletedItems = reader.IsDBNull(10) ? 0 : reader.GetInt32(10),
+            TotalItems = reader.IsDBNull(11) ? 0 : reader.GetInt32(11)
         };
+    }
+
+    private async Task EnsureColumnExistsAsync(SqliteConnection connection, string columnName, string definition, CancellationToken cancellationToken)
+    {
+        var existsSql = $"PRAGMA table_info({TableName})";
+        await using var existsCmd = new SqliteCommand(existsSql, connection);
+        await using var reader = await existsCmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+
+        await reader.CloseAsync();
+        var alterSql = $"ALTER TABLE {TableName} ADD COLUMN {columnName} {definition}";
+        await using var alterCmd = new SqliteCommand(alterSql, connection);
+        await alterCmd.ExecuteNonQueryAsync(cancellationToken);
     }
 }

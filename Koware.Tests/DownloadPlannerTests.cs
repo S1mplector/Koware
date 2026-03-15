@@ -130,6 +130,42 @@ public class DownloadPlannerTests
         Assert.Empty(result);
     }
 
+    [Fact]
+    public void ResolveChapterSelection_AllowsCommaSeparatedRangesAndDecimals()
+    {
+        var chapters = new List<Chapter>
+        {
+            new(new ChapterId("ch-1"), "Chapter 1", 1, new Uri("https://example.com/1")),
+            new(new ChapterId("ch-2"), "Chapter 2", 2, new Uri("https://example.com/2")),
+            new(new ChapterId("ch-2.5"), "Chapter 2.5", 2.5f, new Uri("https://example.com/2.5")),
+            new(new ChapterId("ch-3"), "Chapter 3", 3, new Uri("https://example.com/3")),
+            new(new ChapterId("ch-5"), "Chapter 5", 5, new Uri("https://example.com/5"))
+        };
+
+        var result = DownloadPlanner.ResolveChapterSelection("1,2.5,3-5", null, chapters, NullLogger.Instance);
+
+        Assert.Collection(result,
+            ch => Assert.Equal(1f, ch.Number),
+            ch => Assert.Equal(2.5f, ch.Number),
+            ch => Assert.Equal(3f, ch.Number),
+            ch => Assert.Equal(5f, ch.Number));
+    }
+
+    [Fact]
+    public void ResolveChapterSelection_SingleChapterFallsBackToExactMatch()
+    {
+        var chapters = new List<Chapter>
+        {
+            new(new ChapterId("ch-10"), "Chapter 10", 10, new Uri("https://example.com/10")),
+            new(new ChapterId("ch-10.5"), "Chapter 10.5", 10.5f, new Uri("https://example.com/10.5"))
+        };
+
+        var result = DownloadPlanner.ResolveChapterSelection(null, 10.5f, chapters, NullLogger.Instance);
+
+        var chapter = Assert.Single(result);
+        Assert.Equal(10.5f, chapter.Number);
+    }
+
     [Theory]
     [InlineData("My Show", "Episode 1", 1, null, "My Show - Ep 001 - Episode 1.mp4")]
     [InlineData("My/Show", "Episode: 1", 1, "1080p", "My_Show - Ep 001 - Episode: 1 [1080p].mp4")]

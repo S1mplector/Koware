@@ -122,6 +122,87 @@ public static class DownloadPlanner
     }
 
     /// <summary>
+    /// Resolve which manga chapters to download based on user input.
+    /// </summary>
+    /// <param name="chaptersArg">Chapter selection string: "all", "N", "N-M", or comma-separated segments.</param>
+    /// <param name="singleChapterNumber">Single chapter number from --chapter.</param>
+    /// <param name="chapters">Available chapters for the manga.</param>
+    /// <param name="logger">Optional logger for warnings.</param>
+    /// <returns>List of chapters to download, sorted by number.</returns>
+    public static IReadOnlyList<Chapter> ResolveChapterSelection(
+        string? chaptersArg,
+        float? singleChapterNumber,
+        IReadOnlyList<Chapter> chapters,
+        ILogger? logger = null)
+    {
+        if (chapters.Count == 0)
+        {
+            return Array.Empty<Chapter>();
+        }
+
+        if (string.IsNullOrWhiteSpace(chaptersArg))
+        {
+            if (singleChapterNumber.HasValue)
+            {
+                var match = chapters.FirstOrDefault(c => Math.Abs(c.Number - singleChapterNumber.Value) < 0.001f)
+                    ?? chapters.FirstOrDefault(c => (int)c.Number == (int)singleChapterNumber.Value);
+                if (match is not null)
+                {
+                    return new[] { match };
+                }
+
+                logger?.LogWarning("Requested chapter {Chapter} not found. No chapters will be downloaded.", singleChapterNumber);
+                return Array.Empty<Chapter>();
+            }
+
+            var first = chapters.OrderBy(c => c.Number).First();
+            return new[] { first };
+        }
+
+        chaptersArg = chaptersArg.Trim();
+        if (chaptersArg.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            return chapters.OrderBy(c => c.Number).ToArray();
+        }
+
+        var segments = chaptersArg.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length == 0)
+        {
+            logger?.LogWarning("Invalid --chapters value '{Value}'. Expected formats: N, N-M, N,N2, or all.", chaptersArg);
+            return Array.Empty<Chapter>();
+        }
+
+        var parsedSegments = new List<(float from, float to)>(segments.Length);
+        foreach (var segment in segments)
+        {
+            if (!TryParseChapterSegment(segment, out var from, out var to))
+            {
+                logger?.LogWarning("Invalid --chapters segment '{Segment}'. Expected formats: N, N-M, or all.", segment);
+                return Array.Empty<Chapter>();
+            }
+
+            if (from > to)
+            {
+                (from, to) = (to, from);
+            }
+
+            parsedSegments.Add((from, to));
+        }
+
+        var selected = chapters
+            .Where(chapter => parsedSegments.Any(segment => chapter.Number >= segment.from - 0.001f && chapter.Number <= segment.to + 0.001f))
+            .OrderBy(chapter => chapter.Number)
+            .ToArray();
+
+        if (selected.Length == 0)
+        {
+            logger?.LogWarning("No chapters match the requested selection '{Selection}'.", chaptersArg);
+        }
+
+        return selected;
+    }
+
+    /// <summary>
     /// Build a safe filename for a downloaded episode.
     /// </summary>
     /// <param name="animeTitle">Anime title (sanitized for filesystem).</param>
@@ -175,5 +256,44 @@ public static class DownloadPlanner
 
         var cleaned = new string(chars);
         return cleaned.Length == 0 ? "untitled" : cleaned;
+    }
+
+    private static bool TryParseChapterSegment(string segment, out float from, out float to)
+    {
+        from = 0;
+        to = 0;
+
+        var dashIndex = segment.IndexOf('-', StringComparison.Ordinal);
+        if (dashIndex < 0)
+        {
+            if (!float.TryParse(segment, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var single) || single <= 0)
+            {
+                return false;
+            }
+
+            from = to = single;
+            return true;
+        }
+
+        var startPart = segment[..dashIndex];
+        var endPart = segment[(dashIndex + 1)..];
+
+        if (!float.TryParse(startPart, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out from) || from <= 0)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(endPart))
+        {
+            to = from;
+            return true;
+        }
+
+        if (!float.TryParse(endPart, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out to) || to <= 0)
+        {
+            return false;
+        }
+
+        return true;
     }
 }

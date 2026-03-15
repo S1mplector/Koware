@@ -6832,6 +6832,9 @@ static async Task<int> HandleOfflineAsync(string[] args, IServiceProvider servic
     if (showStats)
     {
         var stats = await downloadStore.GetStatsAsync(cancellationToken);
+        var allDownloads = await downloadStore.GetAllAsync(cancellationToken: cancellationToken);
+        var partialCount = allDownloads.Count(d => d.State == DownloadState.Partial);
+        var failedCount = allDownloads.Count(d => d.State == DownloadState.Failed);
         
         if (jsonOutput)
         {
@@ -6841,6 +6844,8 @@ static async Task<int> HandleOfflineAsync(string[] args, IServiceProvider servic
                 totalChapters = stats.TotalChapters,
                 uniqueAnime = stats.UniqueAnime,
                 uniqueManga = stats.UniqueManga,
+                partialDownloads = partialCount,
+                failedDownloads = failedCount,
                 totalSizeBytes = stats.TotalSizeBytes,
                 totalSizeFormatted = FormatFileSize(stats.TotalSizeBytes)
             };
@@ -6854,6 +6859,8 @@ static async Task<int> HandleOfflineAsync(string[] args, IServiceProvider servic
             Console.WriteLine(new string('─', 30));
             Console.WriteLine($"  Episodes:   {stats.TotalEpisodes} ({stats.UniqueAnime} anime)");
             Console.WriteLine($"  Chapters:   {stats.TotalChapters} ({stats.UniqueManga} manga)");
+            Console.WriteLine($"  Partial:    {partialCount}");
+            Console.WriteLine($"  Failed:     {failedCount}");
             Console.WriteLine($"  Total Size: {FormatFileSize(stats.TotalSizeBytes)}");
         }
         return 0;
@@ -6907,7 +6914,9 @@ static async Task<int> HandleOfflineAsync(string[] args, IServiceProvider servic
             Items = g.OrderBy(d => d.Number).ToList(),
             TotalSize = g.Sum(d => d.FileSizeBytes),
             AvailableCount = g.Count(d => d.Exists),
-            MissingCount = g.Count(d => !d.Exists)
+            MissingCount = g.Count(d => !d.Exists),
+            PartialCount = g.Count(d => d.State == DownloadState.Partial),
+            FailedCount = g.Count(d => d.State == DownloadState.Failed)
         })
         .OrderByDescending(g => g.Items.Max(d => d.DownloadedAt))
         .ToList();
@@ -6929,7 +6938,10 @@ static async Task<int> HandleOfflineAsync(string[] args, IServiceProvider servic
                     path = d.FilePath,
                     sizeBytes = d.FileSizeBytes,
                     exists = d.Exists,
-                    downloadedAt = d.DownloadedAt
+                    downloadedAt = d.DownloadedAt,
+                    state = d.State.ToString(),
+                    completedItems = d.CompletedItems,
+                    totalItems = d.TotalItems
                 }),
                 totalSizeBytes = g.TotalSize
             })
@@ -6959,6 +6971,13 @@ static async Task<int> HandleOfflineAsync(string[] args, IServiceProvider servic
         Console.Write($"    {Icons.Success} {(mode == CliMode.Manga ? "Ch" : "Ep")}: ");
         Console.ResetColor();
         Console.WriteLine(ranges);
+
+        if (group.PartialCount > 0 || group.FailedCount > 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"    {Icons.Warning} {group.PartialCount} partial, {group.FailedCount} failed");
+            Console.ResetColor();
+        }
         
         // Show missing count if any
         if (group.MissingCount > 0)
@@ -6982,47 +7001,12 @@ static async Task<int> HandleOfflineAsync(string[] args, IServiceProvider servic
 /// <summary>
 /// Format a file size in bytes to a human-readable string.
 /// </summary>
-static string FormatFileSize(long bytes)
-{
-    string[] sizes = { "B", "KB", "MB", "GB", "TB" };
-    double len = bytes;
-    int order = 0;
-    while (len >= 1024 && order < sizes.Length - 1)
-    {
-        order++;
-        len /= 1024;
-    }
-    return len.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + " " + sizes[order];
-}
+static string FormatFileSize(long bytes) => DownloadDisplayFormatter.FormatFileSize(bytes);
 
 /// <summary>
 /// Format a list of numbers into compact ranges (e.g., "1-5, 7, 10-12").
 /// </summary>
-static string FormatNumberRanges(IReadOnlyList<int> numbers)
-{
-    if (numbers.Count == 0) return "none";
-    
-    var sorted = numbers.OrderBy(n => n).ToList();
-    var ranges = new List<string>();
-    var start = sorted[0];
-    var end = sorted[0];
-    
-    for (int i = 1; i < sorted.Count; i++)
-    {
-        if (sorted[i] == end + 1)
-        {
-            end = sorted[i];
-        }
-        else
-        {
-            ranges.Add(start == end ? start.ToString() : $"{start}-{end}");
-            start = end = sorted[i];
-        }
-    }
-    ranges.Add(start == end ? start.ToString() : $"{start}-{end}");
-    
-    return string.Join(", ", ranges);
-}
+static string FormatNumberRanges(IReadOnlyList<double> numbers) => DownloadDisplayFormatter.FormatNumberRanges(numbers);
 
 /// <summary>
 /// Launch the manga reader for an offline chapter directory.
@@ -7037,7 +7021,7 @@ static async Task PlayOfflineChapterAsync(DownloadEntry entry, IDownloadStore do
     if (!Directory.Exists(entry.FilePath))
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine($"File(s) missing for Chapter {entry.Number}. Run 'koware offline --cleanup' to remove stale entries.");
+        Console.WriteLine($"File(s) missing for Chapter {DownloadDisplayFormatter.FormatNumber(entry.Number)}. Run 'koware offline --cleanup' to remove stale entries.");
         Console.ResetColor();
         return;
     }
@@ -7046,15 +7030,17 @@ static async Task PlayOfflineChapterAsync(DownloadEntry entry, IDownloadStore do
 
     var allEntries = await downloadStore.GetForContentAsync(entry.ContentId, cancellationToken);
     var chapters = allEntries
-        .Where(d => d.Type == DownloadType.Chapter && (Directory.Exists(d.FilePath) || File.Exists(d.FilePath)))
+        .Where(d => d.Type == DownloadType.Chapter
+            && (Directory.Exists(d.FilePath) || File.Exists(d.FilePath))
+            && (d.CompletedItems > 0 || d.TotalItems == 0))
         .OrderBy(d => d.Number)
         .Select(d => new
         {
             Entry = d,
             Chapter = new Chapter(
                 new ChapterId(d.Id.ToString()),
-                $"Chapter {d.Number}",
-                d.Number,
+                $"Chapter {DownloadDisplayFormatter.FormatNumber(d.Number)}",
+                (float)d.Number,
                 new Uri(Path.GetFullPath(d.FilePath)))
         })
         .ToList();
@@ -7088,7 +7074,7 @@ static async Task PlayOfflineChapterAsync(DownloadEntry entry, IDownloadStore do
                 return;
             }
 
-            var displayTitle = $"{current.Entry.ContentTitle} - Chapter {current.Entry.Number}";
+            var displayTitle = $"{current.Entry.ContentTitle} - Chapter {DownloadDisplayFormatter.FormatNumber(current.Entry.Number)}";
             var initialNav = $"none:1:{current.Chapter.Number.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
             File.WriteAllText(navPath, initialNav);
             exitCode = LaunchReader(
@@ -7167,14 +7153,14 @@ static Task PlayOfflineEpisodeAsync(DownloadEntry entry, IServiceProvider servic
     if (!File.Exists(entry.FilePath))
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine($"File missing for Episode {entry.Number}. Run 'koware offline --cleanup' to remove stale entries.");
+        Console.WriteLine($"File missing for Episode {DownloadDisplayFormatter.FormatNumber(entry.Number)}. Run 'koware offline --cleanup' to remove stale entries.");
         Console.ResetColor();
         return Task.CompletedTask;
     }
 
     var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
     var stream = new StreamLink(new Uri(Path.GetFullPath(entry.FilePath)), entry.Quality ?? "offline", "offline", null);
-    var title = $"{entry.ContentTitle} - Episode {entry.Number}";
+    var title = $"{entry.ContentTitle} - Episode {DownloadDisplayFormatter.FormatNumber(entry.Number)}";
     LaunchPlayer(playerOptions, stream, logger, null, null, title);
     return Task.CompletedTask;
 }
@@ -7191,55 +7177,19 @@ static IReadOnlyCollection<ChapterPage> BuildOfflinePages(string rootPath)
         return Array.Empty<ChapterPage>();
     }
 
-    var allowedExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"
-    };
-
-    var files = Directory.EnumerateFiles(rootPath)
-        .Where(f => allowedExts.Contains(Path.GetExtension(f)))
-        .Select(f => new { Path = f, Number = ExtractFirstNumber(Path.GetFileNameWithoutExtension(f)) })
-        .OrderBy(f => f.Number ?? int.MaxValue)
-        .ThenBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
-        .ToList();
+    var files = DownloadPathHelpers.EnumerateDownloadedPageFiles(rootPath);
 
     var pages = new List<ChapterPage>();
     var index = 1;
 
     foreach (var file in files)
     {
-        var pageNum = file.Number ?? index;
-        pages.Add(new ChapterPage(pageNum, new Uri(Path.GetFullPath(file.Path))));
+        var pageNum = DownloadPathHelpers.ExtractFirstNumber(Path.GetFileNameWithoutExtension(file)) ?? index;
+        pages.Add(new ChapterPage(pageNum, new Uri(Path.GetFullPath(file))));
         index++;
     }
 
     return pages;
-}
-
-static int? ExtractFirstNumber(string? value)
-{
-    if (string.IsNullOrWhiteSpace(value)) return null;
-
-    var start = -1;
-    for (int i = 0; i < value.Length; i++)
-    {
-        if (char.IsDigit(value[i]))
-        {
-            start = i;
-            break;
-        }
-    }
-
-    if (start < 0) return null;
-
-    var end = start + 1;
-    while (end < value.Length && char.IsDigit(value[end]))
-    {
-        end++;
-    }
-
-    var slice = value[start..end];
-    return int.TryParse(slice, out var num) ? num : null;
 }
 
 /// <summary>
@@ -8607,344 +8557,7 @@ static bool IsKowareCliCommand(string? commandOrPath)
 /// </summary>
 static async Task<int> HandleMangaDownloadAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
-    var queryParts = new List<string>();
-    string? chaptersArg = null;
-    float? singleChapter = null;
-    int? preferredIndex = null;
-    var nonInteractive = false;
-    string? outputDir = null;
-
-    for (var i = 1; i < args.Length; i++)
-    {
-        var arg = args[i];
-        if ((arg.Equals("--chapter", StringComparison.OrdinalIgnoreCase) || arg.Equals("--chapters", StringComparison.OrdinalIgnoreCase)) && i + 1 < args.Length)
-        {
-            var value = args[i + 1];
-            if (value.Contains('-') || value.Equals("all", StringComparison.OrdinalIgnoreCase))
-            {
-                chaptersArg = value;
-            }
-            else if (float.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
-            {
-                singleChapter = parsed;
-            }
-            else
-            {
-                chaptersArg = value;
-            }
-            i++;
-            continue;
-        }
-
-        if (arg.Equals("--index", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
-        {
-            if (int.TryParse(args[i + 1], out var idx) && idx >= 1)
-            {
-                preferredIndex = idx;
-                i++;
-                continue;
-            }
-            logger.LogWarning("--index must be a positive integer.");
-            return 1;
-        }
-
-        if (arg.Equals("--dir", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
-        {
-            outputDir = args[++i];
-            continue;
-        }
-
-        if (arg.Equals("--non-interactive", StringComparison.OrdinalIgnoreCase))
-        {
-            nonInteractive = true;
-            continue;
-        }
-
-        queryParts.Add(arg);
-    }
-
-    if (queryParts.Count == 0)
-    {
-        logger.LogWarning("download command is missing a search query.");
-        WriteColoredLine("Usage: koware download <query> [--chapter <n|n-m|all>] [--dir <path>] [--index <n>] [--non-interactive]", ConsoleColor.Cyan);
-        return 1;
-    }
-
-    var query = string.Join(' ', queryParts).Trim();
-    var mangaCatalog = services.GetRequiredService<IMangaCatalog>();
-
-    // Search for manga
-    var searchStep = ConsoleStep.Start("Searching manga");
-    var results = await mangaCatalog.SearchAsync(query, cancellationToken);
-    searchStep.Succeed($"Found {results.Count} result(s)");
-
-    if (results.Count == 0)
-    {
-        logger.LogWarning("No manga found for query: {Query}", query);
-        return 1;
-    }
-
-    // Select manga
-    Manga selectedManga;
-    if (preferredIndex.HasValue)
-    {
-        var idx = preferredIndex.Value - 1;
-        if (idx < 0 || idx >= results.Count)
-        {
-            logger.LogWarning("Index {Index} is out of range (1-{Count}).", preferredIndex.Value, results.Count);
-            return 1;
-        }
-        selectedManga = results.ElementAt(idx);
-    }
-    else if (results.Count == 1 || nonInteractive)
-    {
-        selectedManga = results.First();
-    }
-    else
-    {
-        // Interactive selection
-        var selectResult = InteractiveSelect.Show(
-            results.ToList(),
-            m => m.Title,
-            new SelectorOptions<Manga>
-            {
-                Prompt = $"Select manga to download",
-                MaxVisibleItems = 10,
-                ShowSearch = true,
-                SecondaryDisplayFunc = m => m.Synopsis ?? ""
-            });
-
-        if (selectResult.Cancelled)
-        {
-            logger.LogWarning("Selection cancelled.");
-            return 1;
-        }
-
-        selectedManga = selectResult.Selected!;
-    }
-
-    logger.LogInformation("Selected: {Title}", selectedManga.Title);
-
-    // Fetch chapters
-    var chaptersStep = ConsoleStep.Start("Fetching chapters");
-    var chapters = await mangaCatalog.GetChaptersAsync(selectedManga, cancellationToken);
-    chaptersStep.Succeed($"Found {chapters.Count} chapter(s)");
-
-    if (chapters.Count == 0)
-    {
-        logger.LogWarning("No chapters found for {Title}.", selectedManga.Title);
-        return 1;
-    }
-
-    // Determine which chapters to download
-    var orderedChapters = chapters.OrderBy(c => c.Number).ToList();
-    var targetChapters = new List<Chapter>();
-
-    if (singleChapter.HasValue)
-    {
-        var ch = orderedChapters.FirstOrDefault(c => Math.Abs(c.Number - singleChapter.Value) < 0.001f)
-                 ?? orderedChapters.FirstOrDefault(c => (int)c.Number == (int)singleChapter.Value);
-        if (ch is null)
-        {
-            logger.LogWarning("Chapter {Chapter} not found.", singleChapter.Value);
-            return 1;
-        }
-        targetChapters.Add(ch);
-    }
-    else if (!string.IsNullOrWhiteSpace(chaptersArg))
-    {
-        if (chaptersArg.Equals("all", StringComparison.OrdinalIgnoreCase))
-        {
-            targetChapters.AddRange(orderedChapters);
-        }
-        else if (chaptersArg.Contains('-'))
-        {
-            var parts = chaptersArg.Split('-');
-            if (parts.Length == 2 &&
-                float.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var from) &&
-                float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var to))
-            {
-                targetChapters.AddRange(orderedChapters.Where(c => c.Number >= from && c.Number <= to));
-            }
-        }
-    }
-    else
-    {
-        // Interactive selection
-        Console.WriteLine();
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine($"Available chapters: {orderedChapters.First().Number} - {orderedChapters.Last().Number} ({chapters.Count} total)");
-        Console.ResetColor();
-        Console.Write("Enter chapter(s) to download (e.g., 1, 1-10, all): ");
-        var input = Console.ReadLine();
-        if (string.IsNullOrWhiteSpace(input))
-        {
-            logger.LogInformation("Download cancelled.");
-            return 0;
-        }
-
-        if (input.Equals("all", StringComparison.OrdinalIgnoreCase))
-        {
-            targetChapters.AddRange(orderedChapters);
-        }
-        else if (input.Contains('-'))
-        {
-            var parts = input.Split('-');
-            if (parts.Length == 2 &&
-                float.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var from) &&
-                float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var to))
-            {
-                targetChapters.AddRange(orderedChapters.Where(c => c.Number >= from && c.Number <= to));
-            }
-        }
-        else if (float.TryParse(input, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var num))
-        {
-            var ch = orderedChapters.FirstOrDefault(c => Math.Abs(c.Number - num) < 0.001f)
-                     ?? orderedChapters.FirstOrDefault(c => (int)c.Number == (int)num);
-            if (ch is not null)
-            {
-                targetChapters.Add(ch);
-            }
-        }
-    }
-
-    if (targetChapters.Count == 0)
-    {
-        logger.LogWarning("No chapters match the requested selection.");
-        return 1;
-    }
-
-    // Prepare output directory
-    var sanitizedTitle = SanitizeFileName(selectedManga.Title);
-    var targetDir = string.IsNullOrWhiteSpace(outputDir)
-        ? Path.Combine(defaults.GetMangaDownloadPath(), sanitizedTitle)
-        : Path.Combine(outputDir, sanitizedTitle);
-    Directory.CreateDirectory(targetDir);
-
-    var allMangaOptions = services.GetService<IOptions<AllMangaOptions>>()?.Value;
-    using var httpClient = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) });
-    if (!string.IsNullOrWhiteSpace(allMangaOptions?.UserAgent))
-    {
-        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(allMangaOptions.UserAgent);
-    }
-    if (!string.IsNullOrWhiteSpace(allMangaOptions?.Referer))
-    {
-        httpClient.DefaultRequestHeaders.Referrer = new Uri(allMangaOptions.Referer);
-    }
-
-    logger.LogInformation("Downloading {Count} chapter(s) to {Dir}", targetChapters.Count, targetDir);
-
-    var downloadStore = services.GetRequiredService<IDownloadStore>();
-    var total = targetChapters.Count;
-    var index = 0;
-    var failedCount = 0;
-
-    foreach (var chapter in targetChapters)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        index++;
-
-        // Show progress bar
-        var percent = (int)(index * 100.0 / total);
-        var filled = (int)(index * 30.0 / total);
-        var empty = 30 - filled;
-        var bar = new string('█', filled) + new string('░', empty);
-        var chapterLabel = chapter.Number % 1 == 0 ? $"{(int)chapter.Number}" : $"{chapter.Number:0.#}";
-        System.Console.Write($"\r  [{bar}] {percent,3}% - Chapter {chapterLabel,-10}");
-
-        var chapterDir = Path.Combine(targetDir, DownloadPathHelpers.BuildMangaChapterDirectoryName(chapter.Number));
-        Directory.CreateDirectory(chapterDir);
-
-        try
-        {
-            var pages = await mangaCatalog.GetPagesAsync(chapter, cancellationToken);
-            var pagesFailed = 0;
-            var pagesDownloaded = 0;
-
-            foreach (var page in pages.OrderBy(p => p.PageNumber))
-            {
-                var ext = DownloadPathHelpers.GetImageExtensionFromUrl(page.ImageUrl.ToString());
-                var fileName = $"{page.PageNumber:000}{ext}";
-                var filePath = Path.Combine(chapterDir, fileName);
-
-                if (File.Exists(filePath))
-                {
-                    pagesDownloaded++;
-                    continue; // Skip if already downloaded
-                }
-
-                // Use resilient download with retry logic
-                var success = await httpClient.DownloadImageWithRetryAsync(
-                    page.ImageUrl,
-                    filePath,
-                    referer: allMangaOptions?.Referer,
-                    userAgent: allMangaOptions?.UserAgent,
-                    maxRetries: 3,
-                    logger: logger,
-                    cancellationToken: cancellationToken);
-
-                if (success)
-                {
-                    pagesDownloaded++;
-                }
-                else
-                {
-                    pagesFailed++;
-                    logger.LogWarning("Failed to download page {Page} of chapter {Chapter} after retries", page.PageNumber, chapter.Number);
-                }
-            }
-
-            // Only record if we got at least some pages
-            if (pagesDownloaded > 0)
-            {
-                var chapterDirInfo = new DirectoryInfo(chapterDir);
-                var chapterSize = chapterDirInfo.EnumerateFiles().Sum(f => f.Length);
-                await downloadStore.AddAsync(
-                    DownloadType.Chapter,
-                    selectedManga.Id.Value,
-                    selectedManga.Title,
-                    (int)chapter.Number,
-                    null,
-                    chapterDir,
-                    chapterSize,
-                    cancellationToken);
-            }
-
-            if (pagesFailed > 0)
-            {
-                logger.LogWarning("Chapter {Chapter}: {Failed}/{Total} pages failed", chapter.Number, pagesFailed, pages.Count);
-            }
-        }
-        catch (Exception ex)
-        {
-            failedCount++;
-            logger.LogWarning("Failed to download chapter {Chapter}: {Error}", chapter.Number, ex.Message);
-        }
-    }
-
-    // Clear progress bar and show completion
-    System.Console.Write("\r" + new string(' ', 70) + "\r");
-    System.Console.ForegroundColor = ConsoleColor.Green;
-    var successCount = total - failedCount;
-    System.Console.WriteLine($"  ✔ {successCount} chapter(s) downloaded" + (failedCount > 0 ? $" ({failedCount} failed)" : ""));
-    System.Console.ResetColor();
-
-    Console.WriteLine();
-    Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine($"Download complete. Saved to \"{targetDir}\".");
-    Console.ResetColor();
-
-    return 0;
-}
-
-/// <summary>
-/// Sanitize a string for use as a file/directory name.
-/// </summary>
-static string SanitizeFileName(string name)
-{
-    var invalid = Path.GetInvalidFileNameChars();
-    var sanitized = new string(name.Where(c => !invalid.Contains(c)).ToArray());
-    return string.IsNullOrWhiteSpace(sanitized) ? "download" : sanitized.Trim();
+    return await MangaDownloadWorkflow.RunAsync(args, services, logger, defaults, cancellationToken);
 }
 
 /// <summary>
@@ -9002,8 +8615,9 @@ static void PrintFriendlyCommandHint(string command)
             break;
         case "download":
             WriteColoredLine("Command looks incomplete. Add a search query to download content.", ConsoleColor.Yellow);
-            WriteColoredLine("Usage:   koware download <query> [--episode <n> | --episodes <n-m|all>] [--quality <label>] [--index <match>] [--dir <path>]", ConsoleColor.Cyan);
+            WriteColoredLine("Usage:   koware download <query> [anime options | manga options]", ConsoleColor.Cyan);
             WriteColoredLine("Example: koware download \"bleach\" --episode 1 --dir ~/Downloads/Anime", ConsoleColor.Green);
+            WriteColoredLine("Example: koware download \"chainsaw man\" --chapter 1,3,5-7 --pdf --merge-pdf", ConsoleColor.Green);
             break;
         case "provider":
             Console.WriteLine("Usage: koware provider [--enable <name> | --disable <name>]");
@@ -10798,7 +10412,7 @@ static void PrintUsage()
     WriteCommand("stream <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Show plan + streams, no player.", ConsoleColor.Cyan);
     WriteCommand("watch <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Pick a stream and play (alias: play).", ConsoleColor.Green);
     WriteCommand("play <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Same as watch.", ConsoleColor.Green);
-    WriteCommand("download <query>", "Download episodes or full shows to disk.", ConsoleColor.Green);
+    WriteCommand("download <query>", "Download episodes or manga chapters to disk.", ConsoleColor.Green);
     WriteCommand("read <query> [--chapter <n>]", "Read manga chapters in the reader.", ConsoleColor.Green);
     WriteCommand("last [--play] [--json]", "Show or replay your most recent watch.", ConsoleColor.Yellow);
     WriteCommand("continue [<anime>] [--from <episode>] [--quality <label>]", "Resume from history (auto next episode).", ConsoleColor.Yellow);
@@ -10970,9 +10584,13 @@ static List<string> GetHelpLines(string command, CliMode mode)
             lines.Add("  koware download <query> [options]");
             lines.Add("");
             lines.Add("Manga options:");
-            lines.Add("  --chapter <n|range> Chapter number or range: 1, 1-10, or 'all'");
+            lines.Add("  --chapter <n|list>  Chapter selection: 1, 1-10, 1,3,5-7, or 'all'");
             lines.Add("  --index <match>     Match index from search results");
             lines.Add("  --dir <path>        Output directory");
+            lines.Add("  --pdf               Export one PDF per downloaded chapter");
+            lines.Add("  --merge-pdf         Export a single merged PDF for the selection");
+            lines.Add("  --concurrency <n>   Parallel page downloads (default: 4, max: 12)");
+            lines.Add("  --force             Re-download pages even if files already exist");
             lines.Add("  --non-interactive   Skip interactive prompts");
             lines.Add("");
             lines.Add("Requirements:");
@@ -10982,8 +10600,9 @@ static List<string> GetHelpLines(string command, CliMode mode)
             lines.Add("  koware download \"one piece\" --episodes 1-12 --quality 1080p");
             lines.Add("  koware download \"bleach\" --episode 1 --dir ~/Videos/Anime");
             lines.Add("  koware download \"chainsaw man\" --chapter 1-10 (manga mode)");
+            lines.Add("  koware download \"chainsaw man\" --chapter 1,3,5-7 --pdf --merge-pdf");
             lines.Add("");
-            lines.Add("Downloads are tracked. View with 'koware offline'.");
+            lines.Add("Downloads are tracked with complete/partial chapter state. View with 'koware offline'.");
             break;
             
         case "read":
@@ -11487,13 +11106,14 @@ static int HandleHelp(string[] args, CliMode mode)
         case "download":
             PrintTopicHeader("download", "Download episodes or chapters to files on disk.");
             Console.WriteLine("Usage (anime): koware download <query> [--episode <n> | --episodes <n-m|all>] [--quality <label>] [--index <match>] [--dir <path>]");
-            Console.WriteLine("Usage (manga): koware download <query> [--chapter <n|n-m|all>] [--index <match>] [--dir <path>]");
+            Console.WriteLine("Usage (manga): koware download <query> [--chapter <n|list|all>] [--index <match>] [--dir <path>] [--pdf] [--merge-pdf] [--concurrency <n>] [--force]");
             Console.WriteLine("Mode : downloads episodes or chapters based on current mode.");
             Console.WriteLine("Examples:");
             Console.WriteLine("  koware download \"one piece\" --episodes 1-12 --quality 1080p");
             Console.WriteLine("  koware download \"chainsaw man\" --chapter 1-10  (manga mode)");
+            Console.WriteLine("  koware download \"chainsaw man\" --chapter 1,3,5-7 --pdf --merge-pdf");
             Console.WriteLine();
-            Console.WriteLine("Downloads are tracked. View with 'koware offline'.");
+            Console.WriteLine("Downloads are tracked with complete/partial chapter state. View with 'koware offline'.");
             break;
         case "offline":
         case "downloads":

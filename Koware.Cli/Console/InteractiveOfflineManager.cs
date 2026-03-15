@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Koware.Cli.Downloads;
 using Koware.Cli.History;
 
 namespace Koware.Cli.Console;
@@ -66,7 +67,9 @@ public sealed class InteractiveOfflineManager
                     Items = g.OrderBy(d => d.Number).ToList(),
                     TotalSize = g.Sum(d => d.FileSizeBytes),
                     AvailableCount = g.Count(d => d.Exists),
-                    MissingCount = g.Count(d => !d.Exists)
+                    MissingCount = g.Count(d => !d.Exists),
+                    PartialCount = g.Count(d => d.State == DownloadState.Partial),
+                    FailedCount = g.Count(d => d.State == DownloadState.Failed)
                 })
                 .OrderByDescending(g => g.Items.Max(d => d.DownloadedAt))
                 .ToList();
@@ -187,7 +190,9 @@ public sealed class InteractiveOfflineManager
 
     private async Task ShowEpisodeSelector(ContentGroup group)
     {
-        var availableItems = group.Items.Where(d => d.Exists).ToList();
+        var availableItems = group.Items
+            .Where(d => d.Exists && (d.CompletedItems > 0 || d.TotalItems == 0))
+            .ToList();
 
         if (availableItems.Count == 0)
         {
@@ -201,7 +206,10 @@ public sealed class InteractiveOfflineManager
         var itemLabel = _type == DownloadType.Chapter ? "Chapter" : "Episode";
         var options = availableItems.Select(d => (
             Entry: d,
-            Label: $"{itemLabel} {d.Number}" + (d.Quality != null ? $" [{d.Quality}]" : "") + $"  ({FormatFileSize(d.FileSizeBytes)})"
+            Label: $"{itemLabel} {DownloadDisplayFormatter.FormatNumber(d.Number)}"
+                + (d.Quality != null ? $" [{d.Quality}]" : "")
+                + BuildStateSuffix(d)
+                + $"  ({FormatFileSize(d.FileSizeBytes)})"
         )).ToList();
 
         System.Console.WriteLine();
@@ -233,7 +241,7 @@ public sealed class InteractiveOfflineManager
         else
         {
             System.Console.ForegroundColor = ConsoleColor.Green;
-            System.Console.WriteLine($"{Icons.Play} Playing: {group.Title} - {itemLabel} {result.Selected.Entry.Number}");
+            System.Console.WriteLine($"{Icons.Play} Playing: {group.Title} - {itemLabel} {DownloadDisplayFormatter.FormatNumber(result.Selected.Entry.Number)}");
             System.Console.ResetColor();
             System.Console.WriteLine($"  Path: {result.Selected.Entry.FilePath}");
         }
@@ -296,15 +304,7 @@ public sealed class InteractiveOfflineManager
 
     private static string FormatFileSize(long bytes)
     {
-        string[] suffixes = { "B", "KB", "MB", "GB", "TB" };
-        var order = 0;
-        double size = bytes;
-        while (size >= 1024 && order < suffixes.Length - 1)
-        {
-            order++;
-            size /= 1024;
-        }
-        return $"{size:0.##} {suffixes[order]}";
+        return DownloadDisplayFormatter.FormatFileSize(bytes);
     }
 
     private sealed class ContentGroup
@@ -315,6 +315,8 @@ public sealed class InteractiveOfflineManager
         public long TotalSize { get; init; }
         public int AvailableCount { get; init; }
         public int MissingCount { get; init; }
+        public int PartialCount { get; init; }
+        public int FailedCount { get; init; }
     }
 
     private sealed class ContentDisplayItem
@@ -326,38 +328,8 @@ public sealed class InteractiveOfflineManager
         public ContentDisplayItem(ContentGroup group, DownloadType type)
         {
             Group = group;
-            var itemLabel = type == DownloadType.Chapter ? "ch" : "ep";
-            var count = group.Items.Count;
-            var ranges = FormatNumberRanges(group.Items.Select(d => d.Number).ToList());
             DisplayText = $"{group.Title}";
-            SearchText = group.Title.ToLowerInvariant();
-        }
-
-        private static string FormatNumberRanges(List<int> numbers)
-        {
-            if (numbers.Count == 0) return "";
-            numbers = numbers.OrderBy(n => n).ToList();
-
-            var ranges = new List<string>();
-            var start = numbers[0];
-            var end = start;
-
-            for (var i = 1; i < numbers.Count; i++)
-            {
-                if (numbers[i] == end + 1)
-                {
-                    end = numbers[i];
-                }
-                else
-                {
-                    ranges.Add(start == end ? $"{start}" : $"{start}-{end}");
-                    start = numbers[i];
-                    end = start;
-                }
-            }
-            ranges.Add(start == end ? $"{start}" : $"{start}-{end}");
-
-            return string.Join(", ", ranges);
+            SearchText = $"{group.Title} {DownloadDisplayFormatter.FormatNumberRanges(group.Items.Select(d => d.Number))}".ToLowerInvariant();
         }
     }
 
@@ -527,6 +499,11 @@ public sealed class InteractiveOfflineManager
                         _buffer.SetColor(ConsoleColor.Yellow);
                         _buffer.Write($" {Icons.Warning}");
                     }
+                    else if (item.Group.PartialCount > 0 || item.Group.FailedCount > 0)
+                    {
+                        _buffer.SetColor(ConsoleColor.Yellow);
+                        _buffer.Write($" {item.Group.PartialCount}p/{item.Group.FailedCount}f");
+                    }
 
                     _buffer.ResetColor();
                 }
@@ -559,15 +536,29 @@ public sealed class InteractiveOfflineManager
 
         private static string FormatFileSize(long bytes)
         {
-            string[] suffixes = { "B", "KB", "MB", "GB", "TB" };
-            var order = 0;
-            double size = bytes;
-            while (size >= 1024 && order < suffixes.Length - 1)
-            {
-                order++;
-                size /= 1024;
-            }
-            return $"{size:0.#} {suffixes[order]}";
+            return DownloadDisplayFormatter.FormatFileSize(bytes);
         }
+    }
+
+    private static string BuildStateSuffix(DownloadEntry entry)
+    {
+        if (entry.State == DownloadState.Partial)
+        {
+            return entry.TotalItems > 0
+                ? $" [partial {entry.CompletedItems}/{entry.TotalItems}]"
+                : " [partial]";
+        }
+
+        if (entry.State == DownloadState.Failed)
+        {
+            return " [failed]";
+        }
+
+        if (entry.TotalItems > 0 && entry.CompletedItems > 0 && entry.CompletedItems < entry.TotalItems)
+        {
+            return $" [{entry.CompletedItems}/{entry.TotalItems}]";
+        }
+
+        return string.Empty;
     }
 }
