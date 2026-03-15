@@ -9,10 +9,11 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 source "$SCRIPT_DIR/lib/macos-packaging.sh"
 
 # Configuration
-RUNTIME="${RUNTIME:-osx-arm64}"
+RUNTIME="${RUNTIME:-universal}"
 CONFIGURATION="${CONFIGURATION:-Release}"
 APP_VERSION="$(macos_read_app_version "$REPO_ROOT")"
 COPY_TO_DESKTOP="${COPY_TO_DESKTOP:-false}"
+MACOS_MIN_VERSION="${MACOS_MIN_VERSION:-10.15}"
 
 info() { echo -e "\033[36m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
@@ -53,7 +54,7 @@ while [[ $# -gt 0 ]]; do
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
-            echo "  --runtime <rid>       Runtime identifier (osx-arm64, osx-x64, universal). Default: osx-arm64"
+            echo "  --runtime <rid>       Runtime identifier (osx-arm64, osx-x64, universal). Default: universal"
             echo "  --config <cfg>        Build configuration (Release, Debug). Default: Release"
             echo "  --copy-to-desktop     Copy the DMG to ~/Desktop after build"
             exit 0
@@ -69,6 +70,7 @@ RUNTIME_LABEL="$RUNTIME"
 DMG_NAME="Koware-Installer-${APP_VERSION}-${RUNTIME_LABEL}.dmg"
 
 info "Building Koware Installer App v$APP_VERSION ($RUNTIME)"
+info "Minimum macOS version for app bundles: $MACOS_MIN_VERSION"
 
 # Clean
 rm -rf "$BUILD_DIR"
@@ -191,7 +193,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
-    <string>11.0</string>
+    <string>$MACOS_MIN_VERSION</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
@@ -541,7 +543,7 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
-    <string>11.0</string>
+    <string>$MACOS_MIN_VERSION</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSRequiresAquaSystemAppearance</key>
