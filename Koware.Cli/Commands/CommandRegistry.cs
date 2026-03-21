@@ -52,8 +52,8 @@ public sealed class CommandRegistry
         // Register all commands
         registry.Register(new LastCommand());
         registry.Register(new VersionCommand());
+        registry.Register(new UpdateCommand());
         registry.Register(new SyncCommand());
-        // More commands will be added as they are extracted from Program.cs
         
         return registry;
     }

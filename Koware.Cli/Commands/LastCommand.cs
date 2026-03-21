@@ -14,7 +14,6 @@ public sealed class LastCommand : ICliCommand
 {
     public string Name => "last";
     public string Description => "Show or replay the most recent watch/read history entry";
-    public bool RequiresProvider => true;
 
     public async Task<int> ExecuteAsync(string[] args, CommandContext context)
     {
@@ -87,6 +86,20 @@ public sealed class LastCommand : ICliCommand
 
         var play = args.Any(a => string.Equals(a, "--play", StringComparison.OrdinalIgnoreCase));
 
+        if (play)
+        {
+            var launcher = context.GetRequiredService<IKowareSubprocessLauncher>();
+            var replayArgs = BuildReplayArgs(entry);
+            var exitCode = await launcher.TryRunAsync(replayArgs, context.Logger, context.CancellationToken);
+            if (exitCode.HasValue)
+            {
+                return exitCode.Value;
+            }
+
+            context.Logger.LogWarning("Could not relaunch Koware to replay the last watch entry.");
+            return 1;
+        }
+
         if (!play)
         {
             if (json)
@@ -126,10 +139,27 @@ public sealed class LastCommand : ICliCommand
             System.Console.ResetColor();
         }
 
-        // TODO: Implement --play functionality (requires access to ExecuteAndPlayAsync)
-        // This will be wired up when we refactor the playback logic
-
         return 0;
+    }
+
+    private static IReadOnlyList<string> BuildReplayArgs(WatchHistoryEntry entry)
+    {
+        var args = new List<string>
+        {
+            "watch",
+            entry.AnimeTitle,
+            "--episode",
+            entry.EpisodeNumber.ToString(CultureInfo.InvariantCulture),
+            "--non-interactive"
+        };
+
+        if (!string.IsNullOrWhiteSpace(entry.Quality))
+        {
+            args.Add("--quality");
+            args.Add(entry.Quality);
+        }
+
+        return args;
     }
 
     private static void WriteField(string label, string value, ConsoleColor valueColor)

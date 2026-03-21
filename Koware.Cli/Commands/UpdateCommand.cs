@@ -1,6 +1,5 @@
 // Author: Ilgaz Mehmetoğlu
 using Koware.Cli.Console;
-using Koware.Cli.Console;
 using Koware.Updater;
 
 namespace Koware.Cli.Commands;

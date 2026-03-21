@@ -74,6 +74,8 @@ public partial class MainViewModel : ObservableObject
         _catalogService = catalogService;
     }
 
+    public string ConfigurationPath => _catalogService.ConfigurationFilePath;
+    public string VersionLabel => _catalogService.VersionLabel;
     public bool IsMangaMode => CurrentMode == BrowseMode.Manga;
     public bool IsAnimeMode => CurrentMode == BrowseMode.Anime;
     public bool IsSearchView => CurrentView == ViewState.Search;

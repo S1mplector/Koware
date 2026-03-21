@@ -13,5 +13,5 @@ dotnet run --project Koware.Browser/Koware.Browser.csproj
 ```
 
 ## Notes
-- Uses services from `Koware.Infrastructure` for catalog access.
+- Uses the same provider/config composition as the CLI, including dynamic autoconfig providers.
 - Shares models with `Koware.Domain` and orchestration from `Koware.Application`.

@@ -1,6 +1,7 @@
 // Author: Ilgaz Mehmetoğlu
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Koware.Application.Environment;
 using Koware.Autoconfig.Models;
 using Microsoft.Extensions.Logging;
 
@@ -265,19 +266,7 @@ public sealed class ProviderStore : IProviderStore
 
     private static string GetConfigDirectory()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            return Path.Combine(appData, "koware");
-        }
-        
-        // Linux/macOS: respect XDG_CONFIG_HOME
-        var configHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
-        if (string.IsNullOrEmpty(configHome))
-        {
-            configHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
-        }
-        return Path.Combine(configHome, "koware");
+        return KowarePaths.EnsureUserConfigDirectory();
     }
 
     private void EnsureDirectoriesExist()

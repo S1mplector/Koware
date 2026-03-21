@@ -618,10 +618,11 @@
                                 <Border Background="#1a1f35"
                                         CornerRadius="6"
                                         Padding="12,8">
-                                    <TextBlock Text="~/.config/koware/appsettings.user.json"
+                                    <TextBlock Text="{Binding ConfigurationPath}"
                                                Foreground="#60a5fa"
                                                FontFamily="Consolas,Monaco,monospace"
-                                               FontSize="12" />
+                                               FontSize="12"
+                                               TextWrapping="Wrap" />
                                 </Border>
                             </StackPanel>
                         </Border>
@@ -641,7 +642,7 @@
                                            Foreground="#8892b0"
                                            FontSize="13"
                                            TextWrapping="Wrap" />
-                                <TextBlock Text="Version 1.0.0"
+                                <TextBlock Text="{Binding VersionLabel}"
                                            Foreground="#4a5568"
                                            FontSize="12"
                                            Margin="0,8,0,0" />

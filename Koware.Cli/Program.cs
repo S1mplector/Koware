@@ -18,6 +18,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Koware.Application.DependencyInjection;
+using Koware.Application.Environment;
 using Koware.Application.Models;
 using Koware.Application.UseCases;
 using Koware.Domain.Models;
@@ -61,20 +62,7 @@ return exitCode;
 /// </returns>
 static string GetUserConfigDirectory()
 {
-    if (OperatingSystem.IsWindows())
-    {
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "koware");
-    }
-    else
-    {
-        // macOS and Linux: use XDG config directory
-        var configHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
-        if (string.IsNullOrEmpty(configHome))
-        {
-            configHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
-        }
-        return Path.Combine(configHome, "koware");
-    }
+    return KowarePaths.GetUserConfigDirectory();
 }
 
 /// <summary>
@@ -83,12 +71,7 @@ static string GetUserConfigDirectory()
 /// </summary>
 static string GetUserConfigFilePath()
 {
-    var dir = GetUserConfigDirectory();
-    if (!Directory.Exists(dir))
-    {
-        Directory.CreateDirectory(dir);
-    }
-    return Path.Combine(dir, "appsettings.user.json");
+    return KowarePaths.GetUserConfigFilePath();
 }
 
 /// <summary>
@@ -153,96 +136,9 @@ static IHost BuildHost(string[] args)
     builder.Services.AddSingleton<IMangaListStore, SqliteMangaListStore>();
     builder.Services.AddSingleton<IDownloadStore, SqliteDownloadStore>();
     builder.Services.AddAutoconfigServices();
+    builder.Services.AddKowareCatalogs();
     builder.Services.AddHttpClient();
-    
-    // Register aggregate catalogs that combine built-in and dynamic providers
-    builder.Services.AddSingleton<AggregateAnimeCatalog>(sp =>
-    {
-        var builtIns = new List<AggregateAnimeCatalog.BuiltInAnimeProvider>();
-        var allAnimeOptions = sp.GetRequiredService<IOptions<AllAnimeOptions>>().Value;
-        var hiAnimeOptions = sp.GetRequiredService<IOptions<HiAnimeOptions>>().Value;
-        var nineAnimeOptions = sp.GetRequiredService<IOptions<NineAnimeOptions>>().Value;
-        var hanimeOptions = sp.GetRequiredService<IOptions<HanimeOptions>>().Value;
-
-        if (allAnimeOptions.IsConfigured)
-        {
-            builtIns.Add(new AggregateAnimeCatalog.BuiltInAnimeProvider(
-                "allanime",
-                "AllAnime",
-                sp.GetRequiredService<AllAnimeCatalog>()));
-        }
-
-        if (hiAnimeOptions.IsConfigured)
-        {
-            builtIns.Add(new AggregateAnimeCatalog.BuiltInAnimeProvider(
-                "hianime",
-                "HiAnime",
-                sp.GetRequiredService<HiAnimeCatalog>()));
-        }
-
-        if (nineAnimeOptions.IsConfigured)
-        {
-            builtIns.Add(new AggregateAnimeCatalog.BuiltInAnimeProvider(
-                "9anime",
-                "9anime",
-                sp.GetRequiredService<NineAnimeCatalog>()));
-        }
-
-        if (hanimeOptions.IsConfigured)
-        {
-            builtIns.Add(new AggregateAnimeCatalog.BuiltInAnimeProvider(
-                "hanime",
-                "Hanime",
-                sp.GetRequiredService<HanimeCatalog>()));
-        }
-
-        var store = sp.GetRequiredService<IProviderStore>();
-        var transforms = sp.GetRequiredService<ITransformEngine>();
-        var http = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
-        var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-        return new AggregateAnimeCatalog(builtIns, store, transforms, http, loggerFactory);
-    });
-    builder.Services.AddSingleton<AggregateMangaCatalog>(sp =>
-    {
-        var builtIns = new List<AggregateMangaCatalog.BuiltInMangaProvider>();
-        var allMangaOptions = sp.GetRequiredService<IOptions<AllMangaOptions>>().Value;
-        var nhentaiOptions = sp.GetRequiredService<IOptions<NhentaiOptions>>().Value;
-        var mangaDexOptions = sp.GetRequiredService<IOptions<MangaDexOptions>>().Value;
-
-        if (allMangaOptions.IsConfigured)
-        {
-            builtIns.Add(new AggregateMangaCatalog.BuiltInMangaProvider(
-                "allmanga",
-                "AllManga",
-                sp.GetRequiredService<AllMangaCatalog>()));
-        }
-
-        if (nhentaiOptions.IsConfigured)
-        {
-            builtIns.Add(new AggregateMangaCatalog.BuiltInMangaProvider(
-                "nhentai",
-                "nhentai",
-                sp.GetRequiredService<NhentaiCatalog>()));
-        }
-
-        if (mangaDexOptions.IsConfigured)
-        {
-            builtIns.Add(new AggregateMangaCatalog.BuiltInMangaProvider(
-                "mangadex",
-                "MangaDex",
-                sp.GetRequiredService<MangaDexCatalog>()));
-        }
-
-        var store = sp.GetRequiredService<IProviderStore>();
-        var transforms = sp.GetRequiredService<ITransformEngine>();
-        var http = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
-        var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-        return new AggregateMangaCatalog(builtIns, store, transforms, http, loggerFactory);
-    });
-    
-    // Override the default catalog registrations with aggregate versions
-    builder.Services.AddSingleton<IAnimeCatalog>(sp => sp.GetRequiredService<AggregateAnimeCatalog>());
-    builder.Services.AddSingleton<IMangaCatalog>(sp => sp.GetRequiredService<AggregateMangaCatalog>());
+    builder.Services.AddSingleton<IKowareSubprocessLauncher, KowareSubprocessLauncher>();
     builder.Logging.ClearProviders();
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Logging.AddFilter("koware.cli", LogLevel.Warning);
@@ -272,6 +168,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
     var themeOptions = services.GetService<IOptions<ThemeOptions>>()?.Value;
     Theme.Initialize(themeOptions);
     using var cts = new CancellationTokenSource();
+    var commandRegistry = CommandRegistry.CreateDefault();
     
     // Start auto-sync engine if enabled
     using var syncEngine = TryStartAutoSync(logger);
@@ -296,13 +193,13 @@ static async Task<int> RunAsync(IHost host, string[] args)
     // Commands that require configured providers (will block if not configured)
     var providerRequiredCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "search", "explore", "plan", "stream", "watch", "play", "download", "read", "last", "continue", "list", "recommend", "rec"
+        "search", "explore", "plan", "stream", "watch", "play", "download", "read", "continue", "list", "recommend", "rec"
     };
 
     // Commands that should NOT show the provider warning (utility/setup commands)
     var utilityCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "help", "version", "update", "doctor", "provider", "config", "theme", "mode"
+        "help", "--help", "-h", "version", "--version", "-v", "update", "doctor", "provider", "config", "theme", "mode", "sync", "backup", "restore"
     };
 
     // Show non-blocking warning for commands that don't require providers but aren't utility commands
@@ -332,6 +229,12 @@ static async Task<int> RunAsync(IHost host, string[] args)
             {
                 return 1;
             }
+        }
+
+        if (commandRegistry.Find(command) is { } registeredCommand)
+        {
+            var context = new Koware.Cli.Commands.CommandContext(services, logger, defaults, cts.Token);
+            return await registeredCommand.ExecuteAsync(args, context);
         }
 
         switch (command)
@@ -368,8 +271,6 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 }
             case "read":
                 return await RunReadCommandAsync(args, services, logger, defaults, cts.Token);
-            case "last":
-                return await HandleLastAsync(args, services, logger, defaults, cts.Token);
             case "continue":
                 return await HandleContinueAsync(args, services, logger, defaults, cts.Token);
             case "history":
@@ -394,16 +295,6 @@ static async Task<int> RunAsync(IHost host, string[] args)
                 return await HandleProviderAsync(args, services);
             case "mode":
                 return await HandleModeAsync(args, logger);
-            case "update":
-                return await HandleUpdateAsync(args, logger, cts.Token);
-            case "sync":
-            case "backup":
-            case "restore":
-                return await HandleSyncAsync(args, services, logger, defaults, cts.Token);
-            case "version":
-            case "--version":
-            case "-v":
-                return HandleVersion();
             case "help":
             case "--help":
             case "-h":
@@ -680,133 +571,6 @@ static Episode? GetAdjacentEpisode(IReadOnlyCollection<Episode>? episodes, Episo
     }
 
     return ordered[nextIndex];
-}
-
-/// <summary>
-/// Implement the <c>koware last</c> command: show or replay the most recent history entry.
-/// </summary>
-/// <param name="args">CLI arguments; supports --play and --json flags.</param>
-/// <param name="services">Service provider for history store.</param>
-/// <param name="logger">Logger instance.</param>
-/// <param name="defaults">Default CLI options for mode detection.</param>
-/// <param name="cancellationToken">Cancellation token.</param>
-/// <returns>Exit code: 0 on success, 1 if no history exists.</returns>
-/// <remarks>Mode-aware: shows last watched anime or last read manga based on current mode.</remarks>
-static async Task<int> HandleLastAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
-{
-    var json = args.Any(a => string.Equals(a, "--json", StringComparison.OrdinalIgnoreCase));
-    var mode = defaults.GetMode();
-
-    if (mode == CliMode.Manga)
-    {
-        // Manga mode - show last read
-        var readHistory = services.GetRequiredService<IReadHistoryStore>();
-        var readEntry = await readHistory.GetLastAsync(cancellationToken);
-        if (readEntry is null)
-        {
-            logger.LogWarning("No read history found.");
-            return 1;
-        }
-
-        if (json)
-        {
-            var jsonText = JsonSerializer.Serialize(readEntry, new JsonSerializerOptions { WriteIndented = true });
-            Console.WriteLine(jsonText);
-        }
-        else
-        {
-            Console.ForegroundColor = ConsoleColor.Magenta;
-            Console.WriteLine("Last Read");
-            Console.ResetColor();
-            Console.WriteLine(new string('─', 40));
-
-            WriteLastField("Manga", readEntry.MangaTitle, ConsoleColor.White);
-            
-            var chText = readEntry.ChapterNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            if (!string.IsNullOrWhiteSpace(readEntry.ChapterTitle) && readEntry.ChapterTitle != $"Chapter {readEntry.ChapterNumber}")
-            {
-                chText += $" - {readEntry.ChapterTitle}";
-            }
-            WriteLastField("Chapter", chText, ConsoleColor.Yellow);
-            
-            WriteLastField("Provider", readEntry.Provider, ConsoleColor.Gray);
-
-            var ago = DateTimeOffset.UtcNow - readEntry.ReadAt;
-            var agoText = ago.TotalMinutes < 1 ? "just now" :
-                         ago.TotalMinutes < 60 ? $"{(int)ago.TotalMinutes}m ago" :
-                         ago.TotalHours < 24 ? $"{(int)ago.TotalHours}h ago" :
-                         ago.TotalDays < 7 ? $"{(int)ago.TotalDays}d ago" :
-                         readEntry.ReadAt.LocalDateTime.ToString("MMM dd, yyyy");
-            WriteLastField("Read", $"{readEntry.ReadAt.LocalDateTime:g} ({agoText})", ConsoleColor.DarkGray);
-
-            Console.WriteLine();
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine("Tip: Use 'koware continue' to read the next chapter.");
-            Console.ResetColor();
-        }
-
-        return 0;
-    }
-
-    // Anime mode (default) - show last watched
-    var history = services.GetRequiredService<IWatchHistoryStore>();
-    var entry = await history.GetLastAsync(cancellationToken);
-    if (entry is null)
-    {
-        logger.LogWarning("No watch history found.");
-        return 1;
-    }
-
-    var play = args.Any(a => string.Equals(a, "--play", StringComparison.OrdinalIgnoreCase));
-
-    if (!play)
-    {
-        if (json)
-        {
-            var jsonText = JsonSerializer.Serialize(entry, new JsonSerializerOptions { WriteIndented = true });
-            Console.WriteLine(jsonText);
-        }
-        else
-        {
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("Last Watched");
-            Console.ResetColor();
-            Console.WriteLine(new string('─', 40));
-
-            WriteLastField("Anime", entry.AnimeTitle, ConsoleColor.White);
-            
-            var epText = entry.EpisodeNumber.ToString();
-            if (!string.IsNullOrWhiteSpace(entry.EpisodeTitle))
-            {
-                epText += $" - {entry.EpisodeTitle}";
-            }
-            WriteLastField("Episode", epText, ConsoleColor.Yellow);
-            
-            WriteLastField("Provider", entry.Provider, ConsoleColor.Gray);
-            
-            if (!string.IsNullOrWhiteSpace(entry.Quality))
-            {
-                WriteLastField("Quality", entry.Quality, ConsoleColor.Gray);
-            }
-
-            var ago = DateTimeOffset.UtcNow - entry.WatchedAt;
-            var agoText = ago.TotalMinutes < 1 ? "just now" :
-                         ago.TotalMinutes < 60 ? $"{(int)ago.TotalMinutes}m ago" :
-                         ago.TotalHours < 24 ? $"{(int)ago.TotalHours}h ago" :
-                         ago.TotalDays < 7 ? $"{(int)ago.TotalDays}d ago" :
-                         entry.WatchedAt.LocalDateTime.ToString("MMM dd, yyyy");
-            WriteLastField("Watched", $"{entry.WatchedAt.LocalDateTime:g} ({agoText})", ConsoleColor.DarkGray);
-
-            Console.WriteLine();
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine("Tip: Use 'koware last --play' to replay, or 'koware continue' for next episode.");
-            Console.ResetColor();
-        }
-
-        return 0;
-    }
-
-    return 0;
 }
 
 /// <summary>
@@ -1543,7 +1307,7 @@ static async Task<int> HandleProviderListAsync(
             "AllAnime",
             "Anime",
             allAnime.IsConfigured ? (allAnime.Enabled ? "Ready" : "Disabled") : "Not configured",
-            allAnime.ApiBase ?? "https://api.allanime.day",
+            allAnime.ApiBase ?? "(not configured)",
             allAnime.Enabled,
             false
         ));
@@ -1552,7 +1316,7 @@ static async Task<int> HandleProviderListAsync(
             "HiAnime",
             "Anime",
             hiAnime.IsConfigured ? (hiAnime.Enabled ? "Ready" : "Disabled") : "Not configured",
-            hiAnime.BaseUrl ?? "https://hianime.to",
+            hiAnime.BaseUrl ?? "(not configured)",
             hiAnime.Enabled,
             false
         ));
@@ -1561,7 +1325,7 @@ static async Task<int> HandleProviderListAsync(
             "9anime",
             "Anime",
             nineAnime.IsConfigured ? (nineAnime.Enabled ? "Ready" : "Disabled") : "Not configured",
-            nineAnime.BaseUrl ?? "https://aniwatchtv.to",
+            nineAnime.BaseUrl ?? "(not configured)",
             nineAnime.Enabled,
             false
         ));
@@ -1570,7 +1334,7 @@ static async Task<int> HandleProviderListAsync(
             "Hanime",
             "Anime",
             hanime.IsConfigured ? (hanime.Enabled ? "Ready" : "Disabled") : "Not configured",
-            hanime.BaseUrl ?? "https://hanime.tv",
+            hanime.BaseUrl ?? "(not configured)",
             hanime.Enabled,
             false
         ));
@@ -1579,7 +1343,7 @@ static async Task<int> HandleProviderListAsync(
             "AllManga", 
             "Manga",
             allManga.IsConfigured ? (allManga.Enabled ? "Ready" : "Disabled") : "Not configured",
-            allManga.ApiBase ?? "https://api.allanime.day",
+            allManga.ApiBase ?? "(not configured)",
             allManga.Enabled,
             false
         ));
@@ -1588,7 +1352,7 @@ static async Task<int> HandleProviderListAsync(
             "nhentai",
             "Manga",
             nhentai.IsConfigured ? (nhentai.Enabled ? "Ready" : "Disabled") : "Not configured",
-            nhentai.BaseUrl ?? "https://nhentai.net",
+            nhentai.BaseUrl ?? "(not configured)",
             nhentai.Enabled,
             false
         ));
@@ -1597,7 +1361,7 @@ static async Task<int> HandleProviderListAsync(
             "MangaDex",
             "Manga",
             mangaDex.IsConfigured ? (mangaDex.Enabled ? "Ready" : "Disabled") : "Not configured",
-            mangaDex.WebBase ?? "https://mangadex.org",
+            mangaDex.WebBase ?? "(not configured)",
             mangaDex.Enabled,
             false
         ));
@@ -7537,111 +7301,19 @@ static bool ShouldIsolateReadProcess()
         || disableIsolation.Equals("on", StringComparison.OrdinalIgnoreCase));
 }
 
-static async Task<int?> TryRunKowareSubprocessAsync(IReadOnlyList<string> commandArgs, ILogger logger, CancellationToken cancellationToken)
-{
-    var startInfos = new List<ProcessStartInfo>();
-    var dedupe = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-    void AddStartInfo(string fileName, IEnumerable<string>? prefixArgs = null)
-    {
-        if (string.IsNullOrWhiteSpace(fileName))
-        {
-            return;
-        }
-
-        var keyBuilder = new List<string> { fileName };
-        if (prefixArgs is not null)
-        {
-            keyBuilder.AddRange(prefixArgs);
-        }
-        keyBuilder.AddRange(commandArgs);
-
-        var key = string.Join('\u001f', keyBuilder);
-        if (!dedupe.Add(key))
-        {
-            return;
-        }
-
-        var start = new ProcessStartInfo
-        {
-            FileName = fileName,
-            UseShellExecute = false
-        };
-
-        // Ensure the child process executes read in-process once to avoid isolation loops.
-        start.Environment["KOWARE_DISABLE_READ_ISOLATION"] = "1";
-
-        if (prefixArgs is not null)
-        {
-            foreach (var arg in prefixArgs)
-            {
-                start.ArgumentList.Add(arg);
-            }
-        }
-
-        foreach (var arg in commandArgs)
-        {
-            start.ArgumentList.Add(arg);
-        }
-
-        startInfos.Add(start);
-    }
-
-    var processPath = Environment.ProcessPath;
-    if (!string.IsNullOrWhiteSpace(processPath) && File.Exists(processPath))
-    {
-        var processName = Path.GetFileNameWithoutExtension(processPath);
-        if (processName.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
-        {
-            var entryAssemblyPath = Assembly.GetEntryAssembly()?.Location;
-            if (!string.IsNullOrWhiteSpace(entryAssemblyPath) && File.Exists(entryAssemblyPath))
-            {
-                AddStartInfo(processPath, new[] { entryAssemblyPath });
-            }
-        }
-        else
-        {
-            AddStartInfo(processPath);
-        }
-    }
-
-    var kowarePath = ResolveExecutablePath("koware");
-    if (!string.IsNullOrWhiteSpace(kowarePath))
-    {
-        AddStartInfo(kowarePath);
-    }
-
-    foreach (var startInfo in startInfos)
-    {
-        try
-        {
-            using var process = Process.Start(startInfo);
-            if (process is null)
-            {
-                continue;
-            }
-
-            await process.WaitForExitAsync(cancellationToken);
-            return process.ExitCode;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "Failed to start isolated read subprocess via {Command}", startInfo.FileName);
-        }
-    }
-
-    return null;
-}
-
 static async Task<int> RunReadCommandAsync(string[] readArgs, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
 {
     if (ShouldIsolateReadProcess())
     {
-        var subprocessExitCode = await TryRunKowareSubprocessAsync(readArgs, logger, cancellationToken);
+        var launcher = services.GetRequiredService<IKowareSubprocessLauncher>();
+        var subprocessExitCode = await launcher.TryRunAsync(
+            readArgs,
+            logger,
+            cancellationToken,
+            new Dictionary<string, string?>
+            {
+                ["KOWARE_DISABLE_READ_ISOLATION"] = "1"
+            });
         if (subprocessExitCode.HasValue)
         {
             if (subprocessExitCode.Value != 0)
@@ -11394,19 +11066,6 @@ static void WriteListExample(string example)
 }
 
 /// <summary>
-/// Helper for koware last: write a labeled field with colored value.
-/// </summary>
-static void WriteLastField(string label, string value, ConsoleColor valueColor)
-{
-    var prev = Console.ForegroundColor;
-    Console.ForegroundColor = ConsoleColor.DarkGray;
-    Console.Write($"  {label,-10}");
-    Console.ForegroundColor = valueColor;
-    Console.WriteLine(value);
-    Console.ForegroundColor = prev;
-}
-
-/// <summary>
 /// Read the entry assembly version and return a short label like "v0.4.0".
 /// </summary>
 /// <returns>Version string or empty if unavailable.</returns>
@@ -11448,17 +11107,6 @@ static Version? TryParseVersionCore(string? label)
     }
 
     return Version.TryParse(text, out var parsed) ? parsed : null;
-}
-
-/// <summary>
-/// Implement the <c>koware version</c> command.
-/// </summary>
-/// <returns>Exit code: 0.</returns>
-static int HandleVersion()
-{
-    var version = GetVersionLabel();
-    Console.WriteLine(string.IsNullOrWhiteSpace(version) ? "Koware CLI (unknown version)" : $"Koware CLI {version}");
-    return 0;
 }
 
 /// <summary>
@@ -12422,18 +12070,6 @@ static async Task<int> HandleStatsAsync(string[] args, IServiceProvider services
     Console.ResetColor();
 
     return 0;
-}
-
-// ===== Sync Command =====
-
-/// <summary>
-/// Handle the sync command for cross-device data synchronization.
-/// </summary>
-static async Task<int> HandleSyncAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken ct)
-{
-    var syncCommand = new Koware.Cli.Commands.SyncCommand();
-    var context = new Koware.Cli.Commands.CommandContext(services, logger, defaults, ct);
-    return await syncCommand.ExecuteAsync(args, context);
 }
 
 // ===== Record Types =====

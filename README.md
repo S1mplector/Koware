@@ -10,7 +10,7 @@ It has a text-based user interface but behaves like a regular CLI. You run a com
 
 > Koware requires no external dependencies or additional software. Everything—including the TUI components, fuzzy search, and terminal rendering—is built from scratch in pure C#.
 
-> **⚠️ Important:** Koware ships with **no pre-configured sources**. You must configure your own sources before using it. See [Source Configuration](#source-configuration) below.
+> **⚠️ Important:** Koware ships with **no active source configuration**. You must configure your own sources before using it. See [Source Configuration](#source-configuration) below.
 
 ---
 
@@ -39,7 +39,7 @@ It has a text-based user interface but behaves like a regular CLI. You run a com
 - **Read manga** in the bundled reader (Windows and macOS)
 - **Keep watch history** locally in a small SQLite database
 
-Koware does **NOT** host any media. It does **NOT** include any source URLs. It only provides a framework for accessing user-configured sources.
+Koware does **NOT** host any media. It does **NOT** ship with any active provider endpoints enabled by default. It only provides a framework for accessing user-configured sources.
 
 ---
 
@@ -50,7 +50,7 @@ Koware does **NOT** host any media. It does **NOT** include any source URLs. It 
 - Install (Linux): `curl -fsSL https://raw.githubusercontent.com/S1mplector/Koware/main/Scripts/install-koware-linux.sh | bash`
 - Auto-configure providers: `koware provider autoconfig`
 - Test connectivity: `koware provider test`
-- Search and play: `koware stream "haikyuu" --episode 1 --quality 720p`
+- Search and play: `koware watch "haikyuu" --episode 1 --quality 720p`
 
 After that, fine-tune `appsettings.user.json` if you need custom hosts.
 
@@ -63,13 +63,13 @@ After that, fine-tune `appsettings.user.json` if you need custom hosts.
 - **Windows**: Windows 10 x64 or later, PowerShell.
 - **macOS**: macOS 11+ (Intel or Apple Silicon).
 - **Linux**: Most distributions with glibc 2.17+.
-- To run from source: **.NET 9 SDK**.
+- To run from source: **.NET 8 SDK**.
 
 ### Dependencies
 
 | Dependency | Required | Purpose |
 |------------|----------|---------|
-| .NET 9 Runtime | Yes (for source builds) | Runtime for Koware CLI |
+| .NET 8 Runtime | Yes (for source builds) | Runtime for Koware CLI |
 | Git | Optional | Required for `koware sync` to sync data across devices |
 | GitHub CLI (`gh`) | Optional | Enables automatic private repo creation with `koware sync init` |
 
@@ -269,7 +269,7 @@ All examples assume you have the global `koware` command installed. If not, repl
     koware search "one piece"
     ```
 
-- **`stream`** – choose a show, episode, and quality, and open the stream in your configured player.
+- **`stream`** – resolve available streams for a show/episode without launching playback.
   - Example:
 
     ```powershell
@@ -323,7 +323,7 @@ Key settings:
 
 ## Source Configuration
 
-**Koware ships with no pre-configured sources.** You must configure sources yourself before using the app.
+**Koware ships with no active source configuration.** You must configure sources yourself before using the app.
 
 ### Where to put your config
 
@@ -338,7 +338,7 @@ Start from the sample in the repo:
 cp Koware.Cli/appsettings.json ~/.config/koware/appsettings.user.json
 ```
 
-Then edit the copy with your own host/API URLs.
+The sample file is only a blank template. Fill in the copy with your own host/API URLs, or use autoconfig below.
 
 ### Auto-configure providers (recommended)
 
@@ -375,9 +375,9 @@ The command fetches `providers.json` plus the referenced config files, merges th
   },
   "MangaDex": {
     "Enabled": true,
-    "ApiBase": "https://api.mangadex.org",
-    "WebBase": "https://mangadex.org",
-    "Referer": "https://mangadex.org",
+    "ApiBase": "https://api.your-manga-api.example",
+    "WebBase": "https://your-manga-site.example",
+    "Referer": "https://your-manga-site.example",
     "TranslatedLanguage": "en",
     "UseDataSaver": false
   },
@@ -394,8 +394,8 @@ The command fetches `providers.json` plus the referenced config files, merges th
 | Field | Purpose | Notes |
 |-------|---------|-------|
 | `Enabled` | Turns the source on/off | Set `true` only for sources you control/trust |
-| `BaseHost` | Host name used to build detail/cover image links | Example: `allanime.to` |
-| `ApiBase` | Base URL for GraphQL/REST calls | Example: `https://api.allanime.to` |
+| `BaseHost` | Host name used to build detail/cover image links | Example: `source.example` |
+| `ApiBase` | Base URL for GraphQL/REST calls | Example: `https://api.source.example` |
 | `Referer` | Referer/Origin headers | Should match the site you’re calling |
 | `TranslationType` | sub/dub/etc. when the API supports it | `sub` is common |
 | `SearchLimit` (if present) | Max results per query | Lower it if your source rate-limits |
@@ -494,12 +494,12 @@ koware help history
 
 ### No Bundled Sources
 
-**Koware ships with zero pre-configured sources.** The software is a framework that requires users to configure their own sources. This is similar to how a web browser does not include bookmarks—users add their own.
+**Koware ships with zero active pre-configured sources.** The software is a framework that requires users to configure their own sources. This is similar to how a web browser does not include bookmarks—users add their own.
 
 ### What Koware Does NOT Do
 
 - ❌ Does NOT host, store, or distribute any media content
-- ❌ Does NOT include any pre-configured source URLs or streaming links
+- ❌ Does NOT enable any pre-configured source URLs or streaming links by default
 - ❌ Does NOT include or support bypassing paywalls or DRM
 - ❌ Does NOT circumvent technical protection measures
 

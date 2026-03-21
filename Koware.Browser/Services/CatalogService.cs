@@ -1,21 +1,15 @@
 // Author: Ilgaz Mehmetoğlu
-using System.Diagnostics;
-using System.Net;
-using System.Net.Http;
-using System.Text.Json;
+using System.Reflection;
 using Koware.Application.Abstractions;
+using Koware.Application.Environment;
 using Koware.Domain.Models;
-using Koware.Infrastructure.Configuration;
-using Koware.Infrastructure.Scraping;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 
 namespace Koware.Browser.Services;
 
 /// <summary>
 /// Service providing access to anime and manga catalogs for the browser UI.
-/// Initializes catalogs using user configuration from ~/.config/koware.
+/// Uses the same catalog composition and config path as the CLI.
 /// </summary>
 public sealed class CatalogService
 {
@@ -23,40 +17,29 @@ public sealed class CatalogService
     private readonly IMangaCatalog _mangaCatalog;
     private readonly ILogger<CatalogService> _logger;
 
-    public CatalogService()
+    public CatalogService(IAnimeCatalog animeCatalog, IMangaCatalog mangaCatalog, ILogger<CatalogService> logger)
     {
-        _logger = NullLogger<CatalogService>.Instance;
+        _animeCatalog = animeCatalog;
+        _mangaCatalog = mangaCatalog;
+        _logger = logger;
+    }
 
-        // Load user configuration
-        var configPath = GetConfigPath();
-        var (animeOptions, mangaOptions, gogoOptions, toggleOptions) = LoadConfiguration(configPath);
+    public string ConfigurationFilePath => KowarePaths.GetUserConfigFilePath();
 
-        // Create HTTP clients
-        var animeHttpClient = CreateHttpClient(animeOptions);
-        var mangaHttpClient = CreateHttpClient(mangaOptions);
-        var gogoHttpClient = CreateHttpClient();
+    public string VersionLabel
+    {
+        get
+        {
+            var version = Assembly.GetEntryAssembly()?.GetName().Version;
+            if (version is null)
+            {
+                return "Version unknown";
+            }
 
-        // Create catalogs
-        var allAnimeCatalog = new AllAnimeCatalog(
-            animeHttpClient,
-            Options.Create(animeOptions),
-            NullLogger<AllAnimeCatalog>.Instance);
-
-        var gogoAnimeCatalog = new GogoAnimeCatalog(
-            gogoHttpClient,
-            Options.Create(gogoOptions),
-            NullLogger<GogoAnimeCatalog>.Instance);
-
-        _animeCatalog = new MultiSourceAnimeCatalog(
-            allAnimeCatalog,
-            gogoAnimeCatalog,
-            Options.Create(toggleOptions),
-            NullLogger<MultiSourceAnimeCatalog>.Instance);
-
-        _mangaCatalog = new AllMangaCatalog(
-            mangaHttpClient,
-            Options.Create(mangaOptions),
-            NullLogger<AllMangaCatalog>.Instance);
+            var parts = version.ToString().Split('.');
+            var trimmed = parts.Length >= 3 ? string.Join('.', parts.Take(3)) : version.ToString();
+            return $"Version {trimmed}";
+        }
     }
 
     public async Task<IReadOnlyCollection<Anime>> SearchAnimeAsync(string query, CancellationToken ct = default)
@@ -138,115 +121,4 @@ public sealed class CatalogService
             return Array.Empty<ChapterPage>();
         }
     }
-
-    private static string GetConfigPath()
-    {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(home, ".config", "koware", "appsettings.user.json");
-    }
-
-    private static (AllAnimeOptions anime, AllMangaOptions manga, GogoAnimeOptions gogo, ProviderToggleOptions toggles) LoadConfiguration(string path)
-    {
-        // Initialize with working defaults (same as CLI bundled config)
-        var animeOptions = new AllAnimeOptions
-        {
-            Enabled = true,  // Must be enabled!
-            BaseHost = "allanime.to",
-            ApiBase = "https://api.allanime.day",
-            Referer = "https://allanime.to",
-            UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
-            TranslationType = "sub",
-            SearchLimit = 20
-        };
-        var mangaOptions = new AllMangaOptions
-        {
-            Enabled = true,  // Must be enabled!
-            BaseHost = "allmanga.to",
-            ApiBase = "https://api.allanime.day",
-            Referer = "https://allmanga.to",
-            UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
-            TranslationType = "sub",
-            SearchLimit = 20
-        };
-        var gogoOptions = new GogoAnimeOptions();
-        var toggleOptions = new ProviderToggleOptions();
-
-        if (!File.Exists(path))
-        {
-            return (animeOptions, mangaOptions, gogoOptions, toggleOptions);
-        }
-
-        try
-        {
-            var json = File.ReadAllText(path);
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            if (root.TryGetProperty("AllAnime", out var allAnime))
-            {
-                // Check Enabled flag from config, default to true if not specified
-                animeOptions.Enabled = allAnime.TryGetProperty("Enabled", out var en) ? en.GetBoolean() : true;
-                animeOptions.ApiBase = allAnime.TryGetProperty("ApiBase", out var ab) && !string.IsNullOrWhiteSpace(ab.GetString()) ? ab.GetString() : animeOptions.ApiBase;
-                animeOptions.BaseHost = allAnime.TryGetProperty("BaseHost", out var bh) && !string.IsNullOrWhiteSpace(bh.GetString()) ? bh.GetString() : animeOptions.BaseHost;
-                animeOptions.Referer = allAnime.TryGetProperty("Referer", out var rf) && !string.IsNullOrWhiteSpace(rf.GetString()) ? rf.GetString() : animeOptions.Referer;
-                animeOptions.UserAgent = allAnime.TryGetProperty("UserAgent", out var ua) && !string.IsNullOrWhiteSpace(ua.GetString()) ? ua.GetString() : animeOptions.UserAgent;
-                animeOptions.TranslationType = allAnime.TryGetProperty("TranslationType", out var tt) ? tt.GetString() ?? "sub" : "sub";
-                animeOptions.SearchLimit = allAnime.TryGetProperty("SearchLimit", out var sl) ? sl.GetInt32() : 20;
-            }
-
-            if (root.TryGetProperty("AllManga", out var allManga))
-            {
-                // Check Enabled flag from config, default to true if not specified
-                mangaOptions.Enabled = allManga.TryGetProperty("Enabled", out var en) ? en.GetBoolean() : true;
-                mangaOptions.ApiBase = allManga.TryGetProperty("ApiBase", out var ab) && !string.IsNullOrWhiteSpace(ab.GetString()) ? ab.GetString() : mangaOptions.ApiBase;
-                mangaOptions.BaseHost = allManga.TryGetProperty("BaseHost", out var bh) && !string.IsNullOrWhiteSpace(bh.GetString()) ? bh.GetString() : mangaOptions.BaseHost;
-                mangaOptions.Referer = allManga.TryGetProperty("Referer", out var rf) && !string.IsNullOrWhiteSpace(rf.GetString()) ? rf.GetString() : mangaOptions.Referer;
-                mangaOptions.UserAgent = allManga.TryGetProperty("UserAgent", out var ua) && !string.IsNullOrWhiteSpace(ua.GetString()) ? ua.GetString() : mangaOptions.UserAgent;
-                mangaOptions.TranslationType = allManga.TryGetProperty("TranslationType", out var tt) ? tt.GetString() ?? "sub" : "sub";
-                mangaOptions.SearchLimit = allManga.TryGetProperty("SearchLimit", out var sl) ? sl.GetInt32() : 20;
-            }
-
-            if (root.TryGetProperty("GogoAnime", out var gogo))
-            {
-                gogoOptions.ApiBase = gogo.TryGetProperty("ApiBase", out var ab) ? ab.GetString() : null;
-                gogoOptions.SiteBase = gogo.TryGetProperty("SiteBase", out var sb) ? sb.GetString() : null;
-            }
-
-            if (root.TryGetProperty("Providers", out var providers))
-            {
-                if (providers.TryGetProperty("DisabledProviders", out var disabled) && disabled.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var item in disabled.EnumerateArray())
-                    {
-                        var name = item.GetString();
-                        if (!string.IsNullOrEmpty(name))
-                        {
-                            toggleOptions.DisabledProviders.Add(name);
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            // Log parse errors but use defaults
-            Debug.WriteLine($"[CatalogService] Failed to parse config at {path}: {ex.Message}");
-        }
-
-        return (animeOptions, mangaOptions, gogoOptions, toggleOptions);
-    }
-
-    private static HttpClient CreateHttpClient(AllAnimeOptions options) =>
-        HttpClientBuilder.Create()
-            .WithUserAgent(options.UserAgent)
-            .Build();
-
-    private static HttpClient CreateHttpClient(AllMangaOptions options) =>
-        HttpClientBuilder.Create()
-            .WithUserAgent(options.UserAgent)
-            .WithReferer(options.Referer)
-            .Build();
-
-    private static HttpClient CreateHttpClient() =>
-        HttpClientBuilder.Create().Build();
 }
