@@ -164,28 +164,58 @@ public sealed class ConfigValidator : IConfigValidator
 
         try
         {
-            var catalog = new DynamicAnimeCatalog(
-                config,
-                _httpClient,
-                _transformEngine,
-                new LoggerFactory().CreateLogger<DynamicAnimeCatalog>());
+            var loggerFactory = new LoggerFactory();
+            var resultCount = 0;
+            string? sampleId = null;
 
-            var results = await catalog.SearchAsync(query, ct);
+            if (config.Type == ProviderType.Manga)
+            {
+                var catalog = new DynamicMangaCatalog(
+                    config,
+                    _httpClient,
+                    _transformEngine,
+                    loggerFactory.CreateLogger<DynamicMangaCatalog>());
+
+                var results = await catalog.SearchAsync(query, ct);
+                resultCount = results.Count;
+                sampleId = results.FirstOrDefault()?.Id.Value;
+            }
+            else
+            {
+                var catalog = new DynamicAnimeCatalog(
+                    config,
+                    _httpClient,
+                    _transformEngine,
+                    loggerFactory.CreateLogger<DynamicAnimeCatalog>());
+
+                var results = await catalog.SearchAsync(query, ct);
+                resultCount = results.Count;
+                sampleId = results.FirstOrDefault()?.Id.Value;
+            }
+
             stopwatch.Stop();
 
-            if (results.Count > 0)
+            if (resultCount > 0 && !string.IsNullOrWhiteSpace(sampleId))
             {
-                var firstResult = results.First();
                 return ValidationCheck.Pass(
                     "Search",
-                    $"Found {results.Count} results for '{query}'",
-                    firstResult.Id.Value, // Return ID for next check
+                    $"Found {resultCount} results for '{query}'",
+                    sampleId, // Return ID for next check
                     stopwatch.Elapsed);
             }
 
             return ValidationCheck.Fail(
                 "Search",
                 $"No results found for '{query}'",
+                $"Search query: {query}",
+                stopwatch.Elapsed);
+        }
+        catch (DynamicProviderRuntimeException ex)
+        {
+            stopwatch.Stop();
+            return ValidationCheck.Fail(
+                "Search",
+                $"{ex.Kind}: {ex.Message}",
                 $"Search query: {query}",
                 stopwatch.Elapsed);
         }
@@ -275,6 +305,14 @@ public sealed class ConfigValidator : IConfigValidator
                     duration: stopwatch.Elapsed);
             }
         }
+        catch (DynamicProviderRuntimeException ex)
+        {
+            stopwatch.Stop();
+            return ValidationCheck.Fail(
+                config.Type == ProviderType.Manga ? "Chapters" : "Episodes",
+                $"{ex.Kind}: {ex.Message}",
+                duration: stopwatch.Elapsed);
+        }
         catch (Exception ex)
         {
             stopwatch.Stop();
@@ -357,6 +395,14 @@ public sealed class ConfigValidator : IConfigValidator
                     "No streams found",
                     duration: stopwatch.Elapsed);
             }
+        }
+        catch (DynamicProviderRuntimeException ex)
+        {
+            stopwatch.Stop();
+            return ValidationCheck.Fail(
+                config.Type == ProviderType.Manga ? "Pages" : "Streams",
+                $"{ex.Kind}: {ex.Message}",
+                duration: stopwatch.Elapsed);
         }
         catch (Exception ex)
         {

@@ -5839,6 +5839,14 @@ static async Task<List<ExploreEntry>> FetchExploreEntriesAsync(
                 }).ToList();
             }
         }
+        catch (DynamicProviderRuntimeException ex)
+        {
+            logger.LogWarning(
+                "Explore blocked for provider {Provider}: {Kind} - {Message}",
+                provider.Info.Name,
+                ex.Kind,
+                ex.Message);
+        }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Explore failed for provider {Provider}", provider.Info.Name);

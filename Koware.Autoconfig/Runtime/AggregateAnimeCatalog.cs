@@ -233,6 +233,15 @@ public sealed class AggregateAnimeCatalog : IAnimeCatalog
             var results = await catalog.SearchAsync(query, filters, cancellationToken);
             return PrefixAnimeIds(results, providerSlug);
         }
+        catch (DynamicProviderRuntimeException ex)
+        {
+            _logger.LogWarning(
+                "Search blocked for provider {Provider}: {Kind} - {Message}",
+                providerName,
+                ex.Kind,
+                ex.Message);
+            return Array.Empty<Anime>();
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Search failed for provider {Provider}, continuing with other providers", providerName);
@@ -251,6 +260,15 @@ public sealed class AggregateAnimeCatalog : IAnimeCatalog
         {
             var results = await catalog.BrowsePopularAsync(filters, cancellationToken);
             return PrefixAnimeIds(results, providerSlug);
+        }
+        catch (DynamicProviderRuntimeException ex)
+        {
+            _logger.LogWarning(
+                "Browse blocked for provider {Provider}: {Kind} - {Message}",
+                providerName,
+                ex.Kind,
+                ex.Message);
+            return Array.Empty<Anime>();
         }
         catch (Exception ex)
         {
@@ -271,6 +289,15 @@ public sealed class AggregateAnimeCatalog : IAnimeCatalog
             var episodes = await catalog.GetEpisodesAsync(anime, cancellationToken);
             return PrefixEpisodeIds(episodes, providerSlug);
         }
+        catch (DynamicProviderRuntimeException ex)
+        {
+            _logger.LogWarning(
+                "Episode fetch blocked for provider {Provider}: {Kind} - {Message}",
+                providerName,
+                ex.Kind,
+                ex.Message);
+            return Array.Empty<Episode>();
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Episode fetch failed for provider {Provider}", providerName);
@@ -287,6 +314,15 @@ public sealed class AggregateAnimeCatalog : IAnimeCatalog
         try
         {
             return await catalog.GetStreamsAsync(episode, cancellationToken);
+        }
+        catch (DynamicProviderRuntimeException ex)
+        {
+            _logger.LogWarning(
+                "Stream fetch blocked for provider {Provider}: {Kind} - {Message}",
+                providerName,
+                ex.Kind,
+                ex.Message);
+            return Array.Empty<StreamLink>();
         }
         catch (Exception ex)
         {

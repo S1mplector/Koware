@@ -231,6 +231,15 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
             var results = await catalog.SearchAsync(query, filters, cancellationToken);
             return PrefixMangaIds(results, providerSlug);
         }
+        catch (DynamicProviderRuntimeException ex)
+        {
+            _logger.LogWarning(
+                "Search blocked for provider {Provider}: {Kind} - {Message}",
+                providerName,
+                ex.Kind,
+                ex.Message);
+            return Array.Empty<Manga>();
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Search failed for provider {Provider}, continuing with other providers", providerName);
@@ -249,6 +258,15 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
         {
             var results = await catalog.BrowsePopularAsync(filters, cancellationToken);
             return PrefixMangaIds(results, providerSlug);
+        }
+        catch (DynamicProviderRuntimeException ex)
+        {
+            _logger.LogWarning(
+                "Browse blocked for provider {Provider}: {Kind} - {Message}",
+                providerName,
+                ex.Kind,
+                ex.Message);
+            return Array.Empty<Manga>();
         }
         catch (Exception ex)
         {
@@ -269,6 +287,15 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
             var chapters = await catalog.GetChaptersAsync(manga, cancellationToken);
             return PrefixChapterIds(chapters, providerSlug);
         }
+        catch (DynamicProviderRuntimeException ex)
+        {
+            _logger.LogWarning(
+                "Chapter fetch blocked for provider {Provider}: {Kind} - {Message}",
+                providerName,
+                ex.Kind,
+                ex.Message);
+            return Array.Empty<Chapter>();
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Chapter fetch failed for provider {Provider}", providerName);
@@ -285,6 +312,15 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
         try
         {
             return await catalog.GetPagesAsync(chapter, cancellationToken);
+        }
+        catch (DynamicProviderRuntimeException ex)
+        {
+            _logger.LogWarning(
+                "Page fetch blocked for provider {Provider}: {Kind} - {Message}",
+                providerName,
+                ex.Kind,
+                ex.Message);
+            return Array.Empty<ChapterPage>();
         }
         catch (Exception ex)
         {

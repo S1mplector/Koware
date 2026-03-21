@@ -1,6 +1,5 @@
 // Author: Ilgaz Mehmetoğlu
 using System.Net;
-using System.Text.Json;
 using Koware.Application.Abstractions;
 using Koware.Autoconfig.Models;
 using Koware.Domain.Models;
@@ -17,6 +16,7 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
     private readonly HttpClient _httpClient;
     private readonly ITransformEngine _transforms;
     private readonly ILogger<DynamicAnimeCatalog> _logger;
+    private readonly DynamicProviderRequestGuard _requestGuard;
 
     public DynamicAnimeCatalog(
         DynamicProviderConfig config,
@@ -28,7 +28,8 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
         _httpClient = httpClient;
         _transforms = transforms;
         _logger = logger;
-        
+        _requestGuard = new DynamicProviderRequestGuard(config);
+
         // Register any custom decoders
         foreach (var transform in config.Transforms.Where(t => t.Type == TransformType.Custom))
         {
@@ -46,50 +47,42 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
 
     public async Task<IReadOnlyCollection<Anime>> SearchAsync(string query, SearchFilters filters, CancellationToken cancellationToken = default)
     {
-        try
+        var searchConfig = _config.Search;
+        var variables = new Dictionary<string, string>
         {
-            var searchConfig = _config.Search;
-            var variables = new Dictionary<string, string>
-            {
-                ["query"] = query,
-                ["search"] = query,
-                ["limit"] = searchConfig.PageSize.ToString()
-            };
-            
-            string response;
-            
-            // Check if this is a POST request with body template
-            if (!string.IsNullOrEmpty(searchConfig.BodyTemplate))
-            {
-                var body = BuildRequest(searchConfig.BodyTemplate, variables);
-                response = await ExecutePostRequestAsync(searchConfig.Endpoint, body, cancellationToken);
-            }
-            else
-            {
-                var requestBody = BuildRequest(searchConfig.QueryTemplate, variables);
-                response = await ExecuteRequestAsync(
-                    searchConfig.Endpoint,
-                    searchConfig.Method,
-                    requestBody,
-                    cancellationToken);
-            }
+            ["query"] = query,
+            ["search"] = query,
+            ["limit"] = searchConfig.PageSize.ToString()
+        };
 
-            var results = _transforms.ExtractAll(response, searchConfig.ResultMapping, searchConfig.ResultsPath);
-            
-            return results.Select(r => new Anime(
-                new AnimeId(GetString(r, "Id") ?? Guid.NewGuid().ToString()),
-                GetString(r, "Title") ?? "Unknown",
-                synopsis: GetString(r, "Synopsis"),
-                coverImage: TryParseUri(GetString(r, "CoverImage")),
-                detailPage: TryParseUri(GetString(r, "DetailPage")) ?? GetFallbackDetailPage(),
-                episodes: Array.Empty<Episode>()
-            )).ToList();
-        }
-        catch (Exception ex)
+        string response;
+
+        // Check if this is a POST request with body template
+        if (!string.IsNullOrEmpty(searchConfig.BodyTemplate))
         {
-            _logger.LogError(ex, "Search failed for provider {Provider}", _config.Slug);
-            return Array.Empty<Anime>();
+            var body = BuildRequest(searchConfig.BodyTemplate, variables);
+            response = await ExecutePostRequestAsync(searchConfig.Endpoint, body, cancellationToken);
         }
+        else
+        {
+            var requestBody = BuildRequest(searchConfig.QueryTemplate, variables);
+            response = await ExecuteRequestAsync(
+                searchConfig.Endpoint,
+                searchConfig.Method,
+                requestBody,
+                cancellationToken);
+        }
+
+        var results = _transforms.ExtractAll(response, searchConfig.ResultMapping, searchConfig.ResultsPath);
+
+        return results.Select(r => new Anime(
+            new AnimeId(GetString(r, "Id") ?? Guid.NewGuid().ToString()),
+            GetString(r, "Title") ?? "Unknown",
+            synopsis: GetString(r, "Synopsis"),
+            coverImage: TryParseUri(GetString(r, "CoverImage")),
+            detailPage: TryParseUri(GetString(r, "DetailPage")) ?? GetFallbackDetailPage(),
+            episodes: Array.Empty<Episode>()
+        )).ToList();
     }
 
     public async Task<IReadOnlyCollection<Anime>> BrowsePopularAsync(SearchFilters? filters = null, CancellationToken cancellationToken = default)
@@ -107,44 +100,36 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
             return Array.Empty<Episode>();
         }
 
-        try
+        var requestBody = BuildRequest(episodeConfig.QueryTemplate, new Dictionary<string, string>
         {
-            var requestBody = BuildRequest(episodeConfig.QueryTemplate, new Dictionary<string, string>
-            {
-                ["showId"] = anime.Id.Value,
-                ["animeId"] = anime.Id.Value,
-                ["id"] = anime.Id.Value
-            });
+            ["showId"] = anime.Id.Value,
+            ["animeId"] = anime.Id.Value,
+            ["id"] = anime.Id.Value
+        });
 
-            var response = await ExecuteRequestAsync(
-                episodeConfig.Endpoint,
-                episodeConfig.Method,
-                requestBody,
-                cancellationToken);
+        var response = await ExecuteRequestAsync(
+            episodeConfig.Endpoint,
+            episodeConfig.Method,
+            requestBody,
+            cancellationToken);
 
-            var results = _transforms.ExtractAll(response, episodeConfig.ResultMapping);
-            
-            var episodes = new List<Episode>();
-            var number = 1;
-            
-            foreach (var r in results)
-            {
-                var epNum = GetInt(r, "Number") ?? number;
-                var epId = GetString(r, "Id") ?? $"{anime.Id.Value}:ep-{epNum}";
-                var title = GetString(r, "Title") ?? $"Episode {epNum}";
-                var page = TryParseUri(GetString(r, "Page"));
-                
-                episodes.Add(new Episode(new EpisodeId(epId), title, epNum, page ?? anime.DetailPage));
-                number++;
-            }
-            
-            return episodes.OrderBy(e => e.Number).ToList();
-        }
-        catch (Exception ex)
+        var results = _transforms.ExtractAll(response, episodeConfig.ResultMapping);
+
+        var episodes = new List<Episode>();
+        var number = 1;
+
+        foreach (var r in results)
         {
-            _logger.LogError(ex, "GetEpisodes failed for anime {AnimeId}", anime.Id.Value);
-            return Array.Empty<Episode>();
+            var epNum = GetInt(r, "Number") ?? number;
+            var epId = GetString(r, "Id") ?? $"{anime.Id.Value}:ep-{epNum}";
+            var title = GetString(r, "Title") ?? $"Episode {epNum}";
+            var page = TryParseUri(GetString(r, "Page"));
+
+            episodes.Add(new Episode(new EpisodeId(epId), title, epNum, page ?? anime.DetailPage));
+            number++;
         }
+
+        return episodes.OrderBy(e => e.Number).ToList();
     }
 
     public async Task<IReadOnlyCollection<StreamLink>> GetStreamsAsync(Episode episode, CancellationToken cancellationToken = default)
@@ -156,70 +141,63 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
             return Array.Empty<StreamLink>();
         }
 
-        try
+        // Parse episode ID to get show ID and episode number
+        var (showId, epNumber) = ParseEpisodeId(episode.Id.Value);
+
+        var requestBody = BuildRequest(streamConfig.QueryTemplate, new Dictionary<string, string>
         {
-            // Parse episode ID to get show ID and episode number
-            var (showId, epNumber) = ParseEpisodeId(episode.Id.Value);
-            
-            var requestBody = BuildRequest(streamConfig.QueryTemplate, new Dictionary<string, string>
-            {
-                ["showId"] = showId,
-                ["animeId"] = showId,
-                ["episodeId"] = episode.Id.Value,
-                ["episodeString"] = epNumber,
-                ["ep"] = epNumber
-            });
+            ["showId"] = showId,
+            ["animeId"] = showId,
+            ["episodeId"] = episode.Id.Value,
+            ["episodeString"] = epNumber,
+            ["ep"] = epNumber
+        });
 
-            var response = await ExecuteRequestAsync(
-                streamConfig.Endpoint,
-                streamConfig.Method,
-                requestBody,
-                cancellationToken);
+        var response = await ExecuteRequestAsync(
+            streamConfig.Endpoint,
+            streamConfig.Method,
+            requestBody,
+            cancellationToken);
 
-            var results = _transforms.ExtractAll(response, streamConfig.ResultMapping);
-            
-            var streams = new List<StreamLink>();
-            
-            foreach (var r in results)
+        var results = _transforms.ExtractAll(response, streamConfig.ResultMapping);
+
+        var streams = new List<StreamLink>();
+
+        foreach (var r in results)
+        {
+            var urlString = GetString(r, "Url");
+            if (string.IsNullOrEmpty(urlString))
+                continue;
+
+            // Apply custom decoder if specified
+            if (!string.IsNullOrEmpty(streamConfig.CustomDecoder))
             {
-                var urlString = GetString(r, "Url");
-                if (string.IsNullOrEmpty(urlString))
-                    continue;
-                    
-                // Apply custom decoder if specified
-                if (!string.IsNullOrEmpty(streamConfig.CustomDecoder))
+                var rule = _config.Transforms.FirstOrDefault(t => t.Name == streamConfig.CustomDecoder);
+                if (rule != null)
                 {
-                    var rule = _config.Transforms.FirstOrDefault(t => t.Name == streamConfig.CustomDecoder);
-                    if (rule != null)
-                    {
-                        urlString = _transforms.ApplyCustomTransform(urlString, rule);
-                    }
+                    urlString = _transforms.ApplyCustomTransform(urlString, rule);
                 }
-                
-                if (!Uri.TryCreate(urlString, UriKind.Absolute, out var url))
-                    continue;
-                    
-                var quality = GetString(r, "Quality") ?? "auto";
-                var provider = GetString(r, "Provider") ?? _config.Name;
-                
-                streams.Add(new StreamLink(
-                    url,
-                    quality,
-                    provider,
-                    _config.Hosts.Referer,
-                    null,
-                    false,
-                    0,
-                    provider));
             }
-            
-            return streams;
+
+            var url = TryParseUri(urlString);
+            if (url is null)
+                continue;
+
+            var quality = GetString(r, "Quality") ?? "auto";
+            var provider = GetString(r, "Provider") ?? _config.Name;
+
+            streams.Add(new StreamLink(
+                url,
+                quality,
+                provider,
+                _config.Hosts.Referer,
+                null,
+                false,
+                0,
+                provider));
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "GetStreams failed for episode {EpisodeId}", episode.Id.Value);
-            return Array.Empty<StreamLink>();
-        }
+
+        return streams;
     }
 
     private async Task<string> ExecutePostRequestAsync(
@@ -227,20 +205,14 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
         string jsonBody,
         CancellationToken cancellationToken)
     {
-        var baseUrl = _config.Hosts.ApiBase ?? $"https://{_config.Hosts.BaseHost}";
-        var fullUrl = endpoint.StartsWith("http") ? endpoint : $"{baseUrl.TrimEnd('/')}/{endpoint.TrimStart('/')}";
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, fullUrl);
+        using var request = new HttpRequestMessage(HttpMethod.Post, _requestGuard.ResolveEndpointUri(endpoint));
         request.Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
-        
+
         request.Version = HttpVersion.Version11;
         request.VersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
         ApplyRequestHeaders(request);
 
-        var response = await _httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        
-        return await response.Content.ReadAsStringAsync(cancellationToken);
+        return await _requestGuard.SendAsync(_httpClient, request, cancellationToken);
     }
 
     private async Task<string> ExecuteRequestAsync(
@@ -249,37 +221,30 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
         string requestBody,
         CancellationToken cancellationToken)
     {
-        var baseUrl = _config.Hosts.ApiBase ?? $"https://{_config.Hosts.BaseHost}";
-        var fullUrl = endpoint.StartsWith("http") ? endpoint : $"{baseUrl.TrimEnd('/')}/{endpoint.TrimStart('/')}";
-
         using var request = new HttpRequestMessage();
-        
+
         if (method == SearchMethod.GraphQL)
         {
             request.Method = HttpMethod.Get;
-            var query = Uri.EscapeDataString(requestBody);
-            request.RequestUri = new Uri($"{fullUrl}?query={query}");
+            request.RequestUri = _requestGuard.ResolveGraphQlUri(endpoint, requestBody);
         }
         else if (method == SearchMethod.REST)
         {
-            // For REST, the requestBody might contain the full URL with parameters
+            // For REST, the requestBody is treated as a relative query/path suffix.
             request.Method = HttpMethod.Get;
-            request.RequestUri = new Uri(requestBody.StartsWith("http") ? requestBody : fullUrl + requestBody);
+            request.RequestUri = _requestGuard.ResolveRestRequestUri(endpoint, requestBody);
         }
         else
         {
             request.Method = HttpMethod.Get;
-            request.RequestUri = new Uri(fullUrl);
+            request.RequestUri = _requestGuard.ResolveEndpointUri(endpoint);
         }
 
         request.Version = HttpVersion.Version11;
         request.VersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
         ApplyRequestHeaders(request);
 
-        var response = await _httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        
-        return await response.Content.ReadAsStringAsync(cancellationToken);
+        return await _requestGuard.SendAsync(_httpClient, request, cancellationToken);
     }
 
     private static string BuildRequest(string template, Dictionary<string, string> variables)
@@ -298,12 +263,12 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
     {
         var marker = ":ep-";
         var idx = episodeId.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        
+
         if (idx > 0)
         {
             return (episodeId[..idx], episodeId[(idx + marker.Length)..]);
         }
-        
+
         return (episodeId, "1");
     }
 
@@ -320,7 +285,7 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
 
     private void ApplyRequestHeaders(HttpRequestMessage request)
     {
-        if (Uri.TryCreate(_config.Hosts.Referer, UriKind.Absolute, out var referer))
+        if (DynamicProviderRequestGuard.TryCreateHttpUri(_config.Hosts.Referer) is { } referer)
         {
             request.Headers.Referrer = referer;
         }
@@ -346,20 +311,17 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
 
     private static Uri? TryParseUri(string? url)
     {
-        if (string.IsNullOrEmpty(url))
-            return null;
-        return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri : null;
+        return DynamicProviderRequestGuard.TryCreateHttpUri(url);
     }
 
     private Uri GetFallbackDetailPage()
     {
-        if (Uri.TryCreate(_config.Hosts.Referer, UriKind.Absolute, out var referer))
+        if (DynamicProviderRequestGuard.TryCreateHttpUri(_config.Hosts.Referer) is { } referer)
         {
             return referer;
         }
 
-        var baseUrl = _config.Hosts.ApiBase ?? $"https://{_config.Hosts.BaseHost}";
-        return new Uri(baseUrl);
+        return _requestGuard.RequestBaseUri;
     }
 
     private void RegisterBuiltInDecoder(string name)
@@ -376,7 +338,7 @@ public sealed class DynamicAnimeCatalog : IAnimeCatalog
         // AllAnime-style hex decoding
         if (!encoded.StartsWith("-"))
             return encoded;
-            
+
         try
         {
             var hex = encoded[1..];
