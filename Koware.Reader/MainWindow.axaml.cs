@@ -184,6 +184,8 @@ public partial class MainWindow : Window
 
     private void OnWindowOpened(object? sender, EventArgs e)
     {
+        NormalizePages();
+
         if (Pages.Count == 0)
         {
             ShowError("No pages provided.");
@@ -242,6 +244,14 @@ public partial class MainWindow : Window
         _loadCts = new CancellationTokenSource();
         UpdateLoadingUi();
         _ = LoadAllPagesAsync(_loadCts.Token);
+    }
+
+    private void NormalizePages()
+    {
+        Pages = Pages
+            .OrderBy(page => page.PageNumber)
+            .Select((page, index) => new PageInfo(index + 1, page.Url))
+            .ToList();
     }
     
     private void InitChapters()
@@ -694,9 +704,26 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!ReferenceEquals(container.Child, _pageGrids[pageIndex]))
+        var pageGrid = _pageGrids[pageIndex];
+        if (!ReferenceEquals(container.Child, pageGrid))
         {
-            container.Child = _pageGrids[pageIndex];
+            DetachFromCurrentParent(pageGrid);
+            container.Child = pageGrid;
+        }
+    }
+
+    private static void DetachFromCurrentParent(Control control)
+    {
+        switch (control.Parent)
+        {
+            case null:
+                return;
+            case Border border when ReferenceEquals(border.Child, control):
+                border.Child = null;
+                return;
+            case Panel panel:
+                panel.Children.Remove(control);
+                return;
         }
     }
 
