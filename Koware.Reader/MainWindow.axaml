@@ -270,7 +270,7 @@
                     <!-- Bookmark button -->
                     <Button x:Name="BookmarkButton" Classes="toolbar-sm"
                             Click="OnBookmarkClick"
-                            ToolTip.Tip="Place bookmark (B)">
+                            ToolTip.Tip="Save bookmark (B). Precise placement: Ctrl+B">
                         <StackPanel Orientation="Horizontal" Spacing="4">
                             <TextBlock Text="Bookmark" VerticalAlignment="Center" />
                             <Viewbox Width="14" Height="14" Stretch="Uniform">
@@ -471,6 +471,51 @@
                            HorizontalAlignment="Center" />
             </StackPanel>
         </Border>
+
+        <Border x:Name="LoadingHud"
+                Grid.RowSpan="3"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Margin="16,72,16,0"
+                Padding="12,10"
+                CornerRadius="12"
+                Background="#e6112135"
+                BorderBrush="#2a3a52"
+                BorderThickness="1"
+                IsVisible="False">
+            <StackPanel Spacing="8" MinWidth="240">
+                <TextBlock Text="Loading Chapter"
+                           Foreground="#e2e8f0"
+                           FontWeight="SemiBold"
+                           FontSize="13" />
+                <ProgressBar x:Name="LoadingHudProgressBar"
+                             Minimum="0"
+                             Maximum="100"
+                             Value="0"
+                             Height="6"
+                             Background="#2a2a3a"
+                             Foreground="#38bdf8" />
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock x:Name="LoadingHudText"
+                               Grid.Column="0"
+                               Text="Preparing pages..."
+                               Foreground="#94a3b8"
+                               FontSize="12"
+                               VerticalAlignment="Center"
+                               TextWrapping="Wrap" />
+                    <Button x:Name="RetryFailedPagesButton"
+                            Grid.Column="1"
+                            Classes="toolbar-sm"
+                            Click="OnRetryFailedPagesClick"
+                            IsVisible="False"
+                            Padding="8,4"
+                            Margin="8,0,0,0"
+                            ToolTip.Tip="Retry all failed pages">
+                        <TextBlock Text="Retry Failed" />
+                    </Button>
+                </Grid>
+            </StackPanel>
+        </Border>
         
         <!-- Footer Navigation -->
         <Border Grid.Row="2"
@@ -608,6 +653,18 @@
                         </Border>
                         <Border Classes="shortcut-row">
                             <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Space / Shift+Space" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Next / previous page" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row alt">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="PgUp / PgDn" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Previous / next page" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row">
+                            <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="1-9" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
                                 <TextBlock Text="Jump to position in chapter" Foreground="#ccc" />
                             </StackPanel>
@@ -646,32 +703,44 @@
                         </Border>
                         <Border Classes="shortcut-row">
                             <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="M" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Toggle scroll / page mode" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row alt">
+                            <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="R" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
                                 <TextBlock Text="Toggle RTL (right-to-left)" Foreground="#ccc" />
                             </StackPanel>
                         </Border>
-                        <Border Classes="shortcut-row alt">
+                        <Border Classes="shortcut-row">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="C" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
                                 <TextBlock Text="Open chapters list" Foreground="#ccc" />
                             </StackPanel>
                         </Border>
-                        <Border Classes="shortcut-row">
+                        <Border Classes="shortcut-row alt">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="F / F11" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
                                 <TextBlock Text="Toggle fullscreen" Foreground="#ccc" />
                             </StackPanel>
                         </Border>
-                        <Border Classes="shortcut-row alt">
+                        <Border Classes="shortcut-row">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="Z" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
                                 <TextBlock Text="Toggle Zen mode (hide UI)" Foreground="#ccc" />
                             </StackPanel>
                         </Border>
-                        <Border Classes="shortcut-row">
+                        <Border Classes="shortcut-row alt">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="B" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
-                                <TextBlock Text="Place bookmark at clicked point" Foreground="#ccc" />
+                                <TextBlock Text="Save bookmark at current reading position" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Ctrl+B" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Place bookmark at an exact clicked point" Foreground="#ccc" />
                             </StackPanel>
                         </Border>
                         

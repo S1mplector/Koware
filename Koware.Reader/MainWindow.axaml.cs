@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private readonly List<Border> _sepiaOverlays = new();
     private readonly List<Grid> _pageGrids = new(); // Grid wrapper containing image + sepia overlay
     private CancellationTokenSource? _loadCts;
+    private readonly Dictionary<int, string> _failedPageUrls = new();
     
     // State
     private bool _isFullscreen;
@@ -55,8 +56,10 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _zenHideTimer;
     private readonly DispatcherTimer _zenToastTimer;
     private BookmarkAnchor? _pendingBookmarkRestore;
+    private BookmarkAnchor? _pendingPositionRestore;
     private BookmarkAnchor? _activeBookmark;
     private bool _bookmarkRestoreQueued;
+    private bool _positionRestoreQueued;
     private bool _bookmarkPlacementMode;
     private Point _lastPointerPosition;
     private Border? _bookmarkMarkerVisual;
@@ -237,6 +240,7 @@ public partial class MainWindow : Window
 
         // Start loading pages
         _loadCts = new CancellationTokenSource();
+        UpdateLoadingUi();
         _ = LoadAllPagesAsync(_loadCts.Token);
     }
     
@@ -351,6 +355,7 @@ public partial class MainWindow : Window
     {
         var totalPages = Pages.Count;
         _loadedCount = 0;
+        _failedPageUrls.Clear();
         _bookmarkLayers.Clear();
 
         try
@@ -412,7 +417,7 @@ public partial class MainWindow : Window
 
             // Load images in parallel (limited concurrency)
             var semaphore = new SemaphoreSlim(3); // 3 concurrent downloads
-            var loadTasks = Pages.OrderBy(p => p.PageNumber).Select(async page =>
+            var loadTasks = GetPageLoadOrder().Select(async page =>
             {
                 await semaphore.WaitAsync(cancellationToken);
                 try
@@ -427,39 +432,50 @@ public partial class MainWindow : Window
                             _loadedBitmaps[page.PageNumber] = bitmap;
                             if (bitmap is not null)
                             {
+                                _failedPageUrls.Remove(page.PageNumber);
                                 _pageImages[index].Source = bitmap;
+                                RestorePageContent(page.PageNumber);
                                 ApplyFitMode(_pageImages[index]);
                                 if (_activeBookmark?.Page == page.PageNumber)
                                 {
                                     RefreshBookmarkVisual();
                                 }
+
+                                if (_pendingBookmarkRestore?.Page == page.PageNumber)
+                                {
+                                    QueueBookmarkRestore();
+                                }
+                                else if (_pendingPositionRestore?.Page == page.PageNumber)
+                                {
+                                    QueuePositionRestore();
+                                }
                             }
                             else
                             {
+                                _failedPageUrls[page.PageNumber] = page.Url;
                                 ShowRetryPlaceholder(page.PageNumber, page.Url);
                             }
                         }
 
                         _loadedCount++;
-                        LoadingProgress.Text = $"{_loadedCount} / {totalPages}";
-                        LoadingProgressBar.Value = (_loadedCount * 100.0) / totalPages;
+                        UpdateLoadingUi();
 
                         if (_loadedCount >= totalPages)
                         {
-                            LoadingOverlay.IsVisible = false;
-                            
-                            // Apply single-page mode if enabled
+                            SetTheme(_currentTheme);
+                            QueueBookmarkRestore();
+                            QueuePositionRestore();
+                            RefreshBookmarkVisual();
+
                             if (_singlePageMode)
                             {
                                 UpdatePageVisibility();
                             }
-                            
-                            // Apply theme to page containers
-                            SetTheme(_currentTheme);
 
-                            // Apply exact bookmark anchor after layout and images are ready.
-                            QueueBookmarkRestore();
-                            RefreshBookmarkVisual();
+                            if (GetSuccessfulPageCount() == 0)
+                            {
+                                ShowError("Failed to load any pages.");
+                            }
                         }
                     });
                 }
@@ -562,8 +578,19 @@ public partial class MainWindow : Window
                 {
                     var image = _pageImages[pageNumber - 1];
                     _loadedBitmaps[pageNumber] = bitmap;
+                    _failedPageUrls.Remove(pageNumber);
+                    RestorePageContent(pageNumber);
                     image.Source = bitmap;
                     ApplyFitMode(image);
+                    if (_pendingBookmarkRestore?.Page == pageNumber)
+                    {
+                        QueueBookmarkRestore();
+                    }
+                    else if (_pendingPositionRestore?.Page == pageNumber)
+                    {
+                        QueuePositionRestore();
+                    }
+                    UpdateLoadingUi();
                 }
                 else
                 {
@@ -588,6 +615,137 @@ public partial class MainWindow : Window
                 retryButton
             }
         };
+    }
+
+    private IEnumerable<PageInfo> GetPageLoadOrder()
+    {
+        var preferredPage = Math.Clamp(_currentPage, 1, Math.Max(1, Pages.Count));
+        return Pages
+            .OrderBy(page => Math.Abs(page.PageNumber - preferredPage))
+            .ThenBy(page => page.PageNumber);
+    }
+
+    private int GetSuccessfulPageCount() => _loadedBitmaps.Values.Count(bitmap => bitmap is not null);
+
+    private bool IsPageLoaded(int pageNumber) =>
+        pageNumber >= 1 &&
+        pageNumber <= Pages.Count &&
+        _loadedBitmaps.TryGetValue(pageNumber, out var bitmap) &&
+        bitmap is not null;
+
+    private bool IsCurrentViewReady()
+    {
+        if (Pages.Count == 0)
+        {
+            return false;
+        }
+
+        var currentPage = Math.Clamp(_currentPage, 1, Pages.Count);
+        if (IsPageLoaded(currentPage))
+        {
+            return true;
+        }
+
+        if (_doublePageMode)
+        {
+            var spreadStart = ((currentPage - 1) / 2) * 2 + 1;
+            return IsPageLoaded(spreadStart) || IsPageLoaded(spreadStart + 1);
+        }
+
+        return false;
+    }
+
+    private void UpdateLoadingUi()
+    {
+        var totalPages = Math.Max(1, Pages.Count);
+        var completedPages = Math.Min(_loadedCount, totalPages);
+        var successfulPages = GetSuccessfulPageCount();
+        var failedPages = _failedPageUrls.Count;
+        var progress = (completedPages * 100.0) / totalPages;
+
+        LoadingProgress.Text = $"{completedPages} / {totalPages}";
+        LoadingProgressBar.Value = progress;
+
+        LoadingHudProgressBar.Value = progress;
+        LoadingHudText.Text = failedPages > 0
+            ? $"Ready: {successfulPages}/{totalPages} • Failed: {failedPages}"
+            : $"Ready: {successfulPages}/{totalPages}";
+
+        RetryFailedPagesButton.IsVisible = failedPages > 0;
+        RetryFailedPagesButton.Content = failedPages == 1 ? "Retry Failed" : $"Retry Failed ({failedPages})";
+
+        var currentViewReady = IsCurrentViewReady();
+        LoadingOverlay.IsVisible = !currentViewReady && completedPages < totalPages;
+        LoadingHud.IsVisible = currentViewReady
+            ? completedPages < totalPages || failedPages > 0
+            : completedPages >= totalPages && failedPages > 0;
+    }
+
+    private void RestorePageContent(int pageNumber)
+    {
+        if (!_pagePlaceholders.TryGetValue(pageNumber, out var container))
+        {
+            return;
+        }
+
+        var pageIndex = pageNumber - 1;
+        if (pageIndex < 0 || pageIndex >= _pageGrids.Count)
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(container.Child, _pageGrids[pageIndex]))
+        {
+            container.Child = _pageGrids[pageIndex];
+        }
+    }
+
+    private async void OnRetryFailedPagesClick(object? sender, RoutedEventArgs e)
+    {
+        if (_failedPageUrls.Count == 0 || sender is not Button retryButton)
+        {
+            return;
+        }
+
+        retryButton.IsEnabled = false;
+
+        try
+        {
+            foreach (var (pageNumber, url) in _failedPageUrls.ToList())
+            {
+                var bitmap = await LoadImageAsync(url, CancellationToken.None);
+                if (bitmap is null)
+                {
+                    continue;
+                }
+
+                var pageIndex = pageNumber - 1;
+                if (pageIndex < 0 || pageIndex >= _pageImages.Count)
+                {
+                    continue;
+                }
+
+                _loadedBitmaps[pageNumber] = bitmap;
+                _failedPageUrls.Remove(pageNumber);
+                RestorePageContent(pageNumber);
+                _pageImages[pageIndex].Source = bitmap;
+                ApplyFitMode(_pageImages[pageIndex]);
+
+                if (_pendingBookmarkRestore?.Page == pageNumber)
+                {
+                    QueueBookmarkRestore();
+                }
+                else if (_pendingPositionRestore?.Page == pageNumber)
+                {
+                    QueuePositionRestore();
+                }
+            }
+        }
+        finally
+        {
+            retryButton.IsEnabled = true;
+            UpdateLoadingUi();
+        }
     }
 
 
@@ -744,6 +902,73 @@ public partial class MainWindow : Window
     {
         PageIndicator.Text = $"{_currentPage} / {Pages.Count}";
     }
+
+    private BookmarkAnchor CaptureViewportAnchor(double viewportAnchorRatio = 0.35)
+    {
+        var defaultPage = Math.Clamp(_currentPage, 1, Math.Max(1, Pages.Count));
+        var anchorY = Math.Max(0, ScrollViewer.Viewport.Height * viewportAnchorRatio);
+
+        if (!TryResolveAnchorAtViewportY(anchorY, out var page, out var ratio))
+        {
+            page = defaultPage;
+            ratio = 0;
+        }
+
+        return new BookmarkAnchor(
+            page,
+            Math.Clamp(ratio, 0, 1),
+            0.5,
+            Pages.Count,
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+    }
+
+    private void ExecuteWithPreservedAnchor(Action action)
+    {
+        BookmarkAnchor? anchor = null;
+        if (Pages.Count > 0 && _loadedCount > 0 && IsCurrentViewReady())
+        {
+            anchor = CaptureViewportAnchor();
+            if (anchor.Page != _currentPage)
+            {
+                SetCurrentPageState(anchor.Page);
+            }
+        }
+
+        action();
+
+        if (anchor is not null)
+        {
+            QueueViewportAnchorRestore(anchor);
+        }
+    }
+
+    private void QueueViewportAnchorRestore(BookmarkAnchor anchor, int attempt = 0)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (TryApplyBookmark(anchor))
+            {
+                RefreshBookmarkVisual();
+                return;
+            }
+
+            if (attempt < 4)
+            {
+                QueueViewportAnchorRestore(anchor, attempt + 1);
+                return;
+            }
+
+            SetCurrentPageState(anchor.Page);
+            if (_singlePageMode)
+            {
+                UpdatePageVisibility();
+            }
+            else if (anchor.Page - 1 < _pageImages.Count)
+            {
+                _pageImages[anchor.Page - 1].BringIntoView();
+            }
+        }, DispatcherPriority.Render);
+    }
     
     private void ShowToast(string text)
     {
@@ -753,12 +978,39 @@ public partial class MainWindow : Window
         _toastTimer.Start();
     }
 
+    private static bool TryGetPositionHotkey(Key key, out int tenth)
+    {
+        tenth = key switch
+        {
+            Key.D1 or Key.NumPad1 => 1,
+            Key.D2 or Key.NumPad2 => 2,
+            Key.D3 or Key.NumPad3 => 3,
+            Key.D4 or Key.NumPad4 => 4,
+            Key.D5 or Key.NumPad5 => 5,
+            Key.D6 or Key.NumPad6 => 6,
+            Key.D7 or Key.NumPad7 => 7,
+            Key.D8 or Key.NumPad8 => 8,
+            Key.D9 or Key.NumPad9 => 9,
+            _ => 0
+        };
+
+        return tenth > 0;
+    }
+
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         // RTL-aware navigation
         var navRight = _rtlMode ? -1 : 1;
         var navLeft = _rtlMode ? 1 : -1;
         var step = _doublePageMode ? 2 : 1;
+
+        if (Pages.Count > 0 && TryGetPositionHotkey(e.Key, out var tenth))
+        {
+            var targetPage = Math.Clamp((int)Math.Ceiling(Pages.Count * (tenth / 10.0)), 1, Pages.Count);
+            NavigateToPage(targetPage, showToast: true);
+            e.Handled = true;
+            return;
+        }
         
         switch (e.Key)
         {
@@ -781,6 +1033,26 @@ public partial class MainWindow : Window
                 
             case Key.End:
                 NavigateToPage(Pages.Count, showToast: true);
+                e.Handled = true;
+                break;
+
+            case Key.PageUp:
+                NavigateToPage(_currentPage + (navLeft * step), showToast: true);
+                e.Handled = true;
+                break;
+
+            case Key.PageDown:
+                NavigateToPage(_currentPage + (navRight * step), showToast: true);
+                e.Handled = true;
+                break;
+
+            case Key.Space when e.KeyModifiers.HasFlag(KeyModifiers.Shift):
+                NavigateToPage(_currentPage + (navLeft * step), showToast: true);
+                e.Handled = true;
+                break;
+
+            case Key.Space:
+                NavigateToPage(_currentPage + (navRight * step), showToast: true);
                 e.Handled = true;
                 break;
                 
@@ -850,6 +1122,11 @@ public partial class MainWindow : Window
                 CycleFitMode();
                 e.Handled = true;
                 break;
+
+            case Key.M:
+                ToggleMode();
+                e.Handled = true;
+                break;
                 
             // RTL mode
             case Key.R:
@@ -878,8 +1155,7 @@ public partial class MainWindow : Window
                 e.Handled = true;
                 break;
 
-            // Bookmark placement mode
-            case Key.B:
+            case Key.B when e.KeyModifiers.HasFlag(KeyModifiers.Control):
                 if (_bookmarkPlacementMode)
                 {
                     CancelBookmarkPlacement(showToast: true);
@@ -887,6 +1163,19 @@ public partial class MainWindow : Window
                 else
                 {
                     BeginBookmarkPlacement();
+                }
+                e.Handled = true;
+                break;
+
+            // Bookmark save
+            case Key.B:
+                if (_bookmarkPlacementMode)
+                {
+                    CancelBookmarkPlacement(showToast: true);
+                }
+                else
+                {
+                    SaveBookmark();
                 }
                 e.Handled = true;
                 break;
@@ -967,10 +1256,13 @@ public partial class MainWindow : Window
     
     private void SetZoom(int zoom)
     {
-        _zoomLevel = zoom;
-        ZoomText.Text = $"{zoom}%";
-        ApplyFitModeToAll();
-        PersistPrefs();
+        ExecuteWithPreservedAnchor(() =>
+        {
+            _zoomLevel = zoom;
+            ZoomText.Text = $"{zoom}%";
+            ApplyFitModeToAll();
+            PersistPrefs();
+        });
     }
     
     private void OnZoomSelected(object? sender, RoutedEventArgs e)
@@ -983,17 +1275,20 @@ public partial class MainWindow : Window
     
     private void CycleFitMode()
     {
-        _fitMode = _fitMode switch
+        ExecuteWithPreservedAnchor(() =>
         {
-            FitMode.FitWidth => FitMode.FitHeight,
-            FitMode.FitHeight => FitMode.Original,
-            FitMode.Original => FitMode.FitWidth,
-            _ => FitMode.FitWidth
-        };
-        
-        UpdateFitModeUi();
-        ApplyFitModeToAll();
-        PersistPrefs();
+            _fitMode = _fitMode switch
+            {
+                FitMode.FitWidth => FitMode.FitHeight,
+                FitMode.FitHeight => FitMode.Original,
+                FitMode.Original => FitMode.FitWidth,
+                _ => FitMode.FitWidth
+            };
+
+            UpdateFitModeUi();
+            ApplyFitModeToAll();
+            PersistPrefs();
+        });
     }
     
     private void UpdateFitModeUi()
@@ -1011,16 +1306,19 @@ public partial class MainWindow : Window
     {
         if (sender is Button btn && btn.Tag is string tag)
         {
-            _fitMode = tag switch
+            ExecuteWithPreservedAnchor(() =>
             {
-                "width" => FitMode.FitWidth,
-                "height" => FitMode.FitHeight,
-                "original" => FitMode.Original,
-                _ => FitMode.FitWidth
-            };
-            UpdateFitModeUi();
-            ApplyFitModeToAll();
-            PersistPrefs();
+                _fitMode = tag switch
+                {
+                    "width" => FitMode.FitWidth,
+                    "height" => FitMode.FitHeight,
+                    "original" => FitMode.Original,
+                    _ => FitMode.FitWidth
+                };
+                UpdateFitModeUi();
+                ApplyFitModeToAll();
+                PersistPrefs();
+            });
         }
     }
     
@@ -1065,15 +1363,22 @@ public partial class MainWindow : Window
     
     private void ToggleDoublePageMode()
     {
-        _doublePageMode = !_doublePageMode;
-        DoublePageText.Text = _doublePageMode ? "2-Page" : "1-Page";
-        if (_doublePageMode)
-            DoublePageButton.Classes.Add("active");
-        else
-            DoublePageButton.Classes.Remove("active");
-        
-        RebuildPageLayout();
-        PersistPrefs();
+        ExecuteWithPreservedAnchor(() =>
+        {
+            _doublePageMode = !_doublePageMode;
+            DoublePageText.Text = _doublePageMode ? "2-Page" : "1-Page";
+            if (_doublePageMode)
+                DoublePageButton.Classes.Add("active");
+            else
+                DoublePageButton.Classes.Remove("active");
+
+            RebuildPageLayout();
+            if (_singlePageMode)
+            {
+                UpdatePageVisibility();
+            }
+            PersistPrefs();
+        });
     }
     
     private void OnDoublePageClick(object? sender, RoutedEventArgs e)
@@ -1083,20 +1388,23 @@ public partial class MainWindow : Window
     
     private void ToggleMode()
     {
-        _singlePageMode = !_singlePageMode;
-        ModeText.Text = _singlePageMode ? "Page" : "Scroll";
-        
-        if (_singlePageMode)
+        ExecuteWithPreservedAnchor(() =>
         {
-            ModeButton.Classes.Add("active");
-        }
-        else
-        {
-            ModeButton.Classes.Remove("active");
-        }
-        
-        UpdatePageVisibility();
-        PersistPrefs();
+            _singlePageMode = !_singlePageMode;
+            ModeText.Text = _singlePageMode ? "Page" : "Scroll";
+
+            if (_singlePageMode)
+            {
+                ModeButton.Classes.Add("active");
+            }
+            else
+            {
+                ModeButton.Classes.Remove("active");
+            }
+
+            UpdatePageVisibility();
+            PersistPrefs();
+        });
     }
     
     private void UpdatePageVisibility()
@@ -1163,7 +1471,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            BeginBookmarkPlacement();
+            SaveBookmark();
         }
     }
 
@@ -2260,6 +2568,41 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Render);
     }
 
+    private void QueuePositionRestore()
+    {
+        if (_positionRestoreQueued || _pendingPositionRestore is null || _pendingBookmarkRestore is not null)
+        {
+            return;
+        }
+
+        _positionRestoreQueued = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _positionRestoreQueued = false;
+            if (_pendingBookmarkRestore is not null || _pendingPositionRestore is not { } position)
+            {
+                return;
+            }
+
+            if (TryApplyBookmark(position))
+            {
+                _pendingPositionRestore = null;
+                SavePosition();
+                ShowToast($"Resumed: {position.Page}/{Pages.Count}");
+                return;
+            }
+
+            if (_loadedCount < Pages.Count)
+            {
+                QueuePositionRestore();
+                return;
+            }
+
+            _pendingPositionRestore = null;
+            NavigateToPage(position.Page, showToast: true);
+        }, DispatcherPriority.Render);
+    }
+
     private bool TryApplyBookmark(BookmarkAnchor bookmark)
     {
         if (bookmark.Page < 1 || bookmark.Page > Pages.Count || bookmark.Page - 1 >= _pageImages.Count)
@@ -2402,6 +2745,11 @@ public partial class MainWindow : Window
     
     private void SavePosition()
     {
+        if (Pages.Count == 0)
+        {
+            return;
+        }
+
         try
         {
             var dir = Path.GetDirectoryName(PositionPath);
@@ -2422,11 +2770,14 @@ public partial class MainWindow : Window
             }
             
             var key = BuildPositionKey();
+            var position = CaptureViewportAnchor();
             var posData = new
             {
-                page = _currentPage,
-                total = Pages.Count,
-                savedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                page = position.Page,
+                offsetRatio = position.OffsetRatio,
+                horizontalRatio = position.HorizontalRatio,
+                total = position.TotalPages,
+                savedAt = position.SavedAtMs
             };
             
             // Update with new position (as raw JSON)
@@ -2444,6 +2795,8 @@ public partial class MainWindow : Window
     
     private void RestorePosition()
     {
+        _pendingPositionRestore = null;
+
         try
         {
             if (!File.Exists(PositionPath)) return;
@@ -2458,12 +2811,26 @@ public partial class MainWindow : Window
                 var page = pos.GetProperty("page").GetInt32();
                 var total = pos.GetProperty("total").GetInt32();
                 var savedAt = pos.GetProperty("savedAt").GetInt64();
+                var ratio = pos.TryGetProperty("offsetRatio", out var ratioEl) && ratioEl.TryGetDouble(out var offsetRatio)
+                    ? offsetRatio
+                    : 0;
+                var horizontalRatio = pos.TryGetProperty("horizontalRatio", out var horizontalRatioEl) && horizontalRatioEl.TryGetDouble(out var xRatio)
+                    ? xRatio
+                    : 0.5;
                 
                 // Only restore if saved within last 30 days and same chapter
                 var thirtyDaysMs = 30L * 24 * 60 * 60 * 1000;
-                if (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - savedAt < thirtyDaysMs && total == Pages.Count && page > 1)
+                var isRecent = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - savedAt < thirtyDaysMs;
+                var hasMeaningfulPosition = page > 1 || ratio > 0.01;
+                if (isRecent && total == Pages.Count && page >= 1 && page <= Pages.Count && hasMeaningfulPosition)
                 {
-                    NavigateToPage(page, showToast: true);
+                    _pendingPositionRestore = new BookmarkAnchor(
+                        page,
+                        Math.Clamp(ratio, 0, 1),
+                        Math.Clamp(horizontalRatio, 0, 1),
+                        total,
+                        savedAt);
+                    SetCurrentPageState(page);
                 }
             }
         }
