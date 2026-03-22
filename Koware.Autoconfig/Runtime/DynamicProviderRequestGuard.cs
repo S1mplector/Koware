@@ -252,7 +252,7 @@ internal sealed class DynamicProviderRequestGuard
     private static Uri EnsureTrailingSlash(Uri uri)
     {
         var absolute = uri.AbsoluteUri;
-        return absolute.EndsWith('/', StringComparison.Ordinal)
+        return absolute.EndsWith("/", StringComparison.Ordinal)
             ? uri
             : new Uri($"{absolute}/");
     }
