@@ -62,6 +62,8 @@ public partial class MainWindow : Window
     private bool _positionRestoreQueued;
     private bool _bookmarkPlacementMode;
     private Point _lastPointerPosition;
+    private Point? _readerPointerDownViewportPoint;
+    private int _chapterPanelSelectionIndex = -1;
     private Border? _bookmarkMarkerVisual;
     private Border? _bookmarkCursorGhostVisual;
     private readonly List<Canvas> _bookmarkLayers = new();
@@ -356,11 +358,16 @@ public partial class MainWindow : Window
         }
         
         UpdateChapterNavButtons();
+        if (_chapterPanelSelectionIndex < 0 && ChaptersList.Children.Count > 0)
+        {
+            SetChapterPanelSelection(GetCurrentChapterIndex(), bringIntoView: false);
+        }
     }
     
     private int GetCurrentChapterIndex()
     {
-        var idx = Chapters.Select((c, i) => (c, i)).FirstOrDefault(x => Math.Abs(x.c.Number - _currentChapterNumber) < 0.001f).i;
+        var orderedChapters = Chapters.OrderBy(c => c.Number).ToList();
+        var idx = orderedChapters.FindIndex(ch => Math.Abs(ch.Number - _currentChapterNumber) < 0.001f);
         return idx >= 0 ? idx : 0;
     }
     
@@ -1055,6 +1062,12 @@ public partial class MainWindow : Window
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
+        if (_chaptersOpen && HandleChapterPanelKey(e))
+        {
+            e.Handled = true;
+            return;
+        }
+
         // RTL-aware navigation
         var navRight = _rtlMode ? -1 : 1;
         var navLeft = _rtlMode ? 1 : -1;
@@ -1235,6 +1248,46 @@ public partial class MainWindow : Window
                 }
                 e.Handled = true;
                 break;
+        }
+    }
+
+    private bool HandleChapterPanelKey(KeyEventArgs e)
+    {
+        if (Chapters.Count == 0)
+        {
+            return false;
+        }
+
+        switch (e.Key)
+        {
+            case Key.Up:
+            case Key.K:
+                SetChapterPanelSelection(_chapterPanelSelectionIndex - 1);
+                return true;
+            case Key.Down:
+            case Key.J:
+                SetChapterPanelSelection(_chapterPanelSelectionIndex + 1);
+                return true;
+            case Key.Home:
+                SetChapterPanelSelection(0);
+                return true;
+            case Key.End:
+                SetChapterPanelSelection(ChaptersList.Children.Count - 1);
+                return true;
+            case Key.PageUp:
+                SetChapterPanelSelection(_chapterPanelSelectionIndex - 5);
+                return true;
+            case Key.PageDown:
+                SetChapterPanelSelection(_chapterPanelSelectionIndex + 5);
+                return true;
+            case Key.Enter:
+                if (_chapterPanelSelectionIndex >= 0)
+                {
+                    NavigateToChapter(_chapterPanelSelectionIndex);
+                }
+                return true;
+            default:
+                return false;
         }
     }
     
@@ -1535,6 +1588,10 @@ public partial class MainWindow : Window
     {
         if (!_bookmarkPlacementMode)
         {
+            if (e.GetCurrentPoint(ScrollViewer).Properties.IsLeftButtonPressed)
+            {
+                _readerPointerDownViewportPoint = e.GetPosition(ScrollViewer);
+            }
             return;
         }
 
@@ -1554,6 +1611,112 @@ public partial class MainWindow : Window
         SaveBookmark(bookmark);
         CancelBookmarkPlacement(showToast: false);
         e.Handled = true;
+    }
+
+    private void OnReaderPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (_bookmarkPlacementMode || _readerPointerDownViewportPoint is not { } pressPoint)
+        {
+            return;
+        }
+
+        _readerPointerDownViewportPoint = null;
+
+        if (_showHelp || _chaptersOpen || ErrorOverlay.IsVisible || LoadingOverlay.IsVisible)
+        {
+            return;
+        }
+
+        if (!IsReaderTapNavigationTarget(e.Source))
+        {
+            return;
+        }
+
+        var releasePoint = e.GetPosition(ScrollViewer);
+        var deltaX = releasePoint.X - pressPoint.X;
+        var deltaY = releasePoint.Y - pressPoint.Y;
+        var movementSquared = (deltaX * deltaX) + (deltaY * deltaY);
+        const double tapThreshold = 18;
+        if (movementSquared > tapThreshold * tapThreshold)
+        {
+            return;
+        }
+
+        HandleReaderTap(releasePoint);
+    }
+
+    private static bool IsReaderTapNavigationTarget(object? source)
+    {
+        if (source is not Visual visual)
+        {
+            return true;
+        }
+
+        if (visual is Button or ScrollBar or Thumb)
+        {
+            return false;
+        }
+
+        return !visual.GetVisualAncestors().Any(ancestor => ancestor is Button or ScrollBar or Thumb);
+    }
+
+    private void HandleReaderTap(Point viewportPoint)
+    {
+        var viewportWidth = ScrollViewer.Viewport.Width > 1 ? ScrollViewer.Viewport.Width : ScrollViewer.Bounds.Width;
+        if (viewportWidth <= 1 || Pages.Count == 0)
+        {
+            return;
+        }
+
+        const double edgeZoneRatio = 0.3;
+        var edgeZoneWidth = viewportWidth * edgeZoneRatio;
+
+        if (viewportPoint.X <= edgeZoneWidth)
+        {
+            OnPreviousClick(this, new RoutedEventArgs());
+            return;
+        }
+
+        if (viewportPoint.X >= viewportWidth - edgeZoneWidth)
+        {
+            OnNextClick(this, new RoutedEventArgs());
+            return;
+        }
+
+        ToggleReaderChrome();
+    }
+
+    private void ToggleReaderChrome()
+    {
+        var shouldShow = HeaderBar.Opacity < 0.5 || FooterBar.Opacity < 0.5;
+        SetUiVisibility(shouldShow);
+
+        if (_zenMode)
+        {
+            if (shouldShow)
+            {
+                _zenHideTimer.Stop();
+                _zenHideTimer.Start();
+            }
+            else
+            {
+                _zenHideTimer.Stop();
+            }
+        }
+        else if (_autoHideUi)
+        {
+            if (shouldShow)
+            {
+                _uiHideTimer.Stop();
+                _uiHideTimer.Start();
+            }
+            else
+            {
+                _uiHideTimer.Stop();
+            }
+        }
+
+        ShowToast(shouldShow ? "Controls shown" : "Controls hidden");
     }
     
     private void RebuildPageLayout()
@@ -2066,7 +2229,53 @@ public partial class MainWindow : Window
         _chaptersOpen = open;
         ChaptersPanel.IsVisible = open;
         ChaptersOverlay.IsVisible = open;
+
+        if (open)
+        {
+            SetChapterPanelSelection(GetCurrentChapterIndex());
+        }
     }
+
+    private void SetChapterPanelSelection(int index, bool bringIntoView = true)
+    {
+        if (ChaptersList.Children.Count == 0)
+        {
+            _chapterPanelSelectionIndex = -1;
+            return;
+        }
+
+        _chapterPanelSelectionIndex = Math.Clamp(index, 0, ChaptersList.Children.Count - 1);
+
+        foreach (var child in ChaptersList.Children.OfType<Border>())
+        {
+            if (child.Tag is int childIndex && childIndex == _chapterPanelSelectionIndex)
+            {
+                child.Classes.Add("selected");
+            }
+            else
+            {
+                child.Classes.Remove("selected");
+            }
+        }
+
+        if (bringIntoView)
+        {
+            QueueChapterItemIntoView(_chapterPanelSelectionIndex);
+        }
+    }
+
+    private void QueueChapterItemIntoView(int index)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var currentChapterItem = ChaptersList.Children
+                .OfType<Border>()
+                .FirstOrDefault(child => child.Tag is int childIndex && childIndex == index);
+
+            currentChapterItem?.BringIntoView();
+        }, DispatcherPriority.Render);
+    }
+
     private void ShowError(string message)
     {
         ErrorText.Text = message;

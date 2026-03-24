@@ -209,6 +209,14 @@
             <Setter Property="BorderBrush" Value="{DynamicResource ReaderAccent}" />
             <Setter Property="BorderThickness" Value="1" />
         </Style>
+        <Style Selector="Border.chapter-item.selected">
+            <Setter Property="Background" Value="{DynamicResource ReaderListHoverBg}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderButtonHoverBorder}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style Selector="Border.chapter-item.current.selected">
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderAccent}" />
+        </Style>
         
         <!-- Overlays -->
         <Style Selector="Border.overlay">
@@ -473,6 +481,7 @@
                               HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Auto"
                               PointerPressed="OnReaderPointerPressed"
+                              PointerReleased="OnReaderPointerReleased"
                               Background="{DynamicResource ReaderBackground}">
                     <StackPanel x:Name="PagesContainer"
                                 HorizontalAlignment="Center"
@@ -706,8 +715,40 @@
                         </Border>
                         <Border Classes="shortcut-row">
                             <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Click edges" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Previous / next page" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row alt">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Click center" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Toggle reader controls" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row">
+                            <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="1-9" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
                                 <TextBlock Text="Jump to position in chapter" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Text="Chapters" Foreground="#888" FontWeight="SemiBold" Margin="0,8,0,0" />
+                        <Border Classes="shortcut-row alt">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="C" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Open or close chapters drawer" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="↑ / ↓ / Enter" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="Move selection and jump chapter" Foreground="#ccc" />
+                            </StackPanel>
+                        </Border>
+                        <Border Classes="shortcut-row alt">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Home / End" Foreground="#60a5fa" FontFamily="Consolas" Width="120" />
+                                <TextBlock Text="First / last chapter in drawer" Foreground="#ccc" />
                             </StackPanel>
                         </Border>
                         
