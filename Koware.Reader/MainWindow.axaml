@@ -18,14 +18,29 @@
         <SolidColorBrush x:Key="ReaderText" Color="#e2e8f0" />
         <SolidColorBrush x:Key="ReaderMuted" Color="#94a3b8" />
         <SolidColorBrush x:Key="ReaderAccent" Color="#38bdf8" />
+        <SolidColorBrush x:Key="ReaderAccentStrong" Color="#0ea5e9" />
+        <SolidColorBrush x:Key="ReaderButtonBg" Color="#141e32" />
+        <SolidColorBrush x:Key="ReaderButtonBorder" Color="#2a3a52" />
+        <SolidColorBrush x:Key="ReaderButtonHoverBg" Color="#1e2d45" />
+        <SolidColorBrush x:Key="ReaderButtonHoverBorder" Color="#3a4a62" />
+        <SolidColorBrush x:Key="ReaderButtonActiveBg" Color="#1e3a5f" />
+        <SolidColorBrush x:Key="ReaderDangerBg" Color="#3a1f29" />
+        <SolidColorBrush x:Key="ReaderDangerBorder" Color="#f87171" />
+        <SolidColorBrush x:Key="ReaderDangerText" Color="#fca5a5" />
+        <SolidColorBrush x:Key="ReaderTrack" Color="#2a2a3a" />
+        <SolidColorBrush x:Key="ReaderListHoverBg" Color="#1a2438" />
+        <SolidColorBrush x:Key="ReaderShortcutRowBg" Color="#0a1220" />
+        <SolidColorBrush x:Key="ReaderShortcutRowAltBg" Color="#0f1a2a" />
+        <SolidColorBrush x:Key="ReaderFlyoutBg" Color="#202442" />
+        <SolidColorBrush x:Key="ReaderFlyoutBorder" Color="#2a3a52" />
     </Window.Resources>
     
     <Window.Styles>
         <!-- Toolbar buttons matching Windows style -->
         <Style Selector="Button.toolbar">
-            <Setter Property="Background" Value="#141e32" />
-            <Setter Property="Foreground" Value="#e2e8f0" />
-            <Setter Property="BorderBrush" Value="#2a3a52" />
+            <Setter Property="Background" Value="{DynamicResource ReaderButtonBg}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderText}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderButtonBorder}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="10,6" />
@@ -36,23 +51,23 @@
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style Selector="Button.toolbar:pointerover">
-            <Setter Property="Background" Value="#1e2d45" />
-            <Setter Property="BorderBrush" Value="#3a4a62" />
+            <Setter Property="Background" Value="{DynamicResource ReaderButtonHoverBg}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderButtonHoverBorder}" />
         </Style>
         <Style Selector="Button.toolbar:pressed">
-            <Setter Property="Background" Value="#0f1a2a" />
+            <Setter Property="Background" Value="{DynamicResource ReaderPanel}" />
         </Style>
         <Style Selector="Button.toolbar.active">
-            <Setter Property="Background" Value="#1e3a5f" />
-            <Setter Property="BorderBrush" Value="#38bdf8" />
-            <Setter Property="Foreground" Value="#38bdf8" />
+            <Setter Property="Background" Value="{DynamicResource ReaderButtonActiveBg}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderAccent}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderAccent}" />
         </Style>
         
         <!-- Small toolbar buttons -->
         <Style Selector="Button.toolbar-sm">
-            <Setter Property="Background" Value="#141e32" />
-            <Setter Property="Foreground" Value="#e2e8f0" />
-            <Setter Property="BorderBrush" Value="#2a3a52" />
+            <Setter Property="Background" Value="{DynamicResource ReaderButtonBg}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderText}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderButtonBorder}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="6,5" />
@@ -61,31 +76,33 @@
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
         <Style Selector="Button.toolbar-sm:pointerover">
-            <Setter Property="Background" Value="#1e2d45" />
+            <Setter Property="Background" Value="{DynamicResource ReaderButtonHoverBg}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderButtonHoverBorder}" />
         </Style>
         <Style Selector="Button.toolbar-sm.active">
-            <Setter Property="Background" Value="#1e3a5f" />
-            <Setter Property="BorderBrush" Value="#38bdf8" />
-            <Setter Property="Foreground" Value="#38bdf8" />
+            <Setter Property="Background" Value="{DynamicResource ReaderButtonActiveBg}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderAccent}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderAccent}" />
         </Style>
         <Style Selector="Button.toolbar-sm.placing">
-            <Setter Property="Background" Value="#3a1f29" />
-            <Setter Property="BorderBrush" Value="#f87171" />
-            <Setter Property="Foreground" Value="#fca5a5" />
+            <Setter Property="Background" Value="{DynamicResource ReaderDangerBg}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderDangerBorder}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderDangerText}" />
         </Style>
         
         <!-- Nav buttons -->
         <Style Selector="Button.nav-btn">
-            <Setter Property="Background" Value="#141e32" />
-            <Setter Property="Foreground" Value="#e2e8f0" />
-            <Setter Property="BorderBrush" Value="#2a3a52" />
+            <Setter Property="Background" Value="{DynamicResource ReaderButtonBg}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderText}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderButtonBorder}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="12,8" />
             <Setter Property="MinHeight" Value="36" />
         </Style>
         <Style Selector="Button.nav-btn:pointerover">
-            <Setter Property="Background" Value="#1e2d45" />
+            <Setter Property="Background" Value="{DynamicResource ReaderButtonHoverBg}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderButtonHoverBorder}" />
         </Style>
         <Style Selector="Button.nav-btn:disabled">
             <Setter Property="Opacity" Value="0.4" />
@@ -93,14 +110,18 @@
         
         <!-- Chapter nav buttons -->
         <Style Selector="Button.chapter-nav">
-            <Setter Property="Background" Value="#141e32" />
-            <Setter Property="Foreground" Value="#e2e8f0" />
-            <Setter Property="BorderBrush" Value="#2a3a52" />
+            <Setter Property="Background" Value="{DynamicResource ReaderButtonBg}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderText}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderButtonBorder}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="8,6" />
             <Setter Property="MinHeight" Value="32" />
             <Setter Property="FontSize" Value="11" />
+        </Style>
+        <Style Selector="Button.chapter-nav:pointerover">
+            <Setter Property="Background" Value="{DynamicResource ReaderButtonHoverBg}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderButtonHoverBorder}" />
         </Style>
         <Style Selector="Button.chapter-nav:disabled">
             <Setter Property="Opacity" Value="0.3" />
@@ -139,7 +160,7 @@
         <Style Selector="Slider#PageSlider /template/ Thumb">
             <Setter Property="Width" Value="18" />
             <Setter Property="Height" Value="18" />
-            <Setter Property="Background" Value="#94a3b8" />
+            <Setter Property="Background" Value="{DynamicResource ReaderMuted}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Template">
                 <ControlTemplate>
@@ -148,16 +169,16 @@
             </Setter>
         </Style>
         <Style Selector="Slider#PageSlider /template/ Thumb:pointerover">
-            <Setter Property="Background" Value="#38bdf8" />
+            <Setter Property="Background" Value="{DynamicResource ReaderAccent}" />
         </Style>
         <Style Selector="Slider#PageSlider /template/ Thumb:pressed">
-            <Setter Property="Background" Value="#0ea5e9" />
+            <Setter Property="Background" Value="{DynamicResource ReaderAccentStrong}" />
         </Style>
         
         <!-- Dropdown menu items -->
         <Style Selector="Button.dropdown-item">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#e2e8f0" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderText}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="10,6" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -166,11 +187,11 @@
             <Setter Property="FontSize" Value="12" />
         </Style>
         <Style Selector="Button.dropdown-item:pointerover">
-            <Setter Property="Background" Value="#1e2d45" />
+            <Setter Property="Background" Value="{DynamicResource ReaderButtonHoverBg}" />
         </Style>
         <Style Selector="Button.dropdown-item.active">
-            <Setter Property="Background" Value="#1e3a5f" />
-            <Setter Property="Foreground" Value="#38bdf8" />
+            <Setter Property="Background" Value="{DynamicResource ReaderButtonActiveBg}" />
+            <Setter Property="Foreground" Value="{DynamicResource ReaderAccent}" />
         </Style>
         
         <!-- Chapter list items -->
@@ -181,11 +202,11 @@
             <Setter Property="Cursor" Value="Hand" />
         </Style>
         <Style Selector="Border.chapter-item:pointerover">
-            <Setter Property="Background" Value="#1a2438" />
+            <Setter Property="Background" Value="{DynamicResource ReaderListHoverBg}" />
         </Style>
         <Style Selector="Border.chapter-item.current">
-            <Setter Property="Background" Value="#1e3a5f" />
-            <Setter Property="BorderBrush" Value="#38bdf8" />
+            <Setter Property="Background" Value="{DynamicResource ReaderButtonActiveBg}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ReaderAccent}" />
             <Setter Property="BorderThickness" Value="1" />
         </Style>
         
@@ -201,13 +222,13 @@
         
         <!-- Shortcut rows -->
         <Style Selector="Border.shortcut-row">
-            <Setter Property="Background" Value="#0a1220" />
+            <Setter Property="Background" Value="{DynamicResource ReaderShortcutRowBg}" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="8,6" />
             <Setter Property="Margin" Value="0,0,0,4" />
         </Style>
         <Style Selector="Border.shortcut-row.alt">
-            <Setter Property="Background" Value="#0f1a2a" />
+            <Setter Property="Background" Value="{DynamicResource ReaderShortcutRowAltBg}" />
         </Style>
     </Window.Styles>
     
@@ -270,7 +291,7 @@
                     <!-- Bookmark button -->
                     <Button x:Name="BookmarkButton" Classes="toolbar-sm"
                             Click="OnBookmarkClick"
-                            ToolTip.Tip="Save bookmark (B). Precise placement: Ctrl+B">
+                            ToolTip.Tip="Place bookmark on page. Quick save: B">
                         <StackPanel Orientation="Horizontal" Spacing="4">
                             <TextBlock Text="Bookmark" VerticalAlignment="Center" />
                             <Viewbox Width="14" Height="14" Stretch="Uniform">
@@ -323,7 +344,13 @@
                         </StackPanel>
                         <Button.Flyout>
                             <Flyout Placement="BottomEdgeAlignedRight">
-                                <Border Background="#0f172aF8" CornerRadius="8" Padding="4" MinWidth="120">
+                                <Border x:Name="FitModeFlyoutPanel"
+                                        Background="{DynamicResource ReaderFlyoutBg}"
+                                        BorderBrush="{DynamicResource ReaderFlyoutBorder}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="4"
+                                        MinWidth="120">
                                     <StackPanel Spacing="2">
                                         <Button Classes="dropdown-item" Tag="width" Click="OnFitModeSelected" Content="Fit Width" />
                                         <Button Classes="dropdown-item" Tag="height" Click="OnFitModeSelected" Content="Fit Height" />
@@ -351,7 +378,13 @@
                         </StackPanel>
                         <Button.Flyout>
                             <Flyout Placement="BottomEdgeAlignedRight">
-                                <Border Background="#0f172aF8" CornerRadius="8" Padding="4" MinWidth="100">
+                                <Border x:Name="ZoomFlyoutPanel"
+                                        Background="{DynamicResource ReaderFlyoutBg}"
+                                        BorderBrush="{DynamicResource ReaderFlyoutBorder}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="4"
+                                        MinWidth="100">
                                     <StackPanel Spacing="2">
                                         <Button Classes="dropdown-item" Tag="100" Click="OnZoomSelected" Content="100%" />
                                         <Button Classes="dropdown-item" Tag="125" Click="OnZoomSelected" Content="125%" />
@@ -412,7 +445,13 @@
                         </StackPanel>
                         <Button.Flyout>
                             <Flyout Placement="BottomEdgeAlignedRight">
-                                <Border Background="#0f172aF8" CornerRadius="8" Padding="4" MinWidth="130">
+                                <Border x:Name="ThemeFlyoutPanel"
+                                        Background="{DynamicResource ReaderFlyoutBg}"
+                                        BorderBrush="{DynamicResource ReaderFlyoutBorder}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="4"
+                                        MinWidth="130">
                                     <StackPanel Spacing="2">
                                         <Button Classes="dropdown-item" Tag="dark" Click="OnThemeSelected" Content="Dark" />
                                         <Button Classes="dropdown-item" Tag="sepia" Click="OnThemeSelected" Content="Sepia" />
@@ -454,7 +493,8 @@
                 Background="#cc1a1a2e"
                 IsVisible="True">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="300">
-                <TextBlock Text="Loading pages..."
+                <TextBlock x:Name="LoadingTitleText"
+                           Text="Loading pages..."
                            Foreground="White"
                            FontSize="20"
                            HorizontalAlignment="Center" />
@@ -484,7 +524,8 @@
                 BorderThickness="1"
                 IsVisible="False">
             <StackPanel Spacing="8" MinWidth="240">
-                <TextBlock Text="Loading Chapter"
+                <TextBlock x:Name="LoadingHudTitle"
+                           Text="Loading Chapter"
                            Foreground="#e2e8f0"
                            FontWeight="SemiBold"
                            FontSize="13" />
@@ -759,9 +800,8 @@
                         </Border>
                     </StackPanel>
                     
-                    <Button Click="OnHelpCloseClick"
-                            Background="#3a3a5a"
-                            Foreground="White"
+                    <Button Classes="toolbar"
+                            Click="OnHelpCloseClick"
                             Padding="20,10"
                             Margin="0,8,0,0"
                             CornerRadius="10"
@@ -787,7 +827,8 @@
                 Grid.RowSpan="3"
                 Background="#f01a1a2e"
                 IsVisible="False">
-            <Border Background="#23263f"
+            <Border x:Name="ErrorPanel"
+                    Background="#23263f"
                     CornerRadius="14"
                     Padding="28"
                     VerticalAlignment="Center"
@@ -795,7 +836,8 @@
                 <StackPanel VerticalAlignment="Center"
                             HorizontalAlignment="Center"
                             Spacing="12">
-                    <TextBlock Text="⚠"
+                    <TextBlock x:Name="ErrorIcon"
+                               Text="⚠"
                                Foreground="#f87171"
                                FontSize="48"
                                HorizontalAlignment="Center" />
@@ -806,7 +848,9 @@
                                HorizontalAlignment="Center"
                                TextWrapping="Wrap"
                                MaxWidth="400" />
-                    <Button Content="Close"
+                    <Button x:Name="ErrorCloseButton"
+                            Classes="toolbar"
+                            Content="Close"
                             Click="OnCloseClick"
                             Padding="18,10"
                             CornerRadius="10"

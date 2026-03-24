@@ -253,6 +253,35 @@ public partial class MainWindow : Window
             .Select((page, index) => new PageInfo(index + 1, page.Url))
             .ToList();
     }
+
+    private void SetBrushResource(string key, string color)
+    {
+        if (Resources.TryGetValue(key, out var existing) && existing is SolidColorBrush brush)
+        {
+            brush.Color = Color.Parse(color);
+            return;
+        }
+
+        Resources[key] = new SolidColorBrush(Color.Parse(color));
+    }
+
+    private SolidColorBrush GetBrushResource(string key, string fallbackColor)
+    {
+        if (Resources.TryGetValue(key, out var existing) && existing is SolidColorBrush brush)
+        {
+            return brush;
+        }
+
+        var created = new SolidColorBrush(Color.Parse(fallbackColor));
+        Resources[key] = created;
+        return created;
+    }
+
+    private static string WithAlpha(string hexColor, byte alpha)
+    {
+        var color = Color.Parse(hexColor);
+        return Color.FromArgb(alpha, color.R, color.G, color.B).ToString();
+    }
     
     private void InitChapters()
     {
@@ -619,7 +648,7 @@ public partial class MainWindow : Window
                 new TextBlock
                 {
                     Text = "Failed to load page",
-                    Foreground = Brushes.LightGray,
+                    Foreground = GetBrushResource("ReaderMuted", "#94a3b8"),
                     HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
                 },
                 retryButton
@@ -1498,7 +1527,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            SaveBookmark();
+            BeginBookmarkPlacement();
         }
     }
 
@@ -1650,19 +1679,59 @@ public partial class MainWindow : Window
             _ => "Dark"
         };
         
-        // Define theme colors
-        var (bg, panelBg, borderColor, text, muted, accent, btnBg, btnBorder) = theme switch
+        var (bg, panelBg, borderColor, text, muted, accent, accentStrong, btnBg, btnBorder, btnHoverBg, btnHoverBorder, activeBg, trackBg, flyoutBg, pageShellBg, listHoverBg, shortcutRowBg, shortcutRowAltBg, errorAccent) = theme switch
         {
-            "sepia" => ("#f4ecd8", "#e8dfc9", "#d4c5a9", "#5c4b37", "#8b7355", "#b8860b", "#ddd4c0", "#c9bda0"),
-            "light" => ("#f8fafc", "#ffffff", "#e2e8f0", "#1e293b", "#64748b", "#0284c7", "#f1f5f9", "#e2e8f0"),
-            "contrast" => ("#000000", "#0a0a0a", "#333333", "#ffffff", "#cccccc", "#ffff00", "#1a1a1a", "#444444"),
-            _ => ("#0f172a", "#0f172a", "#1e293b", "#e2e8f0", "#94a3b8", "#38bdf8", "#141e32", "#2a3a52") // dark
+            "sepia" => ("#f4ecd8", "#e8dfc9", "#d4c5a9", "#5c4b37", "#8b7355", "#b8860b", "#9a6d0a", "#ddd4c0", "#c9bda0", "#d4c5a9", "#bfae90", "#c9b896", "#d4c5a9", "#e8dfc9", "#e8dfc9", "#ddd4c0", "#ddd4c0", "#e8dfc9", "#c2410c"),
+            "light" => ("#f8fafc", "#ffffff", "#e2e8f0", "#1e293b", "#64748b", "#0284c7", "#0369a1", "#f1f5f9", "#e2e8f0", "#e2e8f0", "#cbd5e1", "#dbeafe", "#e2e8f0", "#ffffff", "#e2e8f0", "#f1f5f9", "#f1f5f9", "#e2e8f0", "#dc2626"),
+            "contrast" => ("#000000", "#0a0a0a", "#333333", "#ffffff", "#cccccc", "#ffff00", "#ffd400", "#1a1a1a", "#444444", "#262626", "#5c5c5c", "#333300", "#333333", "#0a0a0a", "#1a1a1a", "#1a1a1a", "#1a1a1a", "#0f0f0f", "#ff6b6b"),
+            _ => ("#0f172a", "#0f172a", "#1e293b", "#e2e8f0", "#94a3b8", "#38bdf8", "#0ea5e9", "#141e32", "#2a3a52", "#1e2d45", "#3a4a62", "#1e3a5f", "#2a2a3a", "#202442", "#101020", "#1a2438", "#0a1220", "#0f1a2a", "#f87171")
         };
+        var (dangerBg, dangerBorder, dangerText) = theme switch
+        {
+            "sepia" => ("#5f3a31", "#c2410c", "#fed7aa"),
+            "light" => ("#fee2e2", "#ef4444", "#b91c1c"),
+            "contrast" => ("#330000", "#ff6b6b", "#ffd1d1"),
+            _ => ("#3a1f29", "#f87171", "#fca5a5")
+        };
+        var chaptersButtonBg = theme switch
+        {
+            "sepia" => "#c9b896",
+            "light" => "#dbeafe",
+            "contrast" => "#333300",
+            _ => "#1e3a5f"
+        };
+        var toastBg = WithAlpha(panelBg, 0xD9);
+        var loadingOverlayBg = WithAlpha(bg, 0xCC);
+        var overlayBg = WithAlpha(bg, 0xF0);
+        var chaptersOverlayBg = WithAlpha(bg, 0x80);
+        var hudBg = WithAlpha(panelBg, theme == "contrast" ? (byte)0xF4 : (byte)0xEA);
 
         // Apply to content area and window background (for zen mode edges)
         Background = new SolidColorBrush(Color.Parse(bg));
         ContentWrapper.Background = new SolidColorBrush(Color.Parse(bg));
         ScrollViewer.Background = new SolidColorBrush(Color.Parse(bg));
+
+        SetBrushResource("ReaderBg", bg);
+        SetBrushResource("ReaderPanel", panelBg);
+        SetBrushResource("ReaderBorder", borderColor);
+        SetBrushResource("ReaderText", text);
+        SetBrushResource("ReaderMuted", muted);
+        SetBrushResource("ReaderAccent", accent);
+        SetBrushResource("ReaderAccentStrong", accentStrong);
+        SetBrushResource("ReaderButtonBg", btnBg);
+        SetBrushResource("ReaderButtonBorder", btnBorder);
+        SetBrushResource("ReaderButtonHoverBg", btnHoverBg);
+        SetBrushResource("ReaderButtonHoverBorder", btnHoverBorder);
+        SetBrushResource("ReaderButtonActiveBg", activeBg);
+        SetBrushResource("ReaderDangerBg", dangerBg);
+        SetBrushResource("ReaderDangerBorder", dangerBorder);
+        SetBrushResource("ReaderDangerText", dangerText);
+        SetBrushResource("ReaderTrack", trackBg);
+        SetBrushResource("ReaderListHoverBg", listHoverBg);
+        SetBrushResource("ReaderShortcutRowBg", shortcutRowBg);
+        SetBrushResource("ReaderShortcutRowAltBg", shortcutRowAltBg);
+        SetBrushResource("ReaderFlyoutBg", flyoutBg);
+        SetBrushResource("ReaderFlyoutBorder", borderColor);
         
         // Apply to toolbars
         HeaderBar.Background = new SolidColorBrush(Color.Parse(panelBg));
@@ -1696,108 +1765,52 @@ public partial class MainWindow : Window
         // Update page container backgrounds for theme
         foreach (var placeholder in _pagePlaceholders.Values)
         {
-            placeholder.Background = theme switch
-            {
-                "sepia" => new SolidColorBrush(Color.Parse("#e8dfc9")),
-                "light" => new SolidColorBrush(Color.Parse("#e2e8f0")),
-                "contrast" => new SolidColorBrush(Color.Parse("#1a1a1a")),
-                _ => new SolidColorBrush(Color.Parse("#101020"))
-            };
+            placeholder.Background = new SolidColorBrush(Color.Parse(pageShellBg));
         }
         
         // Update chapters panel
         ChaptersPanel.Background = new SolidColorBrush(Color.Parse(panelBg));
         ChaptersPanel.BorderBrush = new SolidColorBrush(Color.Parse(borderColor));
         
-        // Apply theme to toolbar buttons
-        var btnBgBrush = new SolidColorBrush(Color.Parse(btnBg));
-        var btnBorderBrush = new SolidColorBrush(Color.Parse(btnBorder));
         var textBrush = new SolidColorBrush(Color.Parse(text));
         var accentBrush = new SolidColorBrush(Color.Parse(accent));
         
-        // Header toolbar buttons
-        foreach (var btn in new[] { BookmarkButton, RtlButton, DoublePageButton, FitModeButton, ZoomButton, ModeButton, ThemeButton, ZenButton })
-        {
-            btn.Background = btnBgBrush;
-            btn.BorderBrush = btnBorderBrush;
-            btn.Foreground = textBrush;
-        }
-        
         // Chapters button (has accent styling when active)
-        ChaptersButton.Background = new SolidColorBrush(Color.Parse(theme switch
-        {
-            "sepia" => "#c9b896",
-            "light" => "#dbeafe",
-            "contrast" => "#333300",
-            _ => "#1e3a5f"
-        }));
+        ChaptersButton.Background = new SolidColorBrush(Color.Parse(chaptersButtonBg));
         ChaptersButton.BorderBrush = accentBrush;
         ChaptersButton.Foreground = accentBrush;
         
-        // Footer nav buttons
-        foreach (var btn in new[] { PrevChapterButton, PrevPageButton, NextPageButton, NextChapterButton })
-        {
-            btn.Background = btnBgBrush;
-            btn.BorderBrush = btnBorderBrush;
-            btn.Foreground = textBrush;
-        }
-        
         // Loading progress bar - use theme accent color
         LoadingProgressBar.Foreground = accentBrush;
-        LoadingProgressBar.Background = new SolidColorBrush(Color.Parse(theme switch
-        {
-            "sepia" => "#d4c5a9",
-            "light" => "#e2e8f0",
-            "contrast" => "#333333",
-            _ => "#2a2a3a"
-        }));
-        
+        LoadingProgressBar.Background = new SolidColorBrush(Color.Parse(trackBg));
+        LoadingHudProgressBar.Foreground = accentBrush;
+        LoadingHudProgressBar.Background = new SolidColorBrush(Color.Parse(trackBg));
+        LoadingTitleText.Foreground = textBrush;
+        LoadingHudTitle.Foreground = textBrush;
+        LoadingHudText.Foreground = new SolidColorBrush(Color.Parse(muted));
+        LoadingHud.Background = new SolidColorBrush(Color.Parse(hudBg));
+        LoadingHud.BorderBrush = new SolidColorBrush(Color.Parse(borderColor));
+
         // Zen toast and page toast - theme sensitive backgrounds
-        var toastBg = theme switch
-        {
-            "sepia" => "#d9e8dfc9",
-            "light" => "#d9f1f5f9",
-            "contrast" => "#d9000000",
-            _ => "#d9000000"
-        };
-        var toastText = theme switch
-        {
-            "sepia" => "#5c4b37",
-            "light" => "#1e293b",
-            "contrast" => "#ffffff",
-            _ => "#e2e8f0"
-        };
+        var toastText = text;
         ZenToast.Background = new SolidColorBrush(Color.Parse(toastBg));
         ZenToastText.Foreground = new SolidColorBrush(Color.Parse(toastText));
         PageToast.Background = new SolidColorBrush(Color.Parse(toastBg));
         PageToastText.Foreground = new SolidColorBrush(Color.Parse(toastText));
         
         // Loading overlay - theme sensitive
-        var loadingOverlayBg = theme switch
-        {
-            "sepia" => "#ccf4ecd8",
-            "light" => "#ccf8fafc",
-            "contrast" => "#cc000000",
-            _ => "#cc1a1a2e"
-        };
         LoadingOverlay.Background = new SolidColorBrush(Color.Parse(loadingOverlayBg));
         LoadingProgress.Foreground = new SolidColorBrush(Color.Parse(muted));
-        
+
+        FitModeFlyoutPanel.Background = new SolidColorBrush(Color.Parse(flyoutBg));
+        FitModeFlyoutPanel.BorderBrush = new SolidColorBrush(Color.Parse(borderColor));
+        ZoomFlyoutPanel.Background = new SolidColorBrush(Color.Parse(flyoutBg));
+        ZoomFlyoutPanel.BorderBrush = new SolidColorBrush(Color.Parse(borderColor));
+        ThemeFlyoutPanel.Background = new SolidColorBrush(Color.Parse(flyoutBg));
+        ThemeFlyoutPanel.BorderBrush = new SolidColorBrush(Color.Parse(borderColor));
+
         // Help overlay - theme sensitive
-        var overlayBg = theme switch
-        {
-            "sepia" => "#f0f4ecd8",
-            "light" => "#f0f8fafc",
-            "contrast" => "#f0000000",
-            _ => "#f00d0d1a"
-        };
-        var helpPanelBg = theme switch
-        {
-            "sepia" => "#e8dfc9",
-            "light" => "#ffffff",
-            "contrast" => "#0a0a0a",
-            _ => "#202442"
-        };
+        var helpPanelBg = flyoutBg;
         HelpOverlay.Background = new SolidColorBrush(Color.Parse(overlayBg));
         if (HelpOverlay.Child is Border helpPanel)
         {
@@ -1807,10 +1820,9 @@ public partial class MainWindow : Window
         
         // Error overlay - theme sensitive
         ErrorOverlay.Background = new SolidColorBrush(Color.Parse(overlayBg));
-        if (ErrorOverlay.Child is Border errorPanel)
-        {
-            errorPanel.Background = new SolidColorBrush(Color.Parse(helpPanelBg));
-        }
+        ErrorPanel.Background = new SolidColorBrush(Color.Parse(flyoutBg));
+        ErrorIcon.Foreground = new SolidColorBrush(Color.Parse(errorAccent));
+        ErrorText.Foreground = new SolidColorBrush(Color.Parse(errorAccent));
         
         // Chapters panel header and content
         if (ChaptersPanel.Child is Grid chaptersGrid)
@@ -1837,23 +1849,10 @@ public partial class MainWindow : Window
         }
         
         // Chapters overlay background
-        ChaptersOverlay.Background = new SolidColorBrush(Color.Parse(theme switch
-        {
-            "sepia" => "#80f4ecd8",
-            "light" => "#80f8fafc",
-            "contrast" => "#80000000",
-            _ => "#80000000"
-        }));
+        ChaptersOverlay.Background = new SolidColorBrush(Color.Parse(chaptersOverlayBg));
         
         // Slider track colors
-        var sliderTrackBg = theme switch
-        {
-            "sepia" => "#d4c5a9",
-            "light" => "#cbd5e1",
-            "contrast" => "#333333",
-            _ => "#334155"
-        };
-        PageSlider.Background = new SolidColorBrush(Color.Parse(sliderTrackBg));
+        PageSlider.Background = new SolidColorBrush(Color.Parse(trackBg));
         PageSlider.Foreground = accentBrush;
         
         PersistPrefs();
@@ -1878,13 +1877,6 @@ public partial class MainWindow : Window
             "light" => "#e2e8f0",
             "contrast" => "#0f0f0f",
             _ => "#0f1a2a"
-        };
-        var helpBtnBg = theme switch
-        {
-            "sepia" => "#c9bda0",
-            "light" => "#e2e8f0",
-            "contrast" => "#333333",
-            _ => "#3a3a5a"
         };
         
         foreach (var descendant in helpPanel.GetVisualDescendants())
@@ -1917,7 +1909,6 @@ public partial class MainWindow : Window
                     
                 case Button btn when btn.Content is StackPanel:
                     // Got it button
-                    btn.Background = new SolidColorBrush(Color.Parse(helpBtnBg));
                     btn.Foreground = textBrush;
                     break;
             }
