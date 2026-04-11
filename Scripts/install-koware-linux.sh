@@ -272,6 +272,71 @@ install_from_binary() {
     success "Installed koware to $INSTALL_DIR"
 }
 
+# Get the shell startup file that should make the command available in new terminals.
+get_shell_config_file() {
+    local shell_name
+    shell_name=$(basename "${SHELL:-bash}")
+
+    case "$shell_name" in
+        bash)
+            echo "$HOME/.bashrc"
+            ;;
+        zsh)
+            echo "$HOME/.zshrc"
+            ;;
+        fish)
+            echo "$HOME/.config/fish/config.fish"
+            ;;
+        *)
+            echo "$HOME/.profile"
+            ;;
+    esac
+}
+
+path_config_line() {
+    local shell_name
+    local bin_dir_for_config="$BIN_DIR"
+    shell_name=$(basename "${SHELL:-bash}")
+
+    if [[ "$bin_dir_for_config" == "$HOME"* ]]; then
+        bin_dir_for_config="\$HOME${bin_dir_for_config#$HOME}"
+    fi
+
+    if [ "$shell_name" = "fish" ]; then
+        echo "set -gx PATH \"$bin_dir_for_config\" \$PATH"
+    else
+        echo "export PATH=\"$bin_dir_for_config:\$PATH\""
+    fi
+}
+
+ensure_path_configured() {
+    if [ "${KOWARE_SKIP_PATH_UPDATE:-false}" = "true" ]; then
+        warn "Skipping shell PATH update because KOWARE_SKIP_PATH_UPDATE is set"
+        return 0
+    fi
+
+    local config_file
+    local path_line
+    config_file=$(get_shell_config_file)
+    path_line=$(path_config_line)
+
+    mkdir -p "$(dirname "$config_file")"
+    touch "$config_file"
+
+    if grep -Fq "$path_line" "$config_file"; then
+        info "PATH entry already present in $config_file"
+        return 0
+    fi
+
+    {
+        echo ""
+        echo "# Koware - added by installer"
+        echo "$path_line"
+    } >> "$config_file"
+
+    success "Added $BIN_DIR to PATH in $config_file"
+}
+
 # Setup PATH and symlinks
 setup_path() {
     mkdir -p "$BIN_DIR"
@@ -284,51 +349,20 @@ setup_path() {
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
         warn "$BIN_DIR is not in your PATH"
         echo ""
-        
-        # Detect shell and config file
-        local shell_name=$(basename "$SHELL")
-        local config_file=""
-        
-        case "$shell_name" in
-            bash)
-                if [ -f "$HOME/.bashrc" ]; then
-                    config_file="$HOME/.bashrc"
-                elif [ -f "$HOME/.bash_profile" ]; then
-                    config_file="$HOME/.bash_profile"
-                fi
-                ;;
-            zsh)
-                config_file="$HOME/.zshrc"
-                ;;
-            fish)
-                config_file="$HOME/.config/fish/config.fish"
-                ;;
-            *)
-                config_file="$HOME/.profile"
-                ;;
-        esac
-        
-        local path_export='export PATH="$HOME/.local/bin:$PATH"'
-        if [ "$shell_name" = "fish" ]; then
-            path_export='set -gx PATH $HOME/.local/bin $PATH'
-        fi
-        
-        echo "Add the following to your shell config ($config_file):"
+        ensure_path_configured
         echo ""
-        echo "  $path_export"
+        echo "Reload your shell before running 'koware' directly:"
         echo ""
-        
-        # Interactive mode - offer to add automatically
-        if [ -t 0 ]; then
-            read -p "Add to $config_file automatically? [y/N] " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                echo "" >> "$config_file"
-                echo "# Koware - added by installer" >> "$config_file"
-                echo "$path_export" >> "$config_file"
-                success "Added to $config_file"
-            fi
-        fi
+        echo "  source $(get_shell_config_file)"
+        echo ""
+        echo "For this terminal only, you can also run:"
+        echo ""
+        echo "  export PATH=\"$BIN_DIR:\$PATH\""
+        echo ""
+        echo "Or run Koware by full path now:"
+        echo ""
+        echo "  $BIN_DIR/koware --help"
+        echo ""
     fi
 }
 
@@ -420,8 +454,11 @@ print_instructions() {
     echo ""
     echo "Get started:"
     echo ""
-    echo "  # If PATH was updated, reload your shell first:"
-    echo "  source ~/.bashrc  # or ~/.zshrc"
+    if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+        echo "  # Reload your shell first:"
+        echo "  source $(get_shell_config_file)"
+        echo ""
+    fi
     echo ""
     echo "  # Configure providers (required before first use):"
     echo "  koware provider autoconfig"
@@ -460,6 +497,7 @@ main() {
                 echo "Environment variables:"
                 echo "  KOWARE_INSTALL_DIR  Installation directory (default: ~/.local/share/koware)"
                 echo "  KOWARE_BIN_DIR      Binary directory (default: ~/.local/bin)"
+                echo "  KOWARE_SKIP_PATH_UPDATE=true  Do not edit shell startup files"
                 exit 0
                 ;;
             *)

@@ -189,6 +189,26 @@ The build output will be in `publish/`. Run the included `install.sh` to complet
 | Config | `~/.config/koware/appsettings.user.json` |
 | History DB | `~/.config/koware/history.db` |
 
+#### If `koware` is not recognized
+
+The Linux installer adds `~/.local/bin` to your shell startup file when needed, but a running shell cannot be updated from a piped installer. On Linux Mint or other Bash-based desktops, reload Bash after installation:
+
+```bash
+source ~/.bashrc
+```
+
+For the current terminal only, you can also run:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+You can always verify the installed binary directly:
+
+```bash
+~/.local/bin/koware --help
+```
+
 #### Updating on Linux
 
 ```bash

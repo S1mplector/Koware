@@ -155,6 +155,70 @@ info() { echo -e "\033[36m[INFO]\033[0m $1"; }
 success() { echo -e "\033[32m[OK  ]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
 
+get_shell_config_file() {
+    local shell_name
+    shell_name=$(basename "${SHELL:-bash}")
+
+    case "$shell_name" in
+        bash)
+            echo "$HOME/.bashrc"
+            ;;
+        zsh)
+            echo "$HOME/.zshrc"
+            ;;
+        fish)
+            echo "$HOME/.config/fish/config.fish"
+            ;;
+        *)
+            echo "$HOME/.profile"
+            ;;
+    esac
+}
+
+path_config_line() {
+    local shell_name
+    local bin_dir_for_config="$BIN_DIR"
+    shell_name=$(basename "${SHELL:-bash}")
+
+    if [[ "$bin_dir_for_config" == "$HOME"* ]]; then
+        bin_dir_for_config="\$HOME${bin_dir_for_config#$HOME}"
+    fi
+
+    if [ "$shell_name" = "fish" ]; then
+        echo "set -gx PATH \"$bin_dir_for_config\" \$PATH"
+    else
+        echo "export PATH=\"$bin_dir_for_config:\$PATH\""
+    fi
+}
+
+ensure_path_configured() {
+    if [ "${KOWARE_SKIP_PATH_UPDATE:-false}" = "true" ]; then
+        warn "Skipping shell PATH update because KOWARE_SKIP_PATH_UPDATE is set"
+        return 0
+    fi
+
+    local config_file
+    local path_line
+    config_file=$(get_shell_config_file)
+    path_line=$(path_config_line)
+
+    mkdir -p "$(dirname "$config_file")"
+    touch "$config_file"
+
+    if grep -Fq "$path_line" "$config_file"; then
+        info "PATH entry already present in $config_file"
+        return 0
+    fi
+
+    {
+        echo ""
+        echo "# Koware - added by installer"
+        echo "$path_line"
+    } >> "$config_file"
+
+    success "Added $BIN_DIR to PATH in $config_file"
+}
+
 echo ""
 echo "╔══════════════════════════════════════╗"
 echo "║       Koware Linux Installer         ║"
@@ -213,26 +277,23 @@ fi
 
 # Check if ~/.local/bin is in PATH
 if [ "$SYSTEM_INSTALL" = false ]; then
-    if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+    if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
         warn "$BIN_DIR is not in your PATH"
         echo ""
-        echo "Add the following to your shell configuration (~/.bashrc, ~/.zshrc, etc.):"
+        ensure_path_configured
         echo ""
-        echo '  export PATH="$HOME/.local/bin:$PATH"'
+        echo "Reload your shell before running 'koware' directly:"
         echo ""
-        echo "Then restart your shell or run: source ~/.bashrc"
+        echo "  source $(get_shell_config_file)"
         echo ""
-        
-        # Offer to add to PATH automatically
-        read -p "Would you like to add this to ~/.bashrc automatically? [y/N] " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            echo '' >> "$HOME/.bashrc"
-            echo '# Koware - added by installer' >> "$HOME/.bashrc"
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-            success "Added to ~/.bashrc"
-            echo "Run 'source ~/.bashrc' to apply changes."
-        fi
+        echo "For this terminal only, you can also run:"
+        echo ""
+        echo "  export PATH=\"$BIN_DIR:\$PATH\""
+        echo ""
+        echo "Or run Koware by full path now:"
+        echo ""
+        echo "  $BIN_DIR/koware --help"
+        echo ""
     fi
 fi
 
