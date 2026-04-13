@@ -1,0 +1,11 @@
+<!-- Author: Ilgaz Mehmetoğlu | Summary: Shared watch-together protocol, relay, and WebSocket client. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Version>1.2.4</Version>
+  </PropertyGroup>
+
+</Project>
