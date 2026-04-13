@@ -8,6 +8,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Koware.WatchTogether;
 using LibVLCSharp.Shared;
 using System;
 using System.Collections.Generic;
@@ -26,8 +27,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private DispatcherTimer? _progressTimer;
     private DispatcherTimer? _controlsHideTimer;
     private DispatcherTimer? _skipIndicatorTimer;
+    private DispatcherTimer? _watchTogetherTimer;
+    private CancellationTokenSource? _watchTogetherCts;
+    private WatchTogetherClient? _watchTogetherClient;
     private bool _isFullscreen;
     private bool _isDraggingProgress;
+    private bool _isApplyingWatchTogetherState;
     private WindowState _previousWindowState;
     private double _savedVolume = 100;
     private bool _subtitlesEnabled = true;
@@ -48,6 +53,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public string? HttpReferer { get; set; }
     public string? HttpUserAgent { get; set; }
     public string? SubtitleUrl { get; set; }
+    public WatchTogetherSessionOptions? WatchTogetherSession { get; set; }
 
     public MediaPlayer? MediaPlayer
     {
@@ -144,6 +150,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (!string.IsNullOrWhiteSpace(StreamUrl))
             {
                 PlayStream(StreamUrl);
+                InitializeWatchTogether();
             }
             else
             {
@@ -209,8 +216,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 _mediaPlayer?.SetRate(_playbackSpeed);
             }
             
-            // Restore position on first play
-            RestorePosition();
+            if (WatchTogetherSession is null)
+            {
+                RestorePosition();
+            }
         });
     }
 
@@ -658,7 +667,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {
-        SavePosition();
+        if (WatchTogetherSession is null)
+        {
+            SavePosition();
+        }
+
+        _watchTogetherCts?.Cancel();
+        _watchTogetherTimer?.Stop();
+        if (_watchTogetherClient is not null)
+        {
+            _ = _watchTogetherClient.DisposeAsync();
+        }
+
         _progressTimer?.Stop();
         _controlsHideTimer?.Stop();
         _skipIndicatorTimer?.Stop();
@@ -669,6 +689,138 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         
         // Set environment exit code for CLI to detect episode navigation
         Environment.ExitCode = _exitCode;
+    }
+
+    private void InitializeWatchTogether()
+    {
+        if (WatchTogetherSession is null || _watchTogetherClient is not null)
+        {
+            return;
+        }
+
+        _watchTogetherCts = new CancellationTokenSource();
+        _watchTogetherClient = new WatchTogetherClient(WatchTogetherSession);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _watchTogetherClient.ConnectAsync(_watchTogetherCts.Token);
+                _ = _watchTogetherClient.StartReceiveLoopAsync(HandleWatchTogetherMessageAsync, _watchTogetherCts.Token);
+
+                Dispatcher.UIThread.Post(() =>
+                {
+                    TitleText.Text = WatchTogetherSession.IsHost
+                        ? $"{TitleText.Text} [host]"
+                        : $"{TitleText.Text} [watch together]";
+                });
+            }
+            catch
+            {
+                Dispatcher.UIThread.Post(() => ShowSkipIndicator("Watch room disconnected"));
+            }
+        });
+
+        _watchTogetherTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _watchTogetherTimer.Tick += (_, _) => SendWatchTogetherState();
+        _watchTogetherTimer.Start();
+    }
+
+    private Task HandleWatchTogetherMessageAsync(WatchTogetherMessage message, CancellationToken cancellationToken)
+    {
+        if (WatchTogetherSession is null ||
+            WatchTogetherSession.IsHost ||
+            message.ClientId == WatchTogetherSession.ClientId ||
+            !message.Type.Equals(WatchTogetherMessageTypes.State, StringComparison.OrdinalIgnoreCase) ||
+            message.State is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        Dispatcher.UIThread.Post(() => ApplyWatchTogetherState(message.State));
+        return Task.CompletedTask;
+    }
+
+    private void SendWatchTogetherState()
+    {
+        if (WatchTogetherSession is null ||
+            !WatchTogetherSession.IsHost ||
+            _watchTogetherClient is null ||
+            _mediaPlayer is null ||
+            _isApplyingWatchTogetherState)
+        {
+            return;
+        }
+
+        var state = new WatchTogetherPlaybackState
+        {
+            IsPlaying = _mediaPlayer.IsPlaying,
+            PositionMs = Math.Max(0, _mediaPlayer.Time),
+            Rate = _playbackSpeed
+        };
+
+        _ = _watchTogetherClient.SendAsync(new WatchTogetherMessage
+        {
+            Type = WatchTogetherMessageTypes.State,
+            State = state
+        }, _watchTogetherCts?.Token ?? CancellationToken.None);
+    }
+
+    private void ApplyWatchTogetherState(WatchTogetherPlaybackState state)
+    {
+        if (_mediaPlayer is null)
+        {
+            return;
+        }
+
+        _isApplyingWatchTogetherState = true;
+        try
+        {
+            var target = state.PositionMs;
+            if (state.IsPlaying)
+            {
+                var elapsed = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - state.SentAtUnixMs;
+                if (elapsed > 0 && elapsed < 30_000)
+                {
+                    target += elapsed;
+                }
+            }
+
+            target = Math.Max(0, target);
+            if (_mediaPlayer.Length > 0)
+            {
+                target = Math.Min(_mediaPlayer.Length, target);
+            }
+
+            if (Math.Abs(_mediaPlayer.Time - target) > 1500)
+            {
+                _mediaPlayer.Time = target;
+            }
+
+            if (Math.Abs(_playbackSpeed - state.Rate) > 0.01)
+            {
+                SetSpeed((float)state.Rate);
+            }
+
+            if (state.IsPlaying)
+            {
+                if (!_mediaPlayer.IsPlaying)
+                {
+                    _mediaPlayer.Play();
+                }
+            }
+            else if (_mediaPlayer.IsPlaying)
+            {
+                _mediaPlayer.Pause();
+            }
+        }
+        finally
+        {
+            _ = Task.Delay(250).ContinueWith(_ =>
+            {
+                Dispatcher.UIThread.Post(() => _isApplyingWatchTogetherState = false);
+            });
+        }
     }
     
     // ===== Preference Persistence =====

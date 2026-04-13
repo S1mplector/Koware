@@ -14,6 +14,13 @@ internal static class HtmlPageBuilder
         var titleJson = JsonSerializer.Serialize(args.Title);
         var subtitleJson = JsonSerializer.Serialize(args.SubtitleUrl?.ToString());
         var subtitleLabelJson = JsonSerializer.Serialize(args.SubtitleLabel);
+        var watchTogetherJson = JsonSerializer.Serialize(new
+        {
+            enabled = args.WatchTogetherSession is not null,
+            isHost = args.WatchTogetherSession?.IsHost ?? false,
+            roomCode = args.WatchTogetherSession?.RoomCode,
+            name = args.WatchTogetherSession?.DisplayName
+        });
         var encodedTitle = WebUtility.HtmlEncode(args.Title);
 
         const string template = """
@@ -555,6 +562,7 @@ internal static class HtmlPageBuilder
 
         const source = {{URL_JSON}};
         const title = {{TITLE_JSON}};
+        const watchTogether = {{WATCH_TOGETHER_JSON}};
         const video = document.getElementById("video");
         const statusEl = document.getElementById("status");
         const logEl = enableLogging ? document.getElementById("log") : null;
@@ -598,6 +606,7 @@ internal static class HtmlPageBuilder
         let subtitlesEnabled = true;
         let controlsTimeout = null;
         let savedVolume = 1;
+        let applyingWatchTogetherState = false;
         const hasSubtitles = !!subtitleUrl;
         const subtitleDefaults = {
             fontSize: 22,
@@ -629,10 +638,61 @@ internal static class HtmlPageBuilder
 
         // Expose logging for the host (C#) to call.
         window.__log = log;
+        window.__kowareApplyWatchState = applyWatchTogetherState;
         if (enableLogging && window.chrome?.webview?.addEventListener) {
             window.chrome.webview.addEventListener("message", (e) => {
                 log(e.data);
             });
+        }
+
+        function postWatchTogetherState(reason = "tick") {
+            if (!watchTogether.enabled || !watchTogether.isHost || applyingWatchTogetherState) return;
+            if (!window.chrome?.webview?.postMessage || !Number.isFinite(video.currentTime)) return;
+
+            try {
+                window.chrome.webview.postMessage(JSON.stringify({
+                    type: "koware-sync-state",
+                    reason,
+                    state: {
+                        isPlaying: !video.paused && !video.ended,
+                        positionMs: Math.max(0, Math.floor(video.currentTime * 1000)),
+                        rate: video.playbackRate || 1,
+                        sentAtUnixMs: Date.now()
+                    }
+                }));
+            } catch {}
+        }
+
+        function applyWatchTogetherState(state) {
+            if (!watchTogether.enabled || watchTogether.isHost || !state) return;
+
+            applyingWatchTogetherState = true;
+            try {
+                let targetMs = Math.max(0, Number(state.positionMs || 0));
+                if (state.isPlaying) {
+                    const elapsed = Date.now() - Number(state.sentAtUnixMs || Date.now());
+                    if (elapsed > 0 && elapsed < 30000) {
+                        targetMs += elapsed;
+                    }
+                }
+
+                const targetSeconds = targetMs / 1000;
+                if (Number.isFinite(targetSeconds) && Math.abs(video.currentTime - targetSeconds) > 1.5) {
+                    video.currentTime = targetSeconds;
+                }
+
+                if (state.rate && Math.abs(video.playbackRate - state.rate) > 0.01) {
+                    setSpeed(Number(state.rate));
+                }
+
+                if (state.isPlaying) {
+                    if (video.paused) video.play().catch(() => {});
+                } else if (!video.paused) {
+                    video.pause();
+                }
+            } finally {
+                setTimeout(() => { applyingWatchTogetherState = false; }, 250);
+            }
         }
 
         // Quick HEAD to surface HTTP status even when hls.js dies early.
@@ -997,6 +1057,10 @@ video::cue {
             playPauseBtn.onclick = () => video.paused ? video.play() : video.pause();
             video.addEventListener("play", updatePlayPauseIcon);
             video.addEventListener("pause", updatePlayPauseIcon);
+            video.addEventListener("play", () => postWatchTogetherState("play"));
+            video.addEventListener("pause", () => postWatchTogetherState("pause"));
+            video.addEventListener("seeked", () => postWatchTogetherState("seek"));
+            video.addEventListener("ratechange", () => postWatchTogetherState("rate"));
             video.addEventListener("click", () => video.paused ? video.play() : video.pause());
 
             // Skip buttons
@@ -1031,7 +1095,9 @@ video::cue {
             video.addEventListener("progress", updateBuffer);
             video.addEventListener("loadedmetadata", () => {
                 updateProgress();
-                restorePosition();
+                if (!watchTogether.enabled) {
+                    restorePosition();
+                }
             });
             progressContainer.onclick = (e) => {
                 const rect = progressContainer.getBoundingClientRect();
@@ -1107,8 +1173,11 @@ video::cue {
             });
 
             // Save position periodically and on unload
-            setInterval(savePosition, 10000);
-            window.addEventListener("beforeunload", savePosition);
+            if (!watchTogether.enabled) {
+                setInterval(savePosition, 10000);
+                window.addEventListener("beforeunload", savePosition);
+            }
+            setInterval(() => postWatchTogetherState("tick"), 1000);
         }
 
         (function start() {
@@ -1169,6 +1238,7 @@ video::cue {
             .Replace("{{URL_JSON}}", urlJson)
             .Replace("{{TITLE_JSON}}", titleJson)
             .Replace("{{SUB_JSON}}", subtitleJson)
-            .Replace("{{SUB_LABEL_JSON}}", subtitleLabelJson);
+            .Replace("{{SUB_LABEL_JSON}}", subtitleLabelJson)
+            .Replace("{{WATCH_TOGETHER_JSON}}", watchTogetherJson);
     }
 }

@@ -20,5 +20,6 @@
     <ProjectReference Include="..\Koware.Domain\Koware.Domain.csproj" />
     <ProjectReference Include="..\Koware.Application\Koware.Application.csproj" />
     <ProjectReference Include="..\Koware.Cli\Koware.Cli.csproj" />
+    <ProjectReference Include="..\Koware.WatchTogether\Koware.WatchTogether.csproj" />
   </ItemGroup>
 </Project>

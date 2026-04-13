@@ -10,16 +10,19 @@ using System.Threading.Tasks;
 using System.Windows.Threading;
 using Koware.Player.Win.Rendering;
 using Koware.Player.Win.Startup;
+using Koware.WatchTogether;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
 namespace Koware.Player.Win.Playback;
 
-public sealed class WebViewPlayerHost
+public sealed class WebViewPlayerHost : IAsyncDisposable
 {
     private readonly PlayerArguments _args;
     private readonly WebView2 _view;
     private readonly Dispatcher _dispatcher;
+    private readonly CancellationTokenSource _watchTogetherCts = new();
+    private WatchTogetherClient? _watchTogetherClient;
     private static readonly HttpClient HttpClient = new();
     private static readonly string[] ProxySkipHosts = { "cdn.jsdelivr.net" };
     private static readonly string[] ProxyExtensions =
@@ -89,6 +92,8 @@ public sealed class WebViewPlayerHost
 
         var html = HtmlPageBuilder.Build(_args);
         core.NavigateToString(html);
+
+        await InitializeWatchTogetherAsync();
     }
 
     private async void OnWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
@@ -155,9 +160,13 @@ public sealed class WebViewPlayerHost
 
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
-        // Bridge WebView messages into the JS log (useful for status from native side).
         var message = e.TryGetWebMessageAsString();
         if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        if (TryHandleWatchTogetherBridgeMessage(message))
         {
             return;
         }
@@ -171,6 +180,85 @@ public sealed class WebViewPlayerHost
             // ignore logging failures
         }
     }
+
+    private async Task InitializeWatchTogetherAsync()
+    {
+        if (_args.WatchTogetherSession is null)
+        {
+            return;
+        }
+
+        _watchTogetherClient = new WatchTogetherClient(_args.WatchTogetherSession);
+        await _watchTogetherClient.ConnectAsync(_watchTogetherCts.Token);
+        _ = _watchTogetherClient.StartReceiveLoopAsync(HandleWatchTogetherMessageAsync, _watchTogetherCts.Token);
+    }
+
+    private Task HandleWatchTogetherMessageAsync(WatchTogetherMessage message, CancellationToken cancellationToken)
+    {
+        if (_args.WatchTogetherSession is null ||
+            _args.WatchTogetherSession.IsHost ||
+            message.ClientId == _args.WatchTogetherSession.ClientId ||
+            !message.Type.Equals(WatchTogetherMessageTypes.State, StringComparison.OrdinalIgnoreCase) ||
+            message.State is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        var stateJson = WatchTogetherJson.Serialize(message.State);
+        _ = _dispatcher.InvokeAsync(() =>
+        {
+            _view.CoreWebView2?.ExecuteScriptAsync($"window.__kowareApplyWatchState && window.__kowareApplyWatchState({stateJson});");
+        });
+
+        return Task.CompletedTask;
+    }
+
+    private bool TryHandleWatchTogetherBridgeMessage(string raw)
+    {
+        if (_args.WatchTogetherSession is null ||
+            !_args.WatchTogetherSession.IsHost ||
+            _watchTogetherClient is null)
+        {
+            return false;
+        }
+
+        WatchTogetherBridgeMessage? bridge;
+        try
+        {
+            bridge = JsonSerializer.Deserialize<WatchTogetherBridgeMessage>(raw, WatchTogetherJson.Options);
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (bridge?.Type != "koware-sync-state" || bridge.State is null)
+        {
+            return false;
+        }
+
+        _ = _watchTogetherClient.SendAsync(new WatchTogetherMessage
+        {
+            Type = WatchTogetherMessageTypes.State,
+            State = bridge.State
+        }, _watchTogetherCts.Token);
+
+        return true;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _watchTogetherCts.Cancel();
+
+        if (_watchTogetherClient is not null)
+        {
+            await _watchTogetherClient.DisposeAsync();
+        }
+
+        _watchTogetherCts.Dispose();
+    }
+
+    private sealed record WatchTogetherBridgeMessage(string? Type, WatchTogetherPlaybackState? State);
 
     private async Task ProxyHlsRequestAsync(CoreWebView2WebResourceRequestedEventArgs e, string uri)
     {

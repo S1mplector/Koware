@@ -1,12 +1,20 @@
 // Author: Ilgaz Mehmetoğlu
 // Parses and stores command-line arguments for the Koware player process.
 using System;
+using Koware.WatchTogether;
 
 namespace Koware.Player.Win.Startup;
 
 public sealed class PlayerArguments
 {
-    public PlayerArguments(Uri url, string title, string? referer, string? userAgent, Uri? subtitleUrl, string? subtitleLabel)
+    public PlayerArguments(
+        Uri url,
+        string title,
+        string? referer,
+        string? userAgent,
+        Uri? subtitleUrl,
+        string? subtitleLabel,
+        WatchTogetherSessionOptions? watchTogetherSession)
     {
         Url = url;
         Title = string.IsNullOrWhiteSpace(title) ? "Koware Player" : title;
@@ -14,6 +22,7 @@ public sealed class PlayerArguments
         UserAgent = userAgent;
         SubtitleUrl = subtitleUrl;
         SubtitleLabel = subtitleLabel;
+        WatchTogetherSession = watchTogetherSession;
     }
 
     public Uri Url { get; }
@@ -27,6 +36,8 @@ public sealed class PlayerArguments
     public Uri? SubtitleUrl { get; }
 
     public string? SubtitleLabel { get; }
+
+    public WatchTogetherSessionOptions? WatchTogetherSession { get; }
 
     public static bool TryParse(string[] args, out PlayerArguments? parsed, out string? error)
     {
@@ -50,6 +61,11 @@ public sealed class PlayerArguments
         string? userAgent = null;
         Uri? subtitleUrl = null;
         string? subtitleLabel = null;
+        string? watchRelay = null;
+        string? watchRoom = null;
+        string? watchClientId = null;
+        string? watchName = null;
+        string? watchRole = null;
 
         for (var i = 2; i < args.Length; i++)
         {
@@ -87,11 +103,68 @@ public sealed class PlayerArguments
                 continue;
             }
 
+            if (current.Equals("--watch-relay", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                watchRelay = args[++i];
+                continue;
+            }
+
+            if (current.Equals("--watch-room", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                watchRoom = args[++i];
+                continue;
+            }
+
+            if (current.Equals("--watch-client-id", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                watchClientId = args[++i];
+                continue;
+            }
+
+            if (current.Equals("--watch-name", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                watchName = args[++i];
+                continue;
+            }
+
+            if (current.Equals("--watch-role", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                watchRole = args[++i];
+                continue;
+            }
+
             error = $"Unrecognized argument '{current}'.";
             return false;
         }
 
-        parsed = new PlayerArguments(url, title, referer, userAgent, subtitleUrl, subtitleLabel);
+        parsed = new PlayerArguments(
+            url,
+            title,
+            referer,
+            userAgent,
+            subtitleUrl,
+            subtitleLabel,
+            BuildWatchTogetherSession(watchRelay, watchRoom, watchClientId, watchName, watchRole));
         return true;
+    }
+
+    private static WatchTogetherSessionOptions? BuildWatchTogetherSession(
+        string? relay,
+        string? room,
+        string? clientId,
+        string? name,
+        string? role)
+    {
+        if (string.IsNullOrWhiteSpace(relay) || string.IsNullOrWhiteSpace(room))
+        {
+            return null;
+        }
+
+        return new WatchTogetherSessionOptions(
+            WatchTogetherClient.NormalizeRelayUri(relay),
+            room,
+            string.IsNullOrWhiteSpace(clientId) ? Guid.NewGuid().ToString("N") : clientId,
+            string.IsNullOrWhiteSpace(name) ? Environment.UserName : name,
+            string.IsNullOrWhiteSpace(role) ? WatchTogetherRoles.Guest : role);
     }
 }

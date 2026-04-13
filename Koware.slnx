@@ -5,6 +5,7 @@
   <Project Path="Koware.Cli/Koware.Cli.csproj" />
   <Project Path="Koware.Domain/Koware.Domain.csproj" />
   <Project Path="Koware.Infrastructure/Koware.Infrastructure.csproj" />
+  <Project Path="Koware.WatchTogether/Koware.WatchTogether.csproj" />
   <Project Path="Koware.Player/Koware.Player.csproj" />
   <Project Path="Koware.Reader/Koware.Reader.csproj" />
   <Project Path="Koware.Player.Win/Koware.Player.Win.csproj" />

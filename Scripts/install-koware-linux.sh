@@ -214,6 +214,11 @@ install_from_source() {
             cp "$tmp_dir/output/cli/koware" "$INSTALL_DIR/"
             chmod +x "$INSTALL_DIR/koware"
             [ -f "$tmp_dir/output/cli/appsettings.json" ] && cp "$tmp_dir/output/cli/appsettings.json" "$INSTALL_DIR/"
+            if [ -f "$tmp_dir/output/player/Koware.Player" ]; then
+                mkdir -p "$INSTALL_DIR/player"
+                cp -R "$tmp_dir/output/player/"* "$INSTALL_DIR/player/"
+                chmod +x "$INSTALL_DIR/player/Koware.Player" 2>/dev/null || true
+            fi
         fi
     else
         # Manual build
@@ -267,6 +272,19 @@ install_from_binary() {
     local settings=$(find . -name "appsettings.json" -type f 2>/dev/null | head -1)
     if [ -n "$settings" ]; then
         cp "$settings" "$INSTALL_DIR/"
+    fi
+
+    # Copy bundled player if present. Watch-together sync needs this control bridge.
+    local player_exe=$(find . -path "*/player/Koware.Player" -type f 2>/dev/null | head -1)
+    if [ -z "$player_exe" ]; then
+        player_exe=$(find . -name "Koware.Player" -type f 2>/dev/null | head -1)
+    fi
+
+    if [ -n "$player_exe" ]; then
+        mkdir -p "$INSTALL_DIR/player"
+        cp -R "$(dirname "$player_exe")/"* "$INSTALL_DIR/player/"
+        chmod +x "$INSTALL_DIR/player/Koware.Player" 2>/dev/null || true
+        info "Installed bundled player to $INSTALL_DIR/player"
     fi
     
     success "Installed koware to $INSTALL_DIR"
@@ -436,6 +454,9 @@ verify_installation() {
         echo ""
         echo "  Version:  $version"
         echo "  Location: $INSTALL_DIR/koware"
+        if [ -x "$INSTALL_DIR/player/Koware.Player" ]; then
+            echo "  Player:   $INSTALL_DIR/player/Koware.Player"
+        fi
         echo "  Symlink:  $BIN_DIR/koware"
         echo "  Config:   $CONFIG_DIR/"
         return 0

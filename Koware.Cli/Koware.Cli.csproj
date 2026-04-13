@@ -6,6 +6,7 @@
     <ProjectReference Include="..\Koware.Autoconfig\Koware.Autoconfig.csproj" />
     <ProjectReference Include="..\Koware.Infrastructure\Koware.Infrastructure.csproj" />
     <ProjectReference Include="..\Koware.Updater\Koware.Updater.csproj" />
+    <ProjectReference Include="..\Koware.WatchTogether\Koware.WatchTogether.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

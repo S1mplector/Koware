@@ -16,6 +16,7 @@ public partial class MainWindow : Window
         _args = args;
         InitializeComponent();
         Loaded += OnLoaded;
+        Closed += OnClosed;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -31,6 +32,14 @@ public partial class MainWindow : Window
         {
             MessageBox.Show($"Failed to initialize the player: {ex.Message}", "Koware Player", MessageBoxButton.OK, MessageBoxImage.Error);
             Close();
+        }
+    }
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        if (_host is not null)
+        {
+            _ = _host.DisposeAsync();
         }
     }
 }

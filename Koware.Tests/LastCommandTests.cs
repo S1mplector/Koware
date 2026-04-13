@@ -3,6 +3,7 @@ using Koware.Cli.Configuration;
 using Koware.Cli.History;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
 namespace Koware.Tests;
 

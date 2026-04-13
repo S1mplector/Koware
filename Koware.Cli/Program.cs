@@ -15,6 +15,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Koware.Application.DependencyInjection;
@@ -34,6 +35,7 @@ using Koware.Cli.Downloads;
 using Koware.Cli.Console;
 using Koware.Cli.Health;
 using Koware.Updater;
+using Koware.WatchTogether;
 using Koware.Autoconfig.DependencyInjection;
 using Koware.Autoconfig.Orchestration;
 using Koware.Autoconfig.Storage;
@@ -199,7 +201,7 @@ static async Task<int> RunAsync(IHost host, string[] args)
     // Commands that should NOT show the provider warning (utility/setup commands)
     var utilityCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "help", "--help", "-h", "version", "--version", "-v", "update", "doctor", "provider", "config", "theme", "mode", "sync", "backup", "restore"
+        "help", "--help", "-h", "version", "--version", "-v", "update", "doctor", "provider", "config", "theme", "mode", "sync", "backup", "restore", "watch-together", "party"
     };
 
     // Show non-blocking warning for commands that don't require providers but aren't utility commands
@@ -264,6 +266,9 @@ static async Task<int> RunAsync(IHost host, string[] args)
                     var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
                 return await HandlePlayAsync(orchestrator, args, services, logger, defaults, cts.Token);
                 }
+            case "watch-together":
+            case "party":
+                return await HandleWatchTogetherAsync(args, services, logger, defaults, cts.Token);
             case "download":
                 {
                     var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
@@ -7083,6 +7088,705 @@ static async Task<int> HandlePlayAsync(ScrapeOrchestrator orchestrator, string[]
     return await ExecuteAndPlayAsync(orchestrator, plan, services, history, logger, cancellationToken);
 }
 
+static async Task<int> HandleWatchTogetherAsync(string[] args, IServiceProvider services, ILogger logger, DefaultCliOptions defaults, CancellationToken cancellationToken)
+{
+    if (args.Length < 2 || IsHelpArg(args[1]))
+    {
+        PrintWatchTogetherHelp();
+        return 0;
+    }
+
+    if (args.Skip(2).Any(IsHelpArg))
+    {
+        PrintWatchTogetherHelp();
+        return 0;
+    }
+
+    var subcommand = args[1].ToLowerInvariant();
+    return subcommand switch
+    {
+        "relay" => await HandleWatchTogetherRelayAsync(args, cancellationToken),
+        "create" or "host" => await HandleWatchTogetherCreateAsync(args, services, logger, defaults, cancellationToken),
+        "join" => await HandleWatchTogetherJoinAsync(args, services, logger, cancellationToken),
+        _ => UnknownWatchTogetherSubcommand(subcommand)
+    };
+}
+
+static int UnknownWatchTogetherSubcommand(string subcommand)
+{
+    WriteColoredLine($"Unknown watch-together command '{subcommand}'.", ConsoleColor.Yellow);
+    PrintWatchTogetherHelp();
+    return 1;
+}
+
+static async Task<int> HandleWatchTogetherRelayAsync(string[] args, CancellationToken cancellationToken)
+{
+    var listenUri = new Uri("http://127.0.0.1:8765/");
+
+    for (var i = 2; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if (IsHelpArg(arg))
+        {
+            PrintWatchTogetherHelp();
+            return 0;
+        }
+
+        if ((arg.Equals("--bind", StringComparison.OrdinalIgnoreCase) ||
+             arg.Equals("--listen", StringComparison.OrdinalIgnoreCase)) && i + 1 < args.Length)
+        {
+            listenUri = ParseRelayListenUri(args[++i]);
+            continue;
+        }
+
+        WriteColoredLine($"Unknown option '{arg}'.", ConsoleColor.Yellow);
+        return 1;
+    }
+
+    await using var relay = new WatchTogetherRelayServer(listenUri);
+    await relay.StartAsync(cancellationToken);
+
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine("Watch-together relay is running.");
+    Console.ResetColor();
+    Console.WriteLine($"  HTTP:  {listenUri}");
+    Console.WriteLine($"  Relay: {relay.GetRelayUri()}");
+    Console.WriteLine();
+    Console.WriteLine("Use this relay explicitly with:");
+    Console.WriteLine($"  koware watch-together create \"anime title\" --relay {relay.GetRelayUri()}");
+    Console.WriteLine();
+    Console.WriteLine("Press Ctrl+C to stop the relay.");
+
+    await relay.RunUntilCanceledAsync(cancellationToken);
+    return 0;
+}
+
+static async Task<int> HandleWatchTogetherCreateAsync(
+    string[] args,
+    IServiceProvider services,
+    ILogger logger,
+    DefaultCliOptions defaults,
+    CancellationToken cancellationToken)
+{
+    if (!await CheckProvidersConfiguredAsync(services, CliMode.Anime, cancellationToken))
+    {
+        return 1;
+    }
+
+    WatchTogetherCreateOptions options;
+    try
+    {
+        options = ParseWatchTogetherCreateOptions(args, defaults);
+    }
+    catch (ArgumentException ex)
+    {
+        WriteColoredLine(ex.Message, ConsoleColor.Yellow);
+        PrintWatchTogetherHelp();
+        return 1;
+    }
+
+    await using var embeddedRelay = options.StartEmbeddedRelay
+        ? new WatchTogetherRelayServer(options.BindUri)
+        : null;
+
+    var relayUri = options.RelayUri;
+    if (embeddedRelay is not null)
+    {
+        await embeddedRelay.StartAsync(cancellationToken);
+        relayUri = embeddedRelay.GetRelayUri();
+    }
+
+    if (relayUri is null)
+    {
+        WriteColoredLine("No relay is available. Pass --relay <ws-url> or allow the embedded relay.", ConsoleColor.Yellow);
+        return 1;
+    }
+
+    var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
+    var plan = await MaybeSelectMatchAsync(orchestrator, options.Plan, logger, cancellationToken);
+    plan = await MaybeSelectEpisodeAsync(orchestrator, plan, logger, cancellationToken);
+
+    var resolved = await ResolvePlaybackForWatchTogetherAsync(orchestrator, plan, services, logger, cancellationToken);
+    if (resolved is null)
+    {
+        return 1;
+    }
+
+    var hostSession = new WatchTogetherSessionOptions(
+        relayUri,
+        options.RoomCode,
+        NewClientId(),
+        options.DisplayName,
+        WatchTogetherRoles.Host);
+
+    var content = BuildWatchTogetherContent(plan, resolved);
+    if (!await PublishWatchTogetherContentAsync(hostSession, content, logger, cancellationToken))
+    {
+        return 1;
+    }
+
+    Console.WriteLine();
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine("Watch-together room ready.");
+    Console.ResetColor();
+    Console.WriteLine($"  Room:  {options.RoomCode}");
+    Console.WriteLine($"  Relay: {relayUri}");
+    Console.WriteLine();
+    Console.WriteLine("Invite:");
+    Console.WriteLine($"  koware watch-together join {options.RoomCode}{FormatRelayInviteSuffix(relayUri)}");
+    Console.WriteLine();
+
+    var exitCode = LaunchPlayer(
+        resolved.PlayerOptions,
+        resolved.Stream,
+        logger,
+        resolved.HttpReferrer,
+        resolved.HttpUserAgent,
+        resolved.DisplayTitle,
+        resolved.Player,
+        hostSession);
+
+    await RecordWatchTogetherHistoryAsync(resolved, services, logger, exitCode, cancellationToken);
+    return exitCode;
+}
+
+static async Task<int> HandleWatchTogetherJoinAsync(
+    string[] args,
+    IServiceProvider services,
+    ILogger logger,
+    CancellationToken cancellationToken)
+{
+    WatchTogetherJoinOptions options;
+    try
+    {
+        options = ParseWatchTogetherJoinOptions(args);
+    }
+    catch (ArgumentException ex)
+    {
+        WriteColoredLine(ex.Message, ConsoleColor.Yellow);
+        PrintWatchTogetherHelp();
+        return 1;
+    }
+
+    var cliSession = new WatchTogetherSessionOptions(
+        options.RelayUri,
+        options.RoomCode,
+        NewClientId(),
+        options.DisplayName,
+        WatchTogetherRoles.Guest);
+
+    WatchTogetherContent? content;
+    await using (var client = new WatchTogetherClient(cliSession))
+    {
+        try
+        {
+            await client.ConnectAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Could not connect to watch-together relay.");
+            WriteColoredLine($"Could not connect to watch-together relay: {ex.Message}", ConsoleColor.Yellow);
+            return 1;
+        }
+
+        Console.WriteLine($"Joined room {options.RoomCode}. Waiting for the host stream...");
+        content = await WaitForWatchTogetherContentAsync(client, options.WaitTimeout, cancellationToken);
+    }
+
+    if (content is null)
+    {
+        WriteColoredLine("No host stream was received before the timeout.", ConsoleColor.Yellow);
+        return 1;
+    }
+
+    if (!Uri.TryCreate(content.StreamUrl, UriKind.Absolute, out var streamUri))
+    {
+        WriteColoredLine("The room shared an invalid stream URL.", ConsoleColor.Yellow);
+        return 1;
+    }
+
+    var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
+    var player = ResolveWatchTogetherPlayerExecutable(playerOptions);
+    if (player.Path is null)
+    {
+        WriteColoredLine("Watch together needs the bundled Koware player so playback can be synchronized.", ConsoleColor.Yellow);
+        Console.WriteLine("Build or install Koware.Player, then try joining again.");
+        return 1;
+    }
+
+    var stream = new StreamLink(
+        streamUri,
+        string.IsNullOrWhiteSpace(content.Quality) ? "auto" : content.Quality!,
+        "watch-together",
+        content.Referrer,
+        content.Subtitles
+            .Where(s => Uri.TryCreate(s.Url, UriKind.Absolute, out _))
+            .Select(s => new SubtitleTrack(s.Label, new Uri(s.Url), s.Language))
+            .ToArray());
+
+    var playerSession = cliSession with { ClientId = NewClientId() };
+    return LaunchPlayer(
+        playerOptions,
+        stream,
+        logger,
+        content.Referrer,
+        content.UserAgent,
+        string.IsNullOrWhiteSpace(content.Title) ? "Koware Watch Together" : content.Title,
+        player,
+        playerSession);
+}
+
+static WatchTogetherCreateOptions ParseWatchTogetherCreateOptions(string[] args, DefaultCliOptions defaults)
+{
+    var roomCode = GenerateRoomCode();
+    var displayName = DefaultWatchTogetherName();
+    var relayUri = DefaultWatchTogetherRelayUri();
+    var bindUri = new Uri("http://127.0.0.1:8765/");
+    var startEmbeddedRelay = false;
+    var planArgs = new List<string> { "watch" };
+
+    for (var i = 2; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if (IsHelpArg(arg))
+        {
+            throw new ArgumentException("watch-together create usage requested.");
+        }
+
+        if (arg.Equals("--relay", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            relayUri = WatchTogetherClient.NormalizeRelayUri(args[++i]);
+            startEmbeddedRelay = false;
+            continue;
+        }
+
+        if (arg.Equals("--room", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            roomCode = NormalizeRoomCode(args[++i]);
+            continue;
+        }
+
+        if (arg.Equals("--name", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            displayName = args[++i].Trim();
+            continue;
+        }
+
+        if (arg.Equals("--bind", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            bindUri = ParseRelayListenUri(args[++i]);
+            startEmbeddedRelay = true;
+            continue;
+        }
+
+        if (arg.Equals("--local-relay", StringComparison.OrdinalIgnoreCase) ||
+            arg.Equals("--embedded-relay", StringComparison.OrdinalIgnoreCase))
+        {
+            startEmbeddedRelay = true;
+            continue;
+        }
+
+        if (arg.Equals("--no-embedded-relay", StringComparison.OrdinalIgnoreCase))
+        {
+            startEmbeddedRelay = false;
+            continue;
+        }
+
+        planArgs.Add(arg);
+    }
+
+    if (planArgs.Count == 1)
+    {
+        throw new ArgumentException("Add a search query to create a watch-together room.");
+    }
+
+    if (string.IsNullOrWhiteSpace(displayName))
+    {
+        displayName = DefaultWatchTogetherName();
+    }
+
+    if (string.IsNullOrWhiteSpace(roomCode))
+    {
+        throw new ArgumentException("Room code cannot be empty.");
+    }
+
+    var plan = ParsePlan(planArgs.ToArray(), defaults);
+    return new WatchTogetherCreateOptions(plan, relayUri, bindUri, startEmbeddedRelay, roomCode, displayName);
+}
+
+static WatchTogetherJoinOptions ParseWatchTogetherJoinOptions(string[] args)
+{
+    string? roomCode = null;
+    var relayUri = DefaultWatchTogetherRelayUri();
+    var displayName = DefaultWatchTogetherName();
+    var waitTimeout = TimeSpan.FromSeconds(45);
+
+    for (var i = 2; i < args.Length; i++)
+    {
+        var arg = args[i];
+        if (IsHelpArg(arg))
+        {
+            throw new ArgumentException("watch-together join usage requested.");
+        }
+
+        if (arg.Equals("--relay", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            relayUri = WatchTogetherClient.NormalizeRelayUri(args[++i]);
+            continue;
+        }
+
+        if (arg.Equals("--room", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            roomCode = NormalizeRoomCode(args[++i]);
+            continue;
+        }
+
+        if (arg.Equals("--name", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            displayName = args[++i].Trim();
+            continue;
+        }
+
+        if (arg.Equals("--wait", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        {
+            if (!int.TryParse(args[++i], out var seconds) || seconds <= 0)
+            {
+                throw new ArgumentException("--wait must be a positive number of seconds.");
+            }
+
+            waitTimeout = TimeSpan.FromSeconds(seconds);
+            continue;
+        }
+
+        if (roomCode is null)
+        {
+            roomCode = NormalizeRoomCode(arg);
+            continue;
+        }
+
+        throw new ArgumentException($"Unknown option '{arg}'.");
+    }
+
+    if (string.IsNullOrWhiteSpace(roomCode))
+    {
+        throw new ArgumentException("Room code is required.");
+    }
+
+    if (string.IsNullOrWhiteSpace(displayName))
+    {
+        displayName = DefaultWatchTogetherName();
+    }
+
+    return new WatchTogetherJoinOptions(roomCode, relayUri, displayName, waitTimeout);
+}
+
+static async Task<ResolvedPlayback?> ResolvePlaybackForWatchTogetherAsync(
+    ScrapeOrchestrator orchestrator,
+    ScrapePlan plan,
+    IServiceProvider services,
+    ILogger logger,
+    CancellationToken cancellationToken)
+{
+    var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
+    var playerResolution = ResolveWatchTogetherPlayerExecutable(playerOptions);
+    if (playerResolution.Path is null)
+    {
+        WriteColoredLine("Watch together needs the bundled Koware player so playback can be synchronized.", ConsoleColor.Yellow);
+        Console.WriteLine("Build or install Koware.Player, or set Player:Command to Koware.Player / Koware.Player.Win.");
+        return null;
+    }
+
+    var allAnimeOptions = services.GetService<IOptions<AllAnimeOptions>>()?.Value;
+    var defaultReferrer = allAnimeOptions?.Referer;
+    var defaultUserAgent = allAnimeOptions?.UserAgent;
+
+    var step = ConsoleStep.Start("Resolving streams");
+    ScrapeResult result;
+    try
+    {
+        result = await orchestrator.ExecuteAsync(plan, cancellationToken);
+        step.Succeed("Streams ready");
+    }
+    catch
+    {
+        step.Fail("Failed to resolve streams");
+        throw;
+    }
+
+    if (result.SelectedEpisode is null || result.Streams is null || result.Streams.Count == 0)
+    {
+        logger.LogWarning("No streams found for the query/episode.");
+        RenderPlan(plan, result);
+        return null;
+    }
+
+    var normalizedStreams = ApplyDefaultReferrer(result.Streams, defaultReferrer);
+    var filteredStreams = FilterStreamsForPlayer(normalizedStreams, playerResolution.Name, logger);
+    var stream = PickBestStream(filteredStreams);
+    if (stream is null)
+    {
+        logger.LogWarning("No playable streams found.");
+        return null;
+    }
+
+    var displayTitle = BuildPlayerTitle(result, stream);
+    var httpReferrer = stream.Referrer ?? defaultReferrer;
+
+    return new ResolvedPlayback(
+        result,
+        stream,
+        playerOptions,
+        playerResolution,
+        httpReferrer,
+        defaultUserAgent,
+        string.IsNullOrWhiteSpace(displayTitle) ? stream.Url.ToString() : displayTitle);
+}
+
+static WatchTogetherContent BuildWatchTogetherContent(ScrapePlan plan, ResolvedPlayback resolved)
+{
+    return new WatchTogetherContent
+    {
+        Query = plan.Query,
+        EpisodeNumber = resolved.Result.SelectedEpisode?.Number,
+        Quality = resolved.Stream.Quality,
+        Title = resolved.DisplayTitle,
+        StreamUrl = resolved.Stream.Url.ToString(),
+        Referrer = resolved.HttpReferrer,
+        UserAgent = resolved.HttpUserAgent,
+        Subtitles = resolved.Stream.Subtitles
+            .Select(track => new WatchTogetherSubtitle(track.Label, track.Url.ToString(), track.Language))
+            .ToArray()
+    };
+}
+
+static async Task<bool> PublishWatchTogetherContentAsync(
+    WatchTogetherSessionOptions hostSession,
+    WatchTogetherContent content,
+    ILogger logger,
+    CancellationToken cancellationToken)
+{
+    await using var client = new WatchTogetherClient(hostSession with
+    {
+        ClientId = NewClientId(),
+        Role = WatchTogetherRoles.System
+    });
+
+    try
+    {
+        await client.ConnectAsync(cancellationToken);
+        await client.SendAsync(new WatchTogetherMessage
+        {
+            Type = WatchTogetherMessageTypes.Content,
+            Content = content
+        }, cancellationToken);
+        return true;
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Could not publish watch-together room content.");
+        WriteColoredLine($"Could not publish watch-together room content: {ex.Message}", ConsoleColor.Yellow);
+        return false;
+    }
+}
+
+static async Task<WatchTogetherContent?> WaitForWatchTogetherContentAsync(
+    WatchTogetherClient client,
+    TimeSpan timeout,
+    CancellationToken cancellationToken)
+{
+    using var timeoutCts = new CancellationTokenSource(timeout);
+    using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+
+    try
+    {
+        while (!linked.Token.IsCancellationRequested)
+        {
+            var message = await client.ReceiveAsync(linked.Token);
+            if (message is null)
+            {
+                return null;
+            }
+
+            if (message.Type.Equals(WatchTogetherMessageTypes.Content, StringComparison.OrdinalIgnoreCase) &&
+                message.Content is not null)
+            {
+                return message.Content;
+            }
+        }
+    }
+    catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+    {
+        return null;
+    }
+
+    return null;
+}
+
+static async Task RecordWatchTogetherHistoryAsync(
+    ResolvedPlayback resolved,
+    IServiceProvider services,
+    ILogger logger,
+    int exitCode,
+    CancellationToken cancellationToken)
+{
+    if (resolved.Result.SelectedAnime is null || resolved.Result.SelectedEpisode is null)
+    {
+        return;
+    }
+
+    var entry = new WatchHistoryEntry
+    {
+        Provider = resolved.Stream.SourceTag ?? resolved.Stream.Provider,
+        AnimeId = resolved.Result.SelectedAnime.Id.Value,
+        AnimeTitle = resolved.Result.SelectedAnime.Title,
+        EpisodeNumber = resolved.Result.SelectedEpisode.Number,
+        EpisodeTitle = resolved.Result.SelectedEpisode.Title,
+        Quality = resolved.Stream.Quality,
+        WatchedAt = DateTimeOffset.UtcNow
+    };
+
+    try
+    {
+        var history = services.GetRequiredService<IWatchHistoryStore>();
+        await history.AddAsync(entry, cancellationToken);
+        if (exitCode != 0 && !IsNonErrorExitCode(exitCode))
+        {
+            logger.LogWarning("Player exited with code {ExitCode}, but history was saved so you can retry with 'koware last --play'.", exitCode);
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Failed to update watch history.");
+    }
+
+    try
+    {
+        var animeList = services.GetRequiredService<IAnimeListStore>();
+        await animeList.RecordEpisodeWatchedAsync(
+            resolved.Result.SelectedAnime.Id.Value,
+            resolved.Result.SelectedAnime.Title,
+            resolved.Result.SelectedEpisode.Number,
+            resolved.Result.Episodes?.Count,
+            cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        logger.LogDebug(ex, "Failed to update anime list tracking.");
+    }
+}
+
+static void PrintWatchTogetherHelp()
+{
+    Console.WriteLine("watch-together - Sync playback with other Koware users");
+    Console.WriteLine();
+    Console.WriteLine("Usage:");
+    Console.WriteLine("  koware watch-together create <query> [watch options] [--room <code>] [--relay <ws-url>] [--name <name>]");
+    Console.WriteLine("  koware watch-together join <room> [--relay <ws-url>] [--name <name>]");
+    Console.WriteLine("  koware watch-together relay [--bind <http-url>]");
+    Console.WriteLine();
+    Console.WriteLine("Examples:");
+    Console.WriteLine("  koware watch-together create \"frieren\" --episode 1");
+    Console.WriteLine("  koware watch-together join KWR7F3");
+    Console.WriteLine("  koware watch-together relay --bind http://127.0.0.1:8765/");
+    Console.WriteLine();
+    Console.WriteLine("Notes:");
+    Console.WriteLine($"  Default relay: {DefaultWatchTogetherRelayUri()}");
+    Console.WriteLine("  Override with --relay or KOWARE_WATCH_RELAY.");
+    Console.WriteLine("  The relay only moves room metadata and playback state. It does not host or rebroadcast video.");
+    Console.WriteLine("  Live sync requires the bundled Koware player.");
+}
+
+static Uri DefaultWatchTogetherRelayUri()
+{
+    var fromEnvironment = Environment.GetEnvironmentVariable("KOWARE_WATCH_RELAY");
+    return WatchTogetherClient.NormalizeRelayUri(
+        string.IsNullOrWhiteSpace(fromEnvironment)
+            ? PublicWatchTogetherRelayUri().ToString()
+            : fromEnvironment);
+}
+
+static Uri PublicWatchTogetherRelayUri()
+    => WatchTogetherClient.NormalizeRelayUri("wss://relay.koware.app/");
+
+static string FormatRelayInviteSuffix(Uri relayUri)
+{
+    return relayUri == PublicWatchTogetherRelayUri()
+        ? string.Empty
+        : $" --relay {relayUri}";
+}
+
+static Uri ParseRelayListenUri(string value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        throw new ArgumentException("Relay listen URI cannot be empty.");
+    }
+
+    var text = value.Contains("://", StringComparison.Ordinal) ? value : $"http://{value}";
+    if (!Uri.TryCreate(text, UriKind.Absolute, out var uri))
+    {
+        throw new ArgumentException($"Invalid listen URI '{value}'.");
+    }
+
+    var builder = new UriBuilder(uri)
+    {
+        Scheme = uri.Scheme switch
+        {
+            "ws" => "http",
+            "wss" => "https",
+            "http" => "http",
+            "https" => "https",
+            _ => throw new ArgumentException("Listen URI must use http, https, ws, or wss.")
+        },
+        Path = "/",
+        Query = string.Empty,
+        Fragment = string.Empty
+    };
+
+    return builder.Uri;
+}
+
+static string GenerateRoomCode()
+{
+    const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    Span<char> chars = stackalloc char[6];
+    for (var i = 0; i < chars.Length; i++)
+    {
+        chars[i] = alphabet[RandomNumberGenerator.GetInt32(alphabet.Length)];
+    }
+
+    return new string(chars);
+}
+
+static string NormalizeRoomCode(string roomCode)
+{
+    var normalized = new string(roomCode
+        .Where(char.IsLetterOrDigit)
+        .Select(char.ToUpperInvariant)
+        .ToArray());
+
+    if (string.IsNullOrWhiteSpace(normalized))
+    {
+        throw new ArgumentException("Room code cannot be empty.");
+    }
+
+    return normalized;
+}
+
+static string DefaultWatchTogetherName()
+{
+    return string.IsNullOrWhiteSpace(Environment.UserName)
+        ? Environment.MachineName
+        : Environment.UserName;
+}
+
+static string NewClientId() => Guid.NewGuid().ToString("N");
+
+static bool IsHelpArg(string arg)
+    => arg.Equals("--help", StringComparison.OrdinalIgnoreCase) ||
+       arg.Equals("-h", StringComparison.OrdinalIgnoreCase) ||
+       arg.Equals("help", StringComparison.OrdinalIgnoreCase);
+
 /// <summary>
 /// Implement the <c>koware download</c> command: download episodes or chapters to disk.
 /// </summary>
@@ -9532,9 +10236,86 @@ static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
 
     var playerName = resolved?.Path is null
         ? (candidates.FirstOrDefault() ?? "unknown")
-        : Path.GetFileNameWithoutExtension(resolved.Path);
+        : GetPlayerNameFromPath(resolved.Path);
 
     return new PlayerResolution(resolved?.Path, playerName, candidates);
+}
+
+static PlayerResolution ResolveWatchTogetherPlayerExecutable(PlayerOptions options)
+{
+    var candidates = new List<string>();
+
+    if (!string.IsNullOrWhiteSpace(options.Command) &&
+        options.Command.Contains("Koware.Player", StringComparison.OrdinalIgnoreCase))
+    {
+        candidates.Add(options.Command);
+    }
+
+    var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    if (OperatingSystem.IsWindows())
+    {
+        candidates.AddRange(new[]
+        {
+            "Koware.Player.Win",
+            "Koware.Player.Win.exe",
+            "Koware.Player",
+            "Koware.Player.exe"
+        });
+    }
+    else if (OperatingSystem.IsMacOS())
+    {
+        candidates.AddRange(new[]
+        {
+            "/Applications/Koware.app/Contents/Resources/player/Koware.Player",
+            "/usr/local/bin/koware/player/Koware.Player",
+            Path.Combine(AppContext.BaseDirectory, "Koware.Player"),
+            Path.Combine(homeDir, ".local", "share", "koware", "Koware.Player"),
+            Path.Combine(homeDir, ".local", "share", "koware", "player", "Koware.Player"),
+            "Koware.Player"
+        });
+    }
+    else
+    {
+        candidates.AddRange(new[]
+        {
+            Path.Combine(homeDir, ".local", "share", "koware", "Koware.Player"),
+            Path.Combine(homeDir, ".local", "share", "koware", "player", "Koware.Player"),
+            Path.Combine(AppContext.BaseDirectory, "Koware.Player"),
+            "/opt/koware/player/Koware.Player",
+            "/usr/local/bin/koware/player/Koware.Player",
+            "Koware.Player"
+        });
+    }
+
+    candidates = candidates
+        .Where(c => !string.IsNullOrWhiteSpace(c))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    var resolved = candidates
+        .Select(c => new { Command = c, Path = ResolveExecutablePath(c) })
+        .FirstOrDefault(x => x.Path is not null);
+
+    return new PlayerResolution(
+        resolved?.Path,
+        resolved?.Path is null ? (candidates.FirstOrDefault() ?? "Koware.Player") : GetPlayerNameFromPath(resolved.Path),
+        candidates);
+}
+
+static string GetPlayerNameFromPath(string path)
+{
+    var fileName = Path.GetFileName(path);
+    if (fileName.StartsWith("Koware.Player.Win", StringComparison.OrdinalIgnoreCase))
+    {
+        return "Koware.Player.Win";
+    }
+
+    if (fileName.StartsWith("Koware.Player", StringComparison.OrdinalIgnoreCase))
+    {
+        return "Koware.Player";
+    }
+
+    return Path.GetFileNameWithoutExtension(path);
 }
 
 /// <summary>
@@ -9551,7 +10332,15 @@ static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
 /// <remarks>
 /// Handles Koware.Player.Win, vlc, and mpv with appropriate argument styles.
 /// </remarks>
-static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger, string? httpReferrer, string? httpUserAgent, string? displayTitle, PlayerResolution? resolution = null)
+static int LaunchPlayer(
+    PlayerOptions options,
+    StreamLink stream,
+    ILogger logger,
+    string? httpReferrer,
+    string? httpUserAgent,
+    string? displayTitle,
+    PlayerResolution? resolution = null,
+    WatchTogetherSessionOptions? watchTogetherSession = null)
 {
     resolution ??= ResolvePlayerExecutable(options);
 
@@ -9629,7 +10418,26 @@ static int LaunchPlayer(PlayerOptions options, StreamLink stream, ILogger logger
             }
         }
 
+        if (watchTogetherSession is not null)
+        {
+            start.ArgumentList.Add("--watch-relay");
+            start.ArgumentList.Add(watchTogetherSession.RelayUri.ToString());
+            start.ArgumentList.Add("--watch-room");
+            start.ArgumentList.Add(watchTogetherSession.RoomCode);
+            start.ArgumentList.Add("--watch-client-id");
+            start.ArgumentList.Add(watchTogetherSession.ClientId);
+            start.ArgumentList.Add("--watch-name");
+            start.ArgumentList.Add(watchTogetherSession.DisplayName);
+            start.ArgumentList.Add("--watch-role");
+            start.ArgumentList.Add(watchTogetherSession.Role);
+        }
+
         return StartProcessAndWait(logger, start, playerPath);
+    }
+
+    if (watchTogetherSession is not null)
+    {
+        logger.LogWarning("Player {Player} does not support watch-together sync. Launching without room synchronization.", playerName);
     }
 
     var defaultArgs = string.Empty;
@@ -10092,6 +10900,7 @@ static void PrintUsage()
     WriteCommand("stream <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Show plan + streams, no player.", ConsoleColor.Cyan);
     WriteCommand("watch <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Pick a stream and play (alias: play).", ConsoleColor.Green);
     WriteCommand("play <query> [--episode <n>] [--quality <label>] [--index <n>] [--non-interactive]", "Same as watch.", ConsoleColor.Green);
+    WriteCommand("watch-together <create|join|relay>", "Create or join a synced playback room (alias: party).", ConsoleColor.Green);
     WriteCommand("download <query>", "Download episodes or manga chapters to disk.", ConsoleColor.Green);
     WriteCommand("read <query> [--chapter <n>]", "Read manga chapters in the reader.", ConsoleColor.Green);
     WriteCommand("last [--play] [--json]", "Show or replay your most recent watch.", ConsoleColor.Yellow);
@@ -10244,6 +11053,28 @@ static List<string> GetHelpLines(string command, CliMode mode)
             lines.Add("  koware watch \"one piece\" --episode 1010 --quality 1080p");
             lines.Add("  koware play \"demon slayer\" --episode 1");
             lines.Add("  koware watch \"bleach\" --index 1 --episode 1 --non-interactive");
+            break;
+
+        case "watch-together":
+        case "party":
+            lines.Add("watch-together - Sync playback with other Koware users");
+            lines.Add("Alias: party");
+            lines.Add("");
+            lines.Add("Usage:");
+            lines.Add("  koware watch-together create <query> [watch options] [--room <code>] [--relay <ws-url>] [--name <name>]");
+            lines.Add("  koware watch-together join <room> [--relay <ws-url>] [--name <name>]");
+            lines.Add("  koware watch-together relay [--bind <http-url>]");
+            lines.Add("");
+            lines.Add("Notes:");
+            lines.Add($"  - Default relay: {DefaultWatchTogetherRelayUri()}");
+            lines.Add("  - Override with --relay or KOWARE_WATCH_RELAY.");
+            lines.Add("  - The relay only moves room metadata and playback state.");
+            lines.Add("  - It does not host or rebroadcast video.");
+            lines.Add("  - Live sync requires the bundled Koware player.");
+            lines.Add("");
+            lines.Add("Examples:");
+            lines.Add("  koware watch-together create \"frieren\" --episode 1");
+            lines.Add("  koware watch-together join KWR7F3");
             break;
             
         case "download":
@@ -10658,6 +11489,7 @@ static int HandleHelp(string[] args, CliMode mode)
             ("recommend", "Get personalized recommendations based on your history"),
             ("stream", "Plan stream selection and print the resolved streams"),
             ("watch", "Pick a stream and launch the configured player"),
+            ("watch-together", "Create or join a synced playback room"),
             ("download", "Download episodes or chapters to files on disk"),
             ("read", "Search for manga and read chapters in the Koware reader"),
             ("last", "Show the most recent watched/read entry"),
@@ -10782,6 +11614,10 @@ static int HandleHelp(string[] args, CliMode mode)
             Console.WriteLine("Usage: koware watch <query> [--episode <n>] [--quality <label>] [--index <match>] [--non-interactive]");
             Console.WriteLine("Alias: 'play' is the same as 'watch'.");
             Console.WriteLine("Example: koware watch \"one piece\" --episode 1010 --quality 1080p");
+            break;
+        case "watch-together":
+        case "party":
+            PrintWatchTogetherHelp();
             break;
         case "download":
             PrintTopicHeader("download", "Download episodes or chapters to files on disk.");
@@ -10972,7 +11808,7 @@ static int HandleHelp(string[] args, CliMode mode)
         default:
             PrintUsage();
             Console.WriteLine();
-            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: explore, search, recommend, offline, stream, watch, play, download, last, continue, history, list, config, provider, doctor, update.");
+            Console.WriteLine($"Unknown help topic '{topic}'. Try one of: explore, search, recommend, offline, stream, watch, play, watch-together, download, last, continue, history, list, config, provider, doctor, update.");
             return 1;
     }
 
@@ -12103,3 +12939,26 @@ record NavigationResult(string Action, int Page, float Chapter);
 /// Result from reading with navigation - includes exit code and last position.
 /// </summary>
 record ReadResult(int ExitCode, float LastChapter, int LastPage);
+
+record WatchTogetherCreateOptions(
+    ScrapePlan Plan,
+    Uri? RelayUri,
+    Uri BindUri,
+    bool StartEmbeddedRelay,
+    string RoomCode,
+    string DisplayName);
+
+record WatchTogetherJoinOptions(
+    string RoomCode,
+    Uri RelayUri,
+    string DisplayName,
+    TimeSpan WaitTimeout);
+
+record ResolvedPlayback(
+    ScrapeResult Result,
+    StreamLink Stream,
+    PlayerOptions PlayerOptions,
+    PlayerResolution Player,
+    string? HttpReferrer,
+    string? HttpUserAgent,
+    string DisplayTitle);

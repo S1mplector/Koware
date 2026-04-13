@@ -2,6 +2,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Koware.WatchTogether;
 using System;
 using System.Linq;
 
@@ -27,6 +28,11 @@ public partial class App : Application
             string? referer = null;
             string? userAgent = null;
             string? subtitleUrl = null;
+            string? watchRelay = null;
+            string? watchRoom = null;
+            string? watchClientId = null;
+            string? watchName = null;
+            string? watchRole = null;
 
             for (int i = 0; i < args.Length; i++)
             {
@@ -44,6 +50,26 @@ public partial class App : Application
                 {
                     subtitleUrl = args[++i];
                 }
+                else if (arg.Equals("--watch-relay", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    watchRelay = args[++i];
+                }
+                else if (arg.Equals("--watch-room", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    watchRoom = args[++i];
+                }
+                else if (arg.Equals("--watch-client-id", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    watchClientId = args[++i];
+                }
+                else if (arg.Equals("--watch-name", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    watchName = args[++i];
+                }
+                else if (arg.Equals("--watch-role", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    watchRole = args[++i];
+                }
                 else if (streamUrl is null && arg.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 {
                     streamUrl = arg;
@@ -60,10 +86,31 @@ public partial class App : Application
                 Title = title,
                 HttpReferer = referer,
                 HttpUserAgent = userAgent,
-                SubtitleUrl = subtitleUrl
+                SubtitleUrl = subtitleUrl,
+                WatchTogetherSession = BuildWatchTogetherSession(watchRelay, watchRoom, watchClientId, watchName, watchRole)
             };
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private static WatchTogetherSessionOptions? BuildWatchTogetherSession(
+        string? relay,
+        string? room,
+        string? clientId,
+        string? name,
+        string? role)
+    {
+        if (string.IsNullOrWhiteSpace(relay) || string.IsNullOrWhiteSpace(room))
+        {
+            return null;
+        }
+
+        return new WatchTogetherSessionOptions(
+            WatchTogetherClient.NormalizeRelayUri(relay),
+            room,
+            string.IsNullOrWhiteSpace(clientId) ? Guid.NewGuid().ToString("N") : clientId,
+            string.IsNullOrWhiteSpace(name) ? Environment.UserName : name,
+            string.IsNullOrWhiteSpace(role) ? WatchTogetherRoles.Guest : role);
     }
 }

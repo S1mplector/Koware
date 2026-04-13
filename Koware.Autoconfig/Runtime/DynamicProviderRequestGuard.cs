@@ -85,14 +85,26 @@ internal sealed class DynamicProviderRequestGuard
                 "Provider endpoint is missing.");
         }
 
+        var trimmedEndpoint = endpoint.Trim();
         Uri requestUri;
-        if (Uri.TryCreate(endpoint, UriKind.Absolute, out var absolute))
+        if (IsNetworkPathReference(trimmedEndpoint))
+        {
+            throw CreateException(
+                DynamicProviderFailureKind.BlockedEndpoint,
+                $"Provider endpoint '{trimmedEndpoint}' cannot override the configured host.");
+        }
+
+        if (IsRootRelativeReference(trimmedEndpoint))
+        {
+            requestUri = new Uri(RequestBaseUri, trimmedEndpoint.TrimStart('/', '\\'));
+        }
+        else if (Uri.TryCreate(trimmedEndpoint, UriKind.Absolute, out var absolute))
         {
             requestUri = absolute;
         }
         else
         {
-            requestUri = new Uri(RequestBaseUri, endpoint.TrimStart('/'));
+            requestUri = new Uri(RequestBaseUri, trimmedEndpoint.TrimStart('/', '\\'));
         }
 
         ValidateRequestUri(requestUri, "endpoint");
@@ -122,7 +134,17 @@ internal sealed class DynamicProviderRequestGuard
             return endpointUri;
         }
 
-        if (Uri.TryCreate(requestSuffix, UriKind.Absolute, out var absolute))
+        var trimmedSuffix = requestSuffix.Trim();
+        if (IsNetworkPathReference(trimmedSuffix))
+        {
+            throw CreateException(
+                DynamicProviderFailureKind.BlockedEndpoint,
+                $"REST request suffix '{trimmedSuffix}' cannot override the configured host.",
+                endpointUri);
+        }
+
+        if (!IsRootRelativeReference(trimmedSuffix) &&
+            Uri.TryCreate(trimmedSuffix, UriKind.Absolute, out var absolute))
         {
             throw CreateException(
                 DynamicProviderFailureKind.BlockedEndpoint,
@@ -130,11 +152,11 @@ internal sealed class DynamicProviderRequestGuard
                 absolute);
         }
 
-        if (!Uri.TryCreate(endpointUri + requestSuffix, UriKind.Absolute, out var requestUri))
+        if (!Uri.TryCreate(endpointUri.AbsoluteUri + trimmedSuffix, UriKind.Absolute, out var requestUri))
         {
             throw CreateException(
                 DynamicProviderFailureKind.InvalidConfiguration,
-                $"REST request suffix '{requestSuffix}' could not be combined with endpoint '{endpointUri}'.",
+                $"REST request suffix '{trimmedSuffix}' could not be combined with endpoint '{endpointUri}'.",
                 endpointUri);
         }
 
@@ -260,6 +282,14 @@ internal sealed class DynamicProviderRequestGuard
     private static bool IsHttpOrHttps(Uri uri) =>
         uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
         uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsRootRelativeReference(string value) =>
+        value.StartsWith("/", StringComparison.Ordinal) ||
+        value.StartsWith("\\", StringComparison.Ordinal);
+
+    private static bool IsNetworkPathReference(string value) =>
+        value.StartsWith("//", StringComparison.Ordinal) ||
+        value.StartsWith(@"\\", StringComparison.Ordinal);
 
     private void ValidateRequestUri(Uri? requestUri, string context)
     {
@@ -397,4 +427,3 @@ internal sealed class DynamicProviderRequestGuard
         Exception? innerException = null) =>
         new(kind, _config.Slug, message, endpoint, statusCode, innerException);
 }
-"

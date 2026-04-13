@@ -303,6 +303,19 @@ All examples assume you have the global `koware` command installed. If not, repl
     koware play "demon slayer" --episode 1 --quality 1080p
     ```
 
+- **`watch-together`** – create or join a synced playback room.
+  - Host:
+
+    ```powershell
+    koware watch-together create "frieren" --episode 1
+    ```
+
+  - Join:
+
+    ```powershell
+    koware watch-together join KWR7F3
+    ```
+
 - **`history`** – inspect and manage your local watch history.
   - Run:
 
@@ -313,6 +326,39 @@ All examples assume you have the global `koware` command installed. If not, repl
 When multiple search results are found, Koware will prompt you to choose one. You can also pass `--index <n>` or `--non-interactive` to skip prompts (useful for scripting).
 
 Stream selection prefers HLS/DASH and HTTPS hosts; noisy HTTP logging is filtered by default so you can focus on the important bits.
+
+### Watch Together
+
+Watch together syncs playback state between Koware players. The host resolves the stream locally, shares the room metadata through a WebSocket relay, and every participant plays the stream on their own machine. The relay does not host or rebroadcast video.
+
+By default, rooms use the public relay at `wss://relay.koware.app/`, so participants only need Koware and an internet connection once that relay is deployed:
+
+```bash
+koware watch-together create "frieren" --episode 1
+```
+
+Koware prints a room code and an invite command. Other users join with:
+
+```bash
+koware watch-together join <room-code>
+```
+
+You can override the relay for staging or self-hosting:
+
+```bash
+koware watch-together create "frieren" --episode 1 --relay wss://relay.example.com/
+koware watch-together join <room-code> --relay wss://relay.example.com/
+```
+
+The relay implementation is included for deployment or local development:
+
+```bash
+koware watch-together relay --bind http://127.0.0.1:8765/
+```
+
+Set `KOWARE_WATCH_RELAY` to change the default relay without passing `--relay`.
+
+Live sync requires the bundled Koware player. External players can still be launched by normal `koware watch`, but they do not expose the pause/seek control bridge needed for synced rooms.
 
 For more information about available commands and options, run:
 

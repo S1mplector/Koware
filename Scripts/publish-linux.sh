@@ -130,6 +130,36 @@ else
     exit 1
 fi
 
+# Publish bundled player for watch-together sync.
+PLAYER_PROJ="$REPO_ROOT/Koware.Player/Koware.Player.csproj"
+if [ -f "$PLAYER_PROJ" ]; then
+    info "Publishing Koware.Player..."
+    PLAYER_ARGS=(
+        "publish" "$PLAYER_PROJ"
+        "-c" "$CONFIGURATION"
+        "-r" "$RUNTIME"
+        "-o" "$OUTPUT_DIR/player"
+    )
+
+    if [ "$SELF_CONTAINED" = "true" ]; then
+        PLAYER_ARGS+=("--self-contained" "true")
+    else
+        PLAYER_ARGS+=("--self-contained" "false")
+    fi
+
+    echo "dotnet ${PLAYER_ARGS[*]}"
+    if dotnet "${PLAYER_ARGS[@]}"; then
+        if [ -f "$OUTPUT_DIR/player/Koware.Player" ]; then
+            chmod +x "$OUTPUT_DIR/player/Koware.Player"
+            success "Player executable ready: $OUTPUT_DIR/player/Koware.Player"
+        else
+            warn "Koware.Player publish completed, but executable was not found"
+        fi
+    else
+        warn "Koware.Player publish failed; continuing with CLI-only package"
+    fi
+fi
+
 # Create staging directory for distribution
 STAGING="$OUTPUT_DIR/staging"
 mkdir -p "$STAGING/koware"
@@ -137,6 +167,11 @@ mkdir -p "$STAGING/koware"
 # Copy files to staging
 cp "$OUTPUT_DIR/cli/koware" "$STAGING/koware/"
 [ -f "$OUTPUT_DIR/cli/appsettings.json" ] && cp "$OUTPUT_DIR/cli/appsettings.json" "$STAGING/koware/"
+if [ -f "$OUTPUT_DIR/player/Koware.Player" ]; then
+    mkdir -p "$STAGING/koware/player"
+    cp -R "$OUTPUT_DIR/player/"* "$STAGING/koware/player/"
+    chmod +x "$STAGING/koware/player/Koware.Player" 2>/dev/null || true
+fi
 
 # Create install script for the package
 cat > "$STAGING/koware/install.sh" << 'INSTALL_SCRIPT'
@@ -257,6 +292,14 @@ if [ -f "$SCRIPT_DIR/appsettings.json" ]; then
     cp "$SCRIPT_DIR/appsettings.json" "$INSTALL_DIR/"
 fi
 
+if [ -f "$SCRIPT_DIR/player/Koware.Player" ]; then
+    info "Installing bundled player..."
+    rm -rf "$INSTALL_DIR/player"
+    mkdir -p "$INSTALL_DIR/player"
+    cp -R "$SCRIPT_DIR/player/"* "$INSTALL_DIR/player/"
+    chmod +x "$INSTALL_DIR/player/Koware.Player" 2>/dev/null || true
+fi
+
 # Create symlink in bin directory
 info "Creating symlink in $BIN_DIR..."
 ln -sf "$INSTALL_DIR/koware" "$BIN_DIR/koware"
@@ -301,6 +344,9 @@ echo ""
 success "Koware installed successfully!"
 echo ""
 echo "  Installation: $INSTALL_DIR/koware"
+if [ -f "$INSTALL_DIR/player/Koware.Player" ]; then
+echo "  Player:       $INSTALL_DIR/player/Koware.Player"
+fi
 echo "  Symlink:      $BIN_DIR/koware"
 echo "  Config:       $CONFIG_DIR/"
 echo ""
@@ -416,6 +462,7 @@ QUICK START
   koware provider autoconfig Auto-configure providers
   koware provider test       Test provider connectivity
   koware search "anime"      Search for anime
+  koware watch-together create "anime" --episode 1
 
 CONFIGURATION
 -------------
@@ -470,12 +517,16 @@ if [ "$CREATE_DEB" = "true" ]; then
         rm -rf "$DEB_ROOT"
         mkdir -p "$DEB_ROOT/DEBIAN"
         mkdir -p "$DEB_ROOT/opt/koware"
+        mkdir -p "$DEB_ROOT/opt/koware/player"
         mkdir -p "$DEB_ROOT/usr/local/bin"
         mkdir -p "$DEB_ROOT/usr/share/applications"
         
         # Copy files
         cp "$OUTPUT_DIR/cli/koware" "$DEB_ROOT/opt/koware/"
         [ -f "$OUTPUT_DIR/cli/appsettings.json" ] && cp "$OUTPUT_DIR/cli/appsettings.json" "$DEB_ROOT/opt/koware/"
+        if [ -f "$OUTPUT_DIR/player/Koware.Player" ]; then
+            cp -R "$OUTPUT_DIR/player/"* "$DEB_ROOT/opt/koware/player/"
+        fi
         
         # Create symlink (relative for packaging)
         ln -s /opt/koware/koware "$DEB_ROOT/usr/local/bin/koware"
@@ -503,6 +554,7 @@ EOF
 #!/bin/bash
 set -e
 chmod +x /opt/koware/koware
+chmod +x /opt/koware/player/Koware.Player 2>/dev/null || true
 echo "Koware installed! Run 'koware --help' to get started."
 EOF
         chmod 755 "$DEB_ROOT/DEBIAN/postinst"
@@ -558,7 +610,7 @@ exec "$HERE/usr/bin/koware" "$@"
 EOF
         chmod +x "$APPDIR/AppRun"
         
-        # Create a simple icon (placeholder - in production you'd include real icons)
+        # Create a simple icon (placeholder)
         # For now, create a minimal SVG icon
         cat > "$APPDIR/koware.svg" << 'EOF'
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
