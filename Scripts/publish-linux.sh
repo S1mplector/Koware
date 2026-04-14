@@ -8,6 +8,7 @@ set -e
 CONFIGURATION="${CONFIGURATION:-Release}"
 RUNTIME="${RUNTIME:-linux-x64}"  # linux-x64, linux-arm64, linux-musl-x64
 SELF_CONTAINED="${SELF_CONTAINED:-true}"
+BUNDLE_PLAYER="${BUNDLE_PLAYER:-true}"
 CREATE_TARBALL="${CREATE_TARBALL:-true}"
 CREATE_DEB="${CREATE_DEB:-false}"
 CREATE_APPIMAGE="${CREATE_APPIMAGE:-false}"
@@ -35,6 +36,7 @@ while [[ $# -gt 0 ]]; do
         --config) CONFIGURATION="$2"; shift 2 ;;
         --output) OUTPUT_DIR="$2"; shift 2 ;;
         --no-self-contained) SELF_CONTAINED="false"; shift ;;
+        --no-player) BUNDLE_PLAYER="false"; shift ;;
         --no-tarball) CREATE_TARBALL="false"; shift ;;
         --deb) CREATE_DEB="true"; shift ;;
         --appimage) CREATE_APPIMAGE="true"; shift ;;
@@ -50,6 +52,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --config <cfg>        Build configuration (Release, Debug). Default: Release"
             echo "  --output <dir>        Output directory. Default: ./publish/linux"
             echo "  --no-self-contained   Framework-dependent deployment (requires .NET runtime)"
+            echo "  --no-player           Skip bundled Avalonia player (CLI-only build)"
             echo "  --no-tarball          Skip creating .tar.gz archive"
             echo "  --deb                 Create .deb package (requires dpkg-deb)"
             echo "  --appimage            Create AppImage (requires appimagetool)"
@@ -70,6 +73,7 @@ info "Publishing Koware CLI for Linux"
 info "  Runtime: $RUNTIME"
 info "  Configuration: $CONFIGURATION"
 info "  Self-contained: $SELF_CONTAINED"
+info "  Bundle player: $BUNDLE_PLAYER"
 info "  Version: $APP_VERSION"
 
 # Validate runtime
@@ -107,11 +111,11 @@ PUBLISH_ARGS=(
     "-o" "$OUTPUT_DIR/cli"
     "/p:PublishSingleFile=true"
     "/p:IncludeNativeLibrariesForSelfExtract=true"
-    "/p:EnableCompressionInSingleFile=true"
 )
 
 if [ "$SELF_CONTAINED" = "true" ]; then
     PUBLISH_ARGS+=("--self-contained" "true")
+    PUBLISH_ARGS+=("/p:EnableCompressionInSingleFile=true")
 else
     PUBLISH_ARGS+=("--self-contained" "false")
 fi
@@ -130,10 +134,15 @@ else
     exit 1
 fi
 
-# Publish bundled player for watch-together sync.
+# Publish bundled Avalonia player for watch-together sync.
 PLAYER_PROJ="$REPO_ROOT/Koware.Player/Koware.Player.csproj"
-if [ -f "$PLAYER_PROJ" ]; then
-    info "Publishing Koware.Player..."
+if [ "$BUNDLE_PLAYER" = "true" ]; then
+    if [ ! -f "$PLAYER_PROJ" ]; then
+        err "Koware.Player project not found at $PLAYER_PROJ"
+        exit 1
+    fi
+
+    info "Publishing Koware.Player (Avalonia)..."
     PLAYER_ARGS=(
         "publish" "$PLAYER_PROJ"
         "-c" "$CONFIGURATION"
@@ -148,16 +157,17 @@ if [ -f "$PLAYER_PROJ" ]; then
     fi
 
     echo "dotnet ${PLAYER_ARGS[*]}"
-    if dotnet "${PLAYER_ARGS[@]}"; then
-        if [ -f "$OUTPUT_DIR/player/Koware.Player" ]; then
-            chmod +x "$OUTPUT_DIR/player/Koware.Player"
-            success "Player executable ready: $OUTPUT_DIR/player/Koware.Player"
-        else
-            warn "Koware.Player publish completed, but executable was not found"
-        fi
-    else
-        warn "Koware.Player publish failed; continuing with CLI-only package"
+    dotnet "${PLAYER_ARGS[@]}"
+
+    if [ ! -f "$OUTPUT_DIR/player/Koware.Player" ]; then
+        err "Koware.Player publish completed, but executable was not found at $OUTPUT_DIR/player/Koware.Player"
+        exit 1
     fi
+
+    chmod +x "$OUTPUT_DIR/player/Koware.Player"
+    success "Player executable ready: $OUTPUT_DIR/player/Koware.Player"
+else
+    warn "Skipping bundled Avalonia player; watch-together sync will not work from this package"
 fi
 
 # Create staging directory for distribution
@@ -171,6 +181,9 @@ if [ -f "$OUTPUT_DIR/player/Koware.Player" ]; then
     mkdir -p "$STAGING/koware/player"
     cp -R "$OUTPUT_DIR/player/"* "$STAGING/koware/player/"
     chmod +x "$STAGING/koware/player/Koware.Player" 2>/dev/null || true
+elif [ "$BUNDLE_PLAYER" = "true" ]; then
+    err "Bundled player is required but was not found in $OUTPUT_DIR/player"
+    exit 1
 fi
 
 # Create install script for the package
@@ -189,6 +202,7 @@ BIN_DIR="$HOME/.local/bin"
 info() { echo -e "\033[36m[INFO]\033[0m $1"; }
 success() { echo -e "\033[32m[OK  ]\033[0m $1"; }
 warn() { echo -e "\033[33m[WARN]\033[0m $1"; }
+err() { echo -e "\033[31m[ERR ]\033[0m $1"; }
 
 get_shell_config_file() {
     local shell_name
@@ -254,6 +268,28 @@ ensure_path_configured() {
     success "Added $BIN_DIR to PATH in $config_file"
 }
 
+libvlc_available() {
+    if command -v vlc &> /dev/null; then
+        return 0
+    fi
+
+    if command -v ldconfig &> /dev/null && ldconfig -p 2>/dev/null | grep -q "libvlc\\.so"; then
+        return 0
+    fi
+
+    find /usr/lib /usr/local/lib -name "libvlc.so*" -print -quit 2>/dev/null | grep -q .
+}
+
+warn_if_libvlc_missing() {
+    if [ -x "$INSTALL_DIR/player/Koware.Player" ] && ! libvlc_available; then
+        warn "Bundled Koware.Player was installed, but native LibVLC was not detected."
+        echo "Install VLC runtime libraries before using the bundled player:"
+        echo ""
+        echo "  sudo apt update && sudo apt install -y vlc libvlc5 vlc-plugin-base"
+        echo ""
+    fi
+}
+
 echo ""
 echo "╔══════════════════════════════════════╗"
 echo "║       Koware Linux Installer         ║"
@@ -298,6 +334,11 @@ if [ -f "$SCRIPT_DIR/player/Koware.Player" ]; then
     mkdir -p "$INSTALL_DIR/player"
     cp -R "$SCRIPT_DIR/player/"* "$INSTALL_DIR/player/"
     chmod +x "$INSTALL_DIR/player/Koware.Player" 2>/dev/null || true
+elif [ "${KOWARE_REQUIRE_PLAYER:-true}" = "true" ]; then
+    err "Bundled player missing from package. Watch-together sync requires Koware.Player."
+    exit 1
+else
+    warn "Bundled player missing from package; watch-together sync will not work"
 fi
 
 # Create symlink in bin directory
@@ -350,6 +391,7 @@ fi
 echo "  Symlink:      $BIN_DIR/koware"
 echo "  Config:       $CONFIG_DIR/"
 echo ""
+warn_if_libvlc_missing
 echo "Get started:"
 echo "  koware --help              Show help"
 echo "  koware provider autoconfig Configure providers"
@@ -542,10 +584,15 @@ Section: video
 Priority: optional
 Architecture: $ARCH
 Maintainer: $APP_MAINTAINER
+EOF
+        if [ -f "$OUTPUT_DIR/player/Koware.Player" ]; then
+            echo "Depends: libvlc5, vlc-plugin-base" >> "$DEB_ROOT/DEBIAN/control"
+        fi
+        cat >> "$DEB_ROOT/DEBIAN/control" << EOF
 Description: $APP_DESCRIPTION
  Koware is a standalone, console-first link/stream aggregator that helps
  you search for anime/manga and open streams in a video player from your
- terminal. It requires no external dependencies.
+ terminal. The bundled Linux player uses LibVLC for playback.
 Homepage: https://github.com/S1mplector/Koware
 EOF
 
@@ -596,6 +643,11 @@ if [ "$CREATE_APPIMAGE" = "true" ]; then
         # Copy executable
         cp "$OUTPUT_DIR/cli/koware" "$APPDIR/usr/bin/"
         [ -f "$OUTPUT_DIR/cli/appsettings.json" ] && cp "$OUTPUT_DIR/cli/appsettings.json" "$APPDIR/usr/bin/"
+        if [ -f "$OUTPUT_DIR/player/Koware.Player" ]; then
+            mkdir -p "$APPDIR/usr/bin/player"
+            cp -R "$OUTPUT_DIR/player/"* "$APPDIR/usr/bin/player/"
+            chmod +x "$APPDIR/usr/bin/player/Koware.Player" 2>/dev/null || true
+        fi
         
         # Desktop file
         cp "$STAGING/koware/koware.desktop" "$APPDIR/"

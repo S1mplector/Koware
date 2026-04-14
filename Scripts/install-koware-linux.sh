@@ -12,6 +12,7 @@ GITHUB_REPO="Koware"
 INSTALL_DIR="${KOWARE_INSTALL_DIR:-$HOME/.local/share/koware}"
 BIN_DIR="${KOWARE_BIN_DIR:-$HOME/.local/bin}"
 CONFIG_DIR="$HOME/.config/koware"
+REQUIRE_PLAYER="${KOWARE_REQUIRE_PLAYER:-true}"
 
 # Colors
 RED='\033[0;31m'
@@ -78,6 +79,28 @@ check_requirements() {
         err "Missing required tools: ${missing[*]}"
         echo "Please install them and try again."
         exit 1
+    fi
+}
+
+libvlc_available() {
+    if command -v vlc &> /dev/null; then
+        return 0
+    fi
+
+    if command -v ldconfig &> /dev/null && ldconfig -p 2>/dev/null | grep -q "libvlc\\.so"; then
+        return 0
+    fi
+
+    find /usr/lib /usr/local/lib -name "libvlc.so*" -print -quit 2>/dev/null | grep -q .
+}
+
+warn_if_libvlc_missing() {
+    if [ -x "$INSTALL_DIR/player/Koware.Player" ] && ! libvlc_available; then
+        warn "Bundled Koware.Player was installed, but native LibVLC was not detected."
+        echo "Install VLC runtime libraries before using the bundled player:"
+        echo ""
+        echo "  sudo apt update && sudo apt install -y vlc libvlc5 vlc-plugin-base"
+        echo ""
     fi
 }
 
@@ -218,6 +241,9 @@ install_from_source() {
                 mkdir -p "$INSTALL_DIR/player"
                 cp -R "$tmp_dir/output/player/"* "$INSTALL_DIR/player/"
                 chmod +x "$INSTALL_DIR/player/Koware.Player" 2>/dev/null || true
+            elif [ "$REQUIRE_PLAYER" = "true" ]; then
+                err "Bundled Avalonia player was not produced by the Linux publish step."
+                exit 1
             fi
         fi
     else
@@ -233,6 +259,21 @@ install_from_source() {
         cp "$tmp_dir/output/Koware.Cli" "$INSTALL_DIR/koware"
         chmod +x "$INSTALL_DIR/koware"
         [ -f "$tmp_dir/output/appsettings.json" ] && cp "$tmp_dir/output/appsettings.json" "$INSTALL_DIR/"
+
+        dotnet publish Koware.Player/Koware.Player.csproj \
+            -c Release \
+            -r "linux-$(detect_arch)" \
+            -o "$tmp_dir/player-output" \
+            --self-contained true
+
+        if [ -f "$tmp_dir/player-output/Koware.Player" ]; then
+            mkdir -p "$INSTALL_DIR/player"
+            cp -R "$tmp_dir/player-output/"* "$INSTALL_DIR/player/"
+            chmod +x "$INSTALL_DIR/player/Koware.Player" 2>/dev/null || true
+        elif [ "$REQUIRE_PLAYER" = "true" ]; then
+            err "Bundled Avalonia player was not produced by the manual source build."
+            exit 1
+        fi
     fi
 }
 
@@ -285,6 +326,12 @@ install_from_binary() {
         cp -R "$(dirname "$player_exe")/"* "$INSTALL_DIR/player/"
         chmod +x "$INSTALL_DIR/player/Koware.Player" 2>/dev/null || true
         info "Installed bundled player to $INSTALL_DIR/player"
+    elif [ "$REQUIRE_PLAYER" = "true" ]; then
+        err "Bundled Avalonia player was not found in the release archive."
+        echo "This package cannot support watch-together sync. Set KOWARE_REQUIRE_PLAYER=false only if you want a CLI-only install."
+        exit 1
+    else
+        warn "Bundled player was not found; watch-together sync will not work"
     fi
     
     success "Installed koware to $INSTALL_DIR"
@@ -449,6 +496,11 @@ EOF
 # Verify installation
 verify_installation() {
     if [ -x "$INSTALL_DIR/koware" ]; then
+        if [ "$REQUIRE_PLAYER" = "true" ] && [ ! -x "$INSTALL_DIR/player/Koware.Player" ]; then
+            err "Installation verification failed: bundled player missing at $INSTALL_DIR/player/Koware.Player"
+            return 1
+        fi
+
         local version=$("$INSTALL_DIR/koware" --version 2>/dev/null || echo "unknown")
         success "Koware installed successfully!"
         echo ""
@@ -518,6 +570,7 @@ main() {
                 echo "Environment variables:"
                 echo "  KOWARE_INSTALL_DIR  Installation directory (default: ~/.local/share/koware)"
                 echo "  KOWARE_BIN_DIR      Binary directory (default: ~/.local/bin)"
+                echo "  KOWARE_REQUIRE_PLAYER=false  Allow installing CLI-only archives"
                 echo "  KOWARE_SKIP_PATH_UPDATE=true  Do not edit shell startup files"
                 exit 0
                 ;;
@@ -550,6 +603,7 @@ main() {
     create_desktop_entry
     create_uninstall_script
     verify_installation
+    warn_if_libvlc_missing
     print_instructions
 }
 

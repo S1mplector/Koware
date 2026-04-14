@@ -10185,7 +10185,9 @@ static PlayerResolution ResolvePlayerExecutable(PlayerOptions options)
             "dragon",         // KDE video player
             "parole",         // Xfce video player
             Path.Combine(homeDir, ".local", "share", "koware", "Koware.Player"),
+            Path.Combine(homeDir, ".local", "share", "koware", "player", "Koware.Player"),
             Path.Combine(AppContext.BaseDirectory, "Koware.Player"),
+            Path.Combine(AppContext.BaseDirectory, "player", "Koware.Player"),
             "/opt/koware/player/Koware.Player",
             "/usr/local/bin/koware/player/Koware.Player"
         });
@@ -10269,6 +10271,7 @@ static PlayerResolution ResolveWatchTogetherPlayerExecutable(PlayerOptions optio
             "/Applications/Koware.app/Contents/Resources/player/Koware.Player",
             "/usr/local/bin/koware/player/Koware.Player",
             Path.Combine(AppContext.BaseDirectory, "Koware.Player"),
+            Path.Combine(AppContext.BaseDirectory, "player", "Koware.Player"),
             Path.Combine(homeDir, ".local", "share", "koware", "Koware.Player"),
             Path.Combine(homeDir, ".local", "share", "koware", "player", "Koware.Player"),
             "Koware.Player"
@@ -10281,6 +10284,7 @@ static PlayerResolution ResolveWatchTogetherPlayerExecutable(PlayerOptions optio
             Path.Combine(homeDir, ".local", "share", "koware", "Koware.Player"),
             Path.Combine(homeDir, ".local", "share", "koware", "player", "Koware.Player"),
             Path.Combine(AppContext.BaseDirectory, "Koware.Player"),
+            Path.Combine(AppContext.BaseDirectory, "player", "Koware.Player"),
             "/opt/koware/player/Koware.Player",
             "/usr/local/bin/koware/player/Koware.Player",
             "Koware.Player"

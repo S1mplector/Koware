@@ -35,7 +35,7 @@ It has a text-based user interface but behaves like a regular CLI. You run a com
 
 - **Search for anime/manga** by title
 - **Browse episodes/chapters** for a selected show
-- **Open streams** in IINA, mpv, VLC, or the bundled Koware player (Windows)
+- **Open streams** in IINA, mpv, VLC, or the bundled Koware player (Windows and Linux)
 - **Read manga** in the bundled reader (Windows and macOS)
 - **Keep watch history** locally in a small SQLite database
 
@@ -185,6 +185,7 @@ The build output will be in `publish/`. Run the included `install.sh` to complet
 | Item | Path |
 |------|------|
 | Executable | `~/.local/share/koware/koware` |
+| Bundled player | `~/.local/share/koware/player/Koware.Player` |
 | Symlink | `~/.local/bin/koware` |
 | Config | `~/.config/koware/appsettings.user.json` |
 | History DB | `~/.config/koware/history.db` |
@@ -358,7 +359,9 @@ koware watch-together relay --bind http://127.0.0.1:8765/
 
 Set `KOWARE_WATCH_RELAY` to change the default relay without passing `--relay`.
 
-Live sync requires the bundled Koware player. External players can still be launched by normal `koware watch`, but they do not expose the pause/seek control bridge needed for synced rooms.
+Live sync requires the bundled Koware player. On Linux this is the Avalonia `Koware.Player` binary installed at `~/.local/share/koware/player/Koware.Player` for user installs and `/opt/koware/player/Koware.Player` for system `.deb` installs. External players can still be launched by normal `koware watch`, but they do not expose the pause/seek control bridge needed for synced rooms.
+
+On Linux, the bundled player uses native LibVLC for playback. The `.deb` package declares this dependency; tarball/source installs will warn if `vlc`/`libvlc` is missing.
 
 For more information about available commands and options, run:
 
