@@ -7202,6 +7202,17 @@ static async Task<int> HandleWatchTogetherCreateAsync(
         return 1;
     }
 
+    var relayProbeSession = new WatchTogetherSessionOptions(
+        relayUri,
+        options.RoomCode,
+        NewClientId(),
+        options.DisplayName,
+        WatchTogetherRoles.System);
+    if (!await CheckWatchTogetherRelayAsync(relayProbeSession, logger, "connect to", cancellationToken))
+    {
+        return 1;
+    }
+
     var orchestrator = services.GetRequiredService<ScrapeOrchestrator>();
     var plan = await MaybeSelectMatchAsync(orchestrator, options.Plan, logger, cancellationToken);
     plan = await MaybeSelectEpisodeAsync(orchestrator, plan, logger, cancellationToken);
@@ -7285,7 +7296,7 @@ static async Task<int> HandleWatchTogetherJoinAsync(
         catch (Exception ex)
         {
             logger.LogError(ex, "Could not connect to watch-together relay.");
-            WriteColoredLine($"Could not connect to watch-together relay: {ex.Message}", ConsoleColor.Yellow);
+            WriteWatchTogetherRelayFailure("connect to", cliSession.RelayUri, ex);
             return 1;
         }
 
@@ -7584,9 +7595,64 @@ static async Task<bool> PublishWatchTogetherContentAsync(
     catch (Exception ex)
     {
         logger.LogError(ex, "Could not publish watch-together room content.");
-        WriteColoredLine($"Could not publish watch-together room content: {ex.Message}", ConsoleColor.Yellow);
+        WriteWatchTogetherRelayFailure("publish room content to", hostSession.RelayUri, ex);
         return false;
     }
+}
+
+static async Task<bool> CheckWatchTogetherRelayAsync(
+    WatchTogetherSessionOptions session,
+    ILogger logger,
+    string action,
+    CancellationToken cancellationToken)
+{
+    await using var client = new WatchTogetherClient(session);
+
+    try
+    {
+        await client.ConnectAsync(cancellationToken);
+        return true;
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Could not {Action} watch-together relay.", action);
+        WriteWatchTogetherRelayFailure(action, session.RelayUri, ex);
+        return false;
+    }
+}
+
+static void WriteWatchTogetherRelayFailure(string action, Uri relayUri, Exception exception)
+{
+    WriteColoredLine(
+        $"Could not {action} watch-together relay {relayUri}: {DescribeExceptionChain(exception)}",
+        ConsoleColor.Yellow);
+
+    if (relayUri == PublicWatchTogetherRelayUri())
+    {
+        Console.WriteLine("The default public relay is not reachable from this machine.");
+        Console.WriteLine("Deploy relay.koware.app, set KOWARE_WATCH_RELAY, or pass --relay <ws-url>.");
+        Console.WriteLine("For local testing: koware party relay --bind http://127.0.0.1:8765/");
+    }
+    else
+    {
+        Console.WriteLine("Check that the relay is running and that --relay / KOWARE_WATCH_RELAY points to the reachable WebSocket URL.");
+    }
+}
+
+static string DescribeExceptionChain(Exception exception)
+{
+    var messages = new List<string>();
+
+    for (Exception? current = exception; current is not null; current = current.InnerException)
+    {
+        if (!string.IsNullOrWhiteSpace(current.Message) &&
+            !messages.Contains(current.Message, StringComparer.Ordinal))
+        {
+            messages.Add(current.Message);
+        }
+    }
+
+    return messages.Count == 0 ? exception.GetType().Name : string.Join(" -> ", messages);
 }
 
 static async Task<WatchTogetherContent?> WaitForWatchTogetherContentAsync(
