@@ -69,69 +69,35 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
 
     public async Task<IReadOnlyCollection<Manga>> SearchAsync(string query, SearchFilters filters, CancellationToken cancellationToken = default)
     {
-        var allResults = new List<Manga>();
-        var tasks = new List<Task<IReadOnlyCollection<Manga>>>();
-
-        foreach (var provider in _orderedBuiltInProviders)
-        {
-            tasks.Add(SafeSearchAsync(provider.Catalog, provider.Name, provider.Slug, query, filters, cancellationToken));
-        }
-
-        var activeConfig = await _providerStore.GetActiveAsync(ProviderType.Manga, cancellationToken);
-        if (activeConfig is not null && activeConfig.Type is ProviderType.Manga or ProviderType.Both)
-        {
-            var dynamicCatalog = CreateDynamicCatalog(activeConfig);
-            tasks.Add(SafeSearchAsync(dynamicCatalog, activeConfig.Name, activeConfig.Slug, query, filters, cancellationToken));
-        }
-
-        if (tasks.Count == 0)
+        var candidates = await GetProviderCandidatesAsync(cancellationToken);
+        if (candidates.Count == 0)
         {
             return Array.Empty<Manga>();
         }
 
-        var results = await Task.WhenAll(tasks);
-        foreach (var result in results)
-        {
-            allResults.AddRange(result);
-        }
+        var results = await Task.WhenAll(candidates.Select(provider =>
+            SafeSearchAsync(provider, query, filters, cancellationToken)));
 
-        return allResults;
+        return RankMangaResults(results.SelectMany(r => r), query);
     }
 
     public async Task<IReadOnlyCollection<Manga>> BrowsePopularAsync(SearchFilters? filters = null, CancellationToken cancellationToken = default)
     {
-        var allResults = new List<Manga>();
-        var tasks = new List<Task<IReadOnlyCollection<Manga>>>();
-
-        foreach (var provider in _orderedBuiltInProviders)
-        {
-            tasks.Add(SafeBrowseAsync(provider.Catalog, provider.Name, provider.Slug, filters, cancellationToken));
-        }
-
-        var activeConfig = await _providerStore.GetActiveAsync(ProviderType.Manga, cancellationToken);
-        if (activeConfig is not null && activeConfig.Type is ProviderType.Manga or ProviderType.Both)
-        {
-            var dynamicCatalog = CreateDynamicCatalog(activeConfig);
-            tasks.Add(SafeBrowseAsync(dynamicCatalog, activeConfig.Name, activeConfig.Slug, filters, cancellationToken));
-        }
-
-        if (tasks.Count == 0)
+        var candidates = await GetProviderCandidatesAsync(cancellationToken);
+        if (candidates.Count == 0)
         {
             return Array.Empty<Manga>();
         }
 
-        var results = await Task.WhenAll(tasks);
-        foreach (var result in results)
-        {
-            allResults.AddRange(result);
-        }
+        var results = await Task.WhenAll(candidates.Select(provider =>
+            SafeBrowseAsync(provider, filters, cancellationToken)));
 
-        return allResults;
+        return RankMangaResults(results.SelectMany(r => r), query: string.Empty);
     }
 
     public async Task<IReadOnlyCollection<Chapter>> GetChaptersAsync(Manga manga, CancellationToken cancellationToken = default)
     {
-        if (TryExtractProviderSlug(manga.Id.Value, out var providerSlug))
+        if (ProviderAggregationHelpers.TryExtractProviderSlug(manga.Id.Value, out var providerSlug))
         {
             if (_builtInProviders.TryGetValue(providerSlug, out var builtInProvider))
             {
@@ -148,17 +114,13 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
             }
         }
 
-        var fallbackProvider = GetFallbackBuiltInProvider();
-        if (fallbackProvider is not null)
+        foreach (var provider in await GetProviderCandidatesAsync(cancellationToken))
         {
-            return await SafeGetChaptersAsync(fallbackProvider.Catalog, fallbackProvider.Name, fallbackProvider.Slug, manga, cancellationToken);
-        }
-
-        var activeDynamic = await _providerStore.GetActiveAsync(ProviderType.Manga, cancellationToken);
-        if (activeDynamic is not null && activeDynamic.Type is ProviderType.Manga or ProviderType.Both)
-        {
-            var dynamicCatalog = CreateDynamicCatalog(activeDynamic);
-            return await SafeGetChaptersAsync(dynamicCatalog, activeDynamic.Name, activeDynamic.Slug, manga, cancellationToken);
+            var chapters = await SafeGetChaptersAsync(provider.Catalog, provider.Name, provider.Slug, manga, cancellationToken);
+            if (chapters.Count > 0)
+            {
+                return chapters;
+            }
         }
 
         return Array.Empty<Chapter>();
@@ -166,12 +128,12 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
 
     public async Task<IReadOnlyCollection<ChapterPage>> GetPagesAsync(Chapter chapter, CancellationToken cancellationToken = default)
     {
-        if (TryExtractProviderSlug(chapter.Id.Value, out var providerSlug))
+        if (ProviderAggregationHelpers.TryExtractProviderSlug(chapter.Id.Value, out var providerSlug))
         {
             if (_builtInProviders.TryGetValue(providerSlug, out var builtInProvider))
             {
                 var strippedChapter = StripProviderPrefix(chapter, providerSlug);
-                return await SafeGetPagesAsync(builtInProvider.Catalog, builtInProvider.Name, strippedChapter, cancellationToken);
+                return await SafeGetPagesAsync(builtInProvider.Catalog, builtInProvider.Name, builtInProvider.Slug, strippedChapter, cancellationToken);
             }
 
             var dynamicConfig = await _providerStore.GetAsync(providerSlug, cancellationToken);
@@ -179,34 +141,75 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
             {
                 var dynamicCatalog = CreateDynamicCatalog(dynamicConfig);
                 var strippedChapter = StripProviderPrefix(chapter, providerSlug);
-                return await SafeGetPagesAsync(dynamicCatalog, dynamicConfig.Name, strippedChapter, cancellationToken);
+                return await SafeGetPagesAsync(dynamicCatalog, dynamicConfig.Name, providerSlug, strippedChapter, cancellationToken);
             }
         }
 
-        var fallbackProvider = GetFallbackBuiltInProvider();
-        if (fallbackProvider is not null)
+        foreach (var provider in await GetProviderCandidatesAsync(cancellationToken))
         {
-            return await SafeGetPagesAsync(fallbackProvider.Catalog, fallbackProvider.Name, chapter, cancellationToken);
-        }
-
-        var activeDynamic = await _providerStore.GetActiveAsync(ProviderType.Manga, cancellationToken);
-        if (activeDynamic is not null && activeDynamic.Type is ProviderType.Manga or ProviderType.Both)
-        {
-            var dynamicCatalog = CreateDynamicCatalog(activeDynamic);
-            return await SafeGetPagesAsync(dynamicCatalog, activeDynamic.Name, chapter, cancellationToken);
+            var pages = await SafeGetPagesAsync(provider.Catalog, provider.Name, provider.Slug, chapter, cancellationToken);
+            if (pages.Count > 0)
+            {
+                return pages;
+            }
         }
 
         return Array.Empty<ChapterPage>();
     }
 
-    private BuiltInMangaProvider? GetFallbackBuiltInProvider()
+    private async Task<IReadOnlyList<MangaProviderCandidate>> GetProviderCandidatesAsync(CancellationToken cancellationToken)
     {
-        if (_builtInProviders.TryGetValue("allmanga", out var allManga))
+        var candidates = new List<MangaProviderCandidate>();
+        var rank = 0;
+
+        foreach (var provider in _orderedBuiltInProviders)
         {
-            return allManga;
+            candidates.Add(new MangaProviderCandidate(provider.Slug, provider.Name, provider.Catalog, rank++));
         }
 
-        return _orderedBuiltInProviders.FirstOrDefault();
+        var dynamicConfigs = await GetDynamicProviderConfigsAsync(cancellationToken);
+        foreach (var config in dynamicConfigs)
+        {
+            candidates.Add(new MangaProviderCandidate(
+                ProviderAggregationHelpers.NormalizeSlug(config.Slug),
+                string.IsNullOrWhiteSpace(config.Name) ? config.Slug : config.Name,
+                CreateDynamicCatalog(config),
+                rank++));
+        }
+
+        return candidates;
+    }
+
+    private async Task<IReadOnlyList<DynamicProviderConfig>> GetDynamicProviderConfigsAsync(CancellationToken cancellationToken)
+    {
+        var bySlug = new Dictionary<string, (DynamicProviderConfig Config, bool IsActive)>(StringComparer.OrdinalIgnoreCase);
+        var providers = await _providerStore.ListAsync(cancellationToken);
+
+        foreach (var provider in providers)
+        {
+            if (provider.Type is not (ProviderType.Manga or ProviderType.Both))
+            {
+                continue;
+            }
+
+            var config = await _providerStore.GetAsync(provider.Slug, cancellationToken);
+            if (config is not null && config.Type is (ProviderType.Manga or ProviderType.Both))
+            {
+                bySlug[ProviderAggregationHelpers.NormalizeSlug(config.Slug)] = (config, provider.IsActive);
+            }
+        }
+
+        var activeConfig = await _providerStore.GetActiveAsync(ProviderType.Manga, cancellationToken);
+        if (activeConfig is not null && activeConfig.Type is (ProviderType.Manga or ProviderType.Both))
+        {
+            bySlug[ProviderAggregationHelpers.NormalizeSlug(activeConfig.Slug)] = (activeConfig, true);
+        }
+
+        return bySlug.Values
+            .OrderByDescending(p => p.IsActive)
+            .ThenBy(p => p.Config.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(p => p.Config)
+            .ToArray();
     }
 
     private DynamicMangaCatalog CreateDynamicCatalog(DynamicProviderConfig config)
@@ -218,60 +221,60 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
             _loggerFactory.CreateLogger<DynamicMangaCatalog>());
     }
 
-    private async Task<IReadOnlyCollection<Manga>> SafeSearchAsync(
-        IMangaCatalog catalog,
-        string providerName,
-        string providerSlug,
+    private async Task<IReadOnlyCollection<ProviderResult<Manga>>> SafeSearchAsync(
+        MangaProviderCandidate provider,
         string query,
         SearchFilters filters,
         CancellationToken cancellationToken)
     {
         try
         {
-            var results = await catalog.SearchAsync(query, filters, cancellationToken);
-            return PrefixMangaIds(results, providerSlug);
+            var results = await provider.Catalog.SearchAsync(query, filters, cancellationToken);
+            return PrefixMangaIds(results, provider.Slug)
+                .Select((manga, index) => new ProviderResult<Manga>(manga, provider.Rank, index))
+                .ToArray();
         }
         catch (DynamicProviderRuntimeException ex)
         {
             _logger.LogWarning(
                 "Search blocked for provider {Provider}: {Kind} - {Message}",
-                providerName,
+                provider.Name,
                 ex.Kind,
                 ex.Message);
-            return Array.Empty<Manga>();
+            return Array.Empty<ProviderResult<Manga>>();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Search failed for provider {Provider}, continuing with other providers", providerName);
-            return Array.Empty<Manga>();
+            _logger.LogWarning(ex, "Search failed for provider {Provider}, continuing with other providers", provider.Name);
+            return Array.Empty<ProviderResult<Manga>>();
         }
     }
 
-    private async Task<IReadOnlyCollection<Manga>> SafeBrowseAsync(
-        IMangaCatalog catalog,
-        string providerName,
-        string providerSlug,
+    private async Task<IReadOnlyCollection<ProviderResult<Manga>>> SafeBrowseAsync(
+        MangaProviderCandidate provider,
         SearchFilters? filters,
         CancellationToken cancellationToken)
     {
         try
         {
-            var results = await catalog.BrowsePopularAsync(filters, cancellationToken);
-            return PrefixMangaIds(results, providerSlug);
+            var results = await provider.Catalog.BrowsePopularAsync(filters, cancellationToken);
+            return PrefixMangaIds(results, provider.Slug)
+                .Select((manga, index) => new ProviderResult<Manga>(manga, provider.Rank, index))
+                .ToArray();
         }
         catch (DynamicProviderRuntimeException ex)
         {
             _logger.LogWarning(
                 "Browse blocked for provider {Provider}: {Kind} - {Message}",
-                providerName,
+                provider.Name,
                 ex.Kind,
                 ex.Message);
-            return Array.Empty<Manga>();
+            return Array.Empty<ProviderResult<Manga>>();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Browse failed for provider {Provider}, continuing with other providers", providerName);
-            return Array.Empty<Manga>();
+            _logger.LogWarning(ex, "Browse failed for provider {Provider}, continuing with other providers", provider.Name);
+            return Array.Empty<ProviderResult<Manga>>();
         }
     }
 
@@ -296,7 +299,7 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
                 ex.Message);
             return Array.Empty<Chapter>();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Chapter fetch failed for provider {Provider}", providerName);
             return Array.Empty<Chapter>();
@@ -306,12 +309,14 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
     private async Task<IReadOnlyCollection<ChapterPage>> SafeGetPagesAsync(
         IMangaCatalog catalog,
         string providerName,
+        string providerSlug,
         Chapter chapter,
         CancellationToken cancellationToken)
     {
         try
         {
-            return await catalog.GetPagesAsync(chapter, cancellationToken);
+            var pages = await catalog.GetPagesAsync(chapter, cancellationToken);
+            return TagPages(pages, providerSlug);
         }
         catch (DynamicProviderRuntimeException ex)
         {
@@ -322,17 +327,29 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
                 ex.Message);
             return Array.Empty<ChapterPage>();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Page fetch failed for provider {Provider}", providerName);
             return Array.Empty<ChapterPage>();
         }
     }
 
+    private static IReadOnlyCollection<Manga> RankMangaResults(IEnumerable<ProviderResult<Manga>> results, string query)
+    {
+        return results
+            .GroupBy(r => r.Item.Id.Value, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderBy(r => r.ProviderRank).ThenBy(r => r.ResultIndex).First())
+            .OrderByDescending(r => ProviderAggregationHelpers.ScoreTitle(query, r.Item.Title))
+            .ThenBy(r => r.ProviderRank)
+            .ThenBy(r => r.ResultIndex)
+            .Select(r => r.Item)
+            .ToArray();
+    }
+
     private static IReadOnlyCollection<Manga> PrefixMangaIds(IReadOnlyCollection<Manga> results, string providerSlug)
     {
         return results.Select(manga => new Manga(
-            new MangaId(PrefixId(providerSlug, manga.Id.Value)),
+            new MangaId(ProviderAggregationHelpers.PrefixId(providerSlug, manga.Id.Value)),
             manga.Title,
             manga.Synopsis,
             manga.CoverImage,
@@ -343,7 +360,7 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
     private static IReadOnlyCollection<Chapter> PrefixChapterIds(IReadOnlyCollection<Chapter> chapters, string providerSlug)
     {
         return chapters.Select(chapter => new Chapter(
-            new ChapterId(PrefixId(providerSlug, chapter.Id.Value)),
+            new ChapterId(ProviderAggregationHelpers.PrefixId(providerSlug, chapter.Id.Value)),
             chapter.Title,
             chapter.Number,
             chapter.PageUrl)).ToArray();
@@ -352,7 +369,7 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
     private static Manga StripProviderPrefix(Manga manga, string providerSlug)
     {
         return new Manga(
-            new MangaId(RemovePrefix(providerSlug, manga.Id.Value)),
+            new MangaId(ProviderAggregationHelpers.RemovePrefix(providerSlug, manga.Id.Value)),
             manga.Title,
             manga.Synopsis,
             manga.CoverImage,
@@ -363,56 +380,21 @@ public sealed class AggregateMangaCatalog : IMangaCatalog
     private static Chapter StripProviderPrefix(Chapter chapter, string providerSlug)
     {
         return new Chapter(
-            new ChapterId(RemovePrefix(providerSlug, chapter.Id.Value)),
+            new ChapterId(ProviderAggregationHelpers.RemovePrefix(providerSlug, chapter.Id.Value)),
             chapter.Title,
             chapter.Number,
             chapter.PageUrl);
     }
 
-    private static string PrefixId(string providerSlug, string id)
+    private static IReadOnlyCollection<ChapterPage> TagPages(IReadOnlyCollection<ChapterPage> pages, string providerSlug)
     {
-        if (string.IsNullOrWhiteSpace(providerSlug) || string.IsNullOrWhiteSpace(id))
-        {
-            return id;
-        }
-
-        return id.StartsWith(providerSlug + ":", StringComparison.OrdinalIgnoreCase)
-            ? id
-            : $"{providerSlug}:{id}";
-    }
-
-    private static string RemovePrefix(string providerSlug, string id)
-    {
-        if (string.IsNullOrWhiteSpace(providerSlug) || string.IsNullOrWhiteSpace(id))
-        {
-            return id;
-        }
-
-        var prefix = providerSlug + ":";
-        return id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            ? id[prefix.Length..]
-            : id;
-    }
-
-    private static bool TryExtractProviderSlug(string id, out string providerSlug)
-    {
-        providerSlug = string.Empty;
-
-        var colonIndex = id.IndexOf(':');
-        if (colonIndex <= 0)
-        {
-            return false;
-        }
-
-        var possibleSlug = id[..colonIndex];
-        if (possibleSlug.All(char.IsDigit))
-        {
-            return false;
-        }
-
-        providerSlug = possibleSlug.ToLowerInvariant();
-        return true;
+        _ = providerSlug;
+        return pages;
     }
 
     public sealed record BuiltInMangaProvider(string Slug, string Name, IMangaCatalog Catalog);
+
+    private sealed record MangaProviderCandidate(string Slug, string Name, IMangaCatalog Catalog, int Rank);
+
+    private sealed record ProviderResult<T>(T Item, int ProviderRank, int ResultIndex);
 }
