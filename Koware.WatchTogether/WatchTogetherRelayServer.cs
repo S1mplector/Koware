@@ -169,6 +169,11 @@ public sealed class WatchTogetherRelayServer : IAsyncDisposable
                 continue;
             }
 
+            if (!CanRelayMessage(client, message))
+            {
+                continue;
+            }
+
             var enriched = message with
             {
                 RoomCode = room.RoomCode,
@@ -179,6 +184,22 @@ public sealed class WatchTogetherRelayServer : IAsyncDisposable
 
             await room.BroadcastAsync(enriched, excludeClientId: client.ClientId, cancellationToken);
         }
+    }
+
+    private static bool CanRelayMessage(RelayClient client, WatchTogetherMessage message)
+    {
+        if (message.Type.Equals(WatchTogetherMessageTypes.State, StringComparison.OrdinalIgnoreCase))
+        {
+            return client.Role.Equals(WatchTogetherRoles.Host, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (message.Type.Equals(WatchTogetherMessageTypes.Content, StringComparison.OrdinalIgnoreCase))
+        {
+            return client.Role.Equals(WatchTogetherRoles.Host, StringComparison.OrdinalIgnoreCase) ||
+                   client.Role.Equals(WatchTogetherRoles.System, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return true;
     }
 
     private static string? TryGetRoomCode(string? path)

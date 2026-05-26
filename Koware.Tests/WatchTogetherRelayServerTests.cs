@@ -275,6 +275,98 @@ public sealed class WatchTogetherRelayServerTests
     }
 
     [Fact]
+    public async Task Relay_OnlyHostBroadcastsPlaybackStateToJoiners()
+    {
+        var listenUri = NewLoopbackListenUri();
+        await using var relay = new WatchTogetherRelayServer(listenUri);
+        await relay.StartAsync(CancellationToken.None);
+
+        await using var host = new WatchTogetherClient(NewSession(relay.GetRelayUri(), "ROOM-MASTER", "host", "Host", WatchTogetherRoles.Host));
+        await using var guestA = new WatchTogetherClient(NewSession(relay.GetRelayUri(), "ROOM-MASTER", "guest-a", "Guest A", WatchTogetherRoles.Guest));
+        await using var guestB = new WatchTogetherClient(NewSession(relay.GetRelayUri(), "ROOM-MASTER", "guest-b", "Guest B", WatchTogetherRoles.Guest));
+
+        await host.ConnectAsync(CancellationToken.None);
+        await guestA.ConnectAsync(CancellationToken.None);
+        await guestB.ConnectAsync(CancellationToken.None);
+        await DrainWelcomeAsync(host, CancellationToken.None);
+        await DrainWelcomeAsync(guestA, CancellationToken.None);
+        await DrainWelcomeAsync(guestB, CancellationToken.None);
+
+        await guestA.SendAsync(new WatchTogetherMessage
+        {
+            Type = WatchTogetherMessageTypes.State,
+            State = new WatchTogetherPlaybackState { IsPlaying = true, PositionMs = 999_000 }
+        }, CancellationToken.None);
+
+        using (var shortTimeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(250)))
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ReceiveTypeAsync(guestB, WatchTogetherMessageTypes.State, shortTimeout.Token));
+        }
+
+        await host.SendAsync(new WatchTogetherMessage
+        {
+            Type = WatchTogetherMessageTypes.State,
+            State = new WatchTogetherPlaybackState { IsPlaying = true, PositionMs = 12_345 }
+        }, CancellationToken.None);
+
+        var guestAState = await ReceiveTypeAsync(guestA, WatchTogetherMessageTypes.State, CancellationToken.None);
+
+        await using var lateGuest = new WatchTogetherClient(NewSession(relay.GetRelayUri(), "ROOM-MASTER", "late", "Late Guest", WatchTogetherRoles.Guest));
+        await lateGuest.ConnectAsync(CancellationToken.None);
+        var lateGuestState = await ReceiveTypeAsync(lateGuest, WatchTogetherMessageTypes.State, CancellationToken.None);
+
+        Assert.Equal("host", guestAState.ClientId);
+        Assert.Equal(12_345, guestAState.State!.PositionMs);
+        Assert.Equal("host", lateGuestState.ClientId);
+        Assert.Equal(12_345, lateGuestState.State!.PositionMs);
+    }
+
+    [Fact]
+    public async Task Relay_DoesNotLetGuestsReplaceRoomContent()
+    {
+        var listenUri = NewLoopbackListenUri();
+        await using var relay = new WatchTogetherRelayServer(listenUri);
+        await relay.StartAsync(CancellationToken.None);
+
+        await using var host = new WatchTogetherClient(NewSession(relay.GetRelayUri(), "ROOM-CONTENT-AUTH", "host", "Host", WatchTogetherRoles.Host));
+        await using var guest = new WatchTogetherClient(NewSession(relay.GetRelayUri(), "ROOM-CONTENT-AUTH", "guest", "Guest", WatchTogetherRoles.Guest));
+
+        await host.ConnectAsync(CancellationToken.None);
+        await guest.ConnectAsync(CancellationToken.None);
+        await DrainWelcomeAsync(host, CancellationToken.None);
+        await DrainWelcomeAsync(guest, CancellationToken.None);
+
+        await host.SendAsync(new WatchTogetherMessage
+        {
+            Type = WatchTogetherMessageTypes.Content,
+            Content = new WatchTogetherContent
+            {
+                Title = "Host Episode",
+                StreamUrl = "https://cdn.example.com/host.m3u8"
+            }
+        }, CancellationToken.None);
+
+        await guest.SendAsync(new WatchTogetherMessage
+        {
+            Type = WatchTogetherMessageTypes.Content,
+            Content = new WatchTogetherContent
+            {
+                Title = "Guest Override",
+                StreamUrl = "https://cdn.example.com/guest.m3u8"
+            }
+        }, CancellationToken.None);
+
+        await using var lateGuest = new WatchTogetherClient(NewSession(relay.GetRelayUri(), "ROOM-CONTENT-AUTH", "late", "Late Guest", WatchTogetherRoles.Guest));
+        await lateGuest.ConnectAsync(CancellationToken.None);
+
+        var content = await ReceiveTypeAsync(lateGuest, WatchTogetherMessageTypes.Content, CancellationToken.None);
+
+        Assert.Equal("host", content.ClientId);
+        Assert.Equal("Host Episode", content.Content!.Title);
+        Assert.Equal("https://cdn.example.com/host.m3u8", content.Content.StreamUrl);
+    }
+
+    [Fact]
     public async Task Relay_BroadcastsParticipantJoinToExistingClients()
     {
         var listenUri = NewLoopbackListenUri();
