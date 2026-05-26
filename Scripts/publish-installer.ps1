@@ -36,6 +36,10 @@ if (Test-Path $resolvedOut) {
     Remove-Item -Recurse -Force -LiteralPath $resolvedOut
 }
 New-Item -ItemType Directory -Force -Path $resolvedOut | Out-Null
+$payloadDir = Join-Path $resolvedOut 'payload'
+$payloadDirForMsbuild = $payloadDir.TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
 
 # Publish the installer (this also builds/zips the payloads via MSBuild target)
 Write-Info "Publishing installer -> $resolvedOut"
@@ -44,6 +48,8 @@ $publishArgs = @(
     "-c", $Configuration,
     "-r", $Runtime,
     "-o", $resolvedOut,
+    "/p:KowareBuildPayload=true",
+    "/p:IntermediatePayloadDir=$payloadDirForMsbuild",
     "/p:PublishSingleFile=true",
     "/p:IncludeNativeLibrariesForSelfExtract=true",
     "/p:EnableCompressionInSingleFile=true"
@@ -53,9 +59,7 @@ $logLine = "dotnet " + (($publishArgs | ForEach-Object { if ($_ -match '\\s') { 
 Write-Host $logLine -ForegroundColor DarkGray
 & dotnet @publishArgs
 
-# Locate payload zips created by the installer project target
-$payloadDir = Join-Path $scriptRoot '..\Koware.Installer.Win\payload'
-try { $payloadDir = (Resolve-Path -LiteralPath $payloadDir).Path } catch {}
+# Locate payload zips created by the installer project target.
 $cliZip = Join-Path $payloadDir 'koware-cli.zip'
 $playerZip = Join-Path $payloadDir 'koware-player.zip'
 $readerZip = Join-Path $payloadDir 'koware-reader.zip'

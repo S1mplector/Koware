@@ -74,9 +74,14 @@
         <!-- Header (title bar, auto-hide in fullscreen) -->
         <Border x:Name="HeaderBar"
                 VerticalAlignment="Top"
-                Background="Linear, 0%, 0%, 0%, 100%, #b3000000, Transparent"
                 Padding="16,12"
                 IsHitTestVisible="True">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                    <GradientStop Color="#B3000000" Offset="0" />
+                    <GradientStop Color="Transparent" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
             <TextBlock x:Name="TitleText"
                        Text="Koware Player"
                        FontSize="14"
@@ -187,9 +192,14 @@
         <!-- Bottom Controls Panel -->
         <Border x:Name="ControlsPanel"
                 VerticalAlignment="Bottom"
-                Background="Linear, 0%, 0%, 0%, 100%, Transparent, #cc000000"
                 Padding="16,20,16,16"
                 IsHitTestVisible="True">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                    <GradientStop Color="Transparent" Offset="0" />
+                    <GradientStop Color="#CC000000" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
             <Grid RowDefinitions="Auto,Auto">
                 <!-- Progress Bar -->
                 <Grid Grid.Row="0" Margin="0,0,0,10">
@@ -240,7 +250,7 @@
                             Click="OnRewindClick"
                             ToolTip.Tip="Back 10s (←)">
                         <Viewbox Width="20" Height="20" Stretch="Uniform">
-                            <Path Stroke="#e2e8f0" StrokeThickness="2" Fill="None"
+                            <Path Stroke="#e2e8f0" StrokeThickness="2" Fill="{x:Null}"
                                   Data="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" />
                         </Viewbox>
                     </Button>
@@ -250,7 +260,7 @@
                             Click="OnForwardClick"
                             ToolTip.Tip="Forward 10s (→)">
                         <Viewbox Width="20" Height="20" Stretch="Uniform">
-                            <Path Stroke="#e2e8f0" StrokeThickness="2" Fill="None"
+                            <Path Stroke="#e2e8f0" StrokeThickness="2" Fill="{x:Null}"
                                   Data="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z" />
                         </Viewbox>
                     </Button>

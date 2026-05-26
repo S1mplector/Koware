@@ -39,6 +39,20 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
+      - name: Restore Windows desktop projects
+        if: matrix.os == 'windows-latest'
+        run: |
+          dotnet restore Koware.Player.Win/Koware.Player.Win.csproj
+          dotnet restore Koware.Reader.Win/Koware.Reader.Win.csproj
+          dotnet restore Koware.Installer.Win/Koware.Installer.Win.csproj
+
+      - name: Build Windows desktop projects
+        if: matrix.os == 'windows-latest'
+        run: |
+          dotnet build Koware.Player.Win/Koware.Player.Win.csproj --no-restore --configuration Release
+          dotnet build Koware.Reader.Win/Koware.Reader.Win.csproj --no-restore --configuration Release
+          dotnet build Koware.Installer.Win/Koware.Installer.Win.csproj --no-restore --configuration Release
+
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
 

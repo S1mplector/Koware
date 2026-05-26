@@ -31,10 +31,12 @@ public sealed class InstallerEngine
         var installDir = Path.GetFullPath(options.InstallDir);
         var cliProject = Path.Combine(_repoRoot, "Koware.Cli");
         var playerProject = Path.Combine(_repoRoot, "Koware.Player.Win");
+        var readerProject = Path.Combine(_repoRoot, "Koware.Reader.Win");
+        var browserProject = Path.Combine(_repoRoot, "Koware.Browser");
 
         EnsureDirectory(installDir, options.CleanTarget, progress);
 
-        var embeddedUsed = TryExtractEmbedded("Payload.KowareCli", installDir, progress);
+        var embeddedCliUsed = TryExtractEmbedded("Payload.KowareCli", installDir, progress);
         var embeddedPlayerUsed = false;
         var embeddedReaderUsed = false;
         var embeddedBrowserUsed = false;
@@ -46,20 +48,54 @@ public sealed class InstallerEngine
             embeddedBrowserUsed = TryExtractEmbedded("Payload.KowareBrowser", installDir, progress);
         }
 
-        if (!embeddedUsed && options.Publish)
+        if (!embeddedCliUsed)
         {
-            await PublishAsync("Koware CLI", cliProject, installDir, progress, cancellationToken);
-            if (options.IncludePlayer && Directory.Exists(playerProject))
+            if (options.Publish)
             {
-                await PublishAsync("Koware Player", playerProject, installDir, progress, cancellationToken);
+                await PublishAsync("Koware CLI", cliProject, installDir, progress, cancellationToken);
+            }
+            else
+            {
+                CopyLatestBuild(cliProject, installDir, progress);
             }
         }
-        else if (!embeddedUsed)
+
+        if (options.IncludePlayer)
         {
-            CopyLatestBuild(cliProject, installDir, progress);
-            if (options.IncludePlayer && Directory.Exists(playerProject))
+            if (!embeddedPlayerUsed && Directory.Exists(playerProject))
             {
-                CopyLatestBuild(playerProject, installDir, progress);
+                if (options.Publish)
+                {
+                    await PublishAsync("Koware Player", playerProject, installDir, progress, cancellationToken);
+                }
+                else
+                {
+                    CopyLatestBuild(playerProject, installDir, progress);
+                }
+            }
+
+            if (!embeddedReaderUsed && Directory.Exists(readerProject))
+            {
+                if (options.Publish)
+                {
+                    await PublishAsync("Koware Reader", readerProject, installDir, progress, cancellationToken);
+                }
+                else
+                {
+                    CopyLatestBuild(readerProject, installDir, progress);
+                }
+            }
+
+            if (!embeddedBrowserUsed && Directory.Exists(browserProject))
+            {
+                if (options.Publish)
+                {
+                    await PublishAsync("Koware Browser", browserProject, installDir, progress, cancellationToken);
+                }
+                else
+                {
+                    CopyLatestBuild(browserProject, installDir, progress);
+                }
             }
         }
 

@@ -113,13 +113,37 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try
         {
-            Core.Initialize();
+            var appDir = AppContext.BaseDirectory;
+            var vlcLibDir = Path.Combine(appDir, "lib");
+            var vlcPluginDir = Path.Combine(appDir, "plugins");
+
+            if (Directory.Exists(vlcPluginDir))
+            {
+                Environment.SetEnvironmentVariable("VLC_PLUGIN_PATH", vlcPluginDir);
+            }
+
+            if (Directory.Exists(vlcLibDir))
+            {
+                Core.Initialize(vlcLibDir);
+            }
+            else
+            {
+                Core.Initialize();
+            }
             
-            _libVLC = new LibVLC(
+            var libVlcOptions = new List<string>
+            {
                 "--no-xlib",
                 "--quiet",
                 "--no-video-title-show"
-            );
+            };
+
+            if (Directory.Exists(vlcPluginDir))
+            {
+                libVlcOptions.Add($"--plugin-path={vlcPluginDir}");
+            }
+
+            _libVLC = new LibVLC(libVlcOptions.ToArray());
             
             MediaPlayer = new MediaPlayer(_libVLC);
             
@@ -159,6 +183,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception ex)
         {
+            Console.Error.WriteLine($"Koware.Player initialization failed: {ex}");
             ShowError($"Failed to initialize player: {ex.Message}");
         }
     }
@@ -197,6 +222,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception ex)
         {
+            Console.Error.WriteLine($"Koware.Player playback failed: {ex}");
             ShowError($"Failed to play: {ex.Message}");
         }
     }
@@ -521,6 +547,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     
     private void OnFontSizeChanged(object? sender, RangeBaseValueChangedEventArgs e)
     {
+        if (FontSizeValue is null)
+        {
+            return;
+        }
+
         _subtitleFontSize = (int)e.NewValue;
         FontSizeValue.Text = $"{_subtitleFontSize}px";
         SavePrefs();
@@ -528,7 +559,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     
     private void OnFontFamilyChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (FontFamilyCombo.SelectedItem is ComboBoxItem item)
+        var combo = sender as ComboBox;
+        if (combo?.SelectedItem is ComboBoxItem item)
         {
             _subtitleFontFamily = item.Content?.ToString() ?? "Segoe UI";
             SavePrefs();
@@ -537,6 +569,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     
     private void OnBgOpacityChanged(object? sender, RangeBaseValueChangedEventArgs e)
     {
+        if (BgOpacityValue is null)
+        {
+            return;
+        }
+
         _subtitleBgOpacity = (int)e.NewValue;
         BgOpacityValue.Text = $"{_subtitleBgOpacity}%";
         SavePrefs();
@@ -715,8 +752,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                         : $"{TitleText.Text} [watch together]";
                 });
             }
-            catch
+            catch (Exception ex)
             {
+                Console.Error.WriteLine($"Koware.Player watch-together connection failed: {ex}");
                 Dispatcher.UIThread.Post(() => ShowSkipIndicator("Watch room disconnected"));
             }
         });
