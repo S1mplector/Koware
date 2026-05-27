@@ -150,8 +150,6 @@ if [ "$BUNDLE_PLAYER" = "true" ]; then
         "-c" "$CONFIGURATION"
         "-r" "$RUNTIME"
         "-o" "$OUTPUT_DIR/player"
-        "/p:DebugType=none"
-        "/p:DebugSymbols=false"
     )
 
     if [ "$SELF_CONTAINED" = "true" ]; then
