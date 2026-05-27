@@ -1537,10 +1537,14 @@ static async Task<int> HandleProviderTestAsync(
     MangaDexOptions mangaDex,
     IServiceProvider services)
 {
+    // AllManga's GraphQL API requires a query+variables URL; a bare GET to ApiBase returns 403.
+    var allMangaTestEndpoint = string.IsNullOrWhiteSpace(allManga.ApiBase) ? (string?)null
+        : $"{allManga.ApiBase.TrimEnd('/')}/api?query={Uri.EscapeDataString("query($s:SearchInput $l:Int){mangas(search:$s limit:$l){edges{_id}}}")}&variables={Uri.EscapeDataString("{\"search\":{\"query\":\"test\",\"allowAdult\":false},\"limit\":1}")}";
+
     var providers = new Dictionary<string, (bool configured, string? endpoint, string endpointField, string? referer, string? userAgent, bool isDynamic)>(StringComparer.OrdinalIgnoreCase)
     {
         ["allanime"] = (allAnime.IsConfigured, allAnime.ApiBase, "ApiBase", allAnime.Referer, allAnime.UserAgent, false),
-        ["allmanga"] = (allManga.IsConfigured, allManga.ApiBase, "ApiBase", allManga.Referer, allManga.UserAgent, false),
+        ["allmanga"] = (allManga.IsConfigured, allMangaTestEndpoint, "ApiBase", allManga.Referer, allManga.UserAgent, false),
         ["hianime"] = (hiAnime.IsConfigured, hiAnime.BaseUrl, "BaseUrl", hiAnime.EffectiveReferer, hiAnime.UserAgent, false),
         ["9anime"] = (nineAnime.IsConfigured, nineAnime.BaseUrl, "BaseUrl", nineAnime.EffectiveReferer, nineAnime.UserAgent, false),
         ["nineanime"] = (nineAnime.IsConfigured, nineAnime.BaseUrl, "BaseUrl", nineAnime.EffectiveReferer, nineAnime.UserAgent, false),
