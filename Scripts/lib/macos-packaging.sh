@@ -49,8 +49,9 @@ macos_publish_runtime_bundle() {
     local self_contained="${5:-true}"
     local cli_dir="$target_root/$rid"
     local reader_dir="$cli_dir/reader"
+    local player_dir="$cli_dir/player"
 
-    mkdir -p "$cli_dir" "$reader_dir"
+    mkdir -p "$cli_dir" "$reader_dir" "$player_dir"
 
     macos_publish_project \
         "$repo_root/Koware.Cli/Koware.Cli.csproj" \
@@ -67,6 +68,14 @@ macos_publish_runtime_bundle() {
         "$reader_dir" \
         "$self_contained" \
         "Koware.Reader"
+
+    macos_publish_project \
+        "$repo_root/Koware.Player/Koware.Player.csproj" \
+        "$configuration" \
+        "$rid" \
+        "$player_dir" \
+        "$self_contained" \
+        "Koware.Player"
 }
 
 macos_write_runtime_launcher() {
