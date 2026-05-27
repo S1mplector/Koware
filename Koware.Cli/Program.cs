@@ -10867,7 +10867,7 @@ static void RenderMangaSearch(string query, IReadOnlyCollection<Manga> matches)
 {
     Console.WriteLine();
     Console.ForegroundColor = ConsoleColor.Magenta;
-    Console.Write("📚 ");
+    Console.Write("{Icons.Book}");
     Console.ResetColor();
     Console.Write($"Manga results for ");
     Console.ForegroundColor = ConsoleColor.White;
