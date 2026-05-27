@@ -148,21 +148,39 @@ public sealed class WatchTogetherRelayServer : IAsyncDisposable
 
         while (!cancellationToken.IsCancellationRequested && client.Socket.State == WebSocketState.Open)
         {
-            using var stream = new MemoryStream();
             WebSocketReceiveResult result;
-            do
+
+            // Fast path: single-frame message fits entirely in the buffer
+            result = await client.Socket.ReceiveAsync(buffer, cancellationToken);
+            if (result.MessageType == WebSocketMessageType.Close)
             {
-                result = await client.Socket.ReceiveAsync(buffer, cancellationToken);
-                if (result.MessageType == WebSocketMessageType.Close)
-                {
-                    return;
-                }
-
-                stream.Write(buffer, 0, result.Count);
+                return;
             }
-            while (!result.EndOfMessage);
 
-            var json = Encoding.UTF8.GetString(stream.ToArray());
+            string json;
+            if (result.EndOfMessage)
+            {
+                json = Encoding.UTF8.GetString(buffer, 0, result.Count);
+            }
+            else
+            {
+                // Multi-frame: accumulate into a MemoryStream
+                using var stream = new MemoryStream(buffer.Length * 2);
+                stream.Write(buffer, 0, result.Count);
+                do
+                {
+                    result = await client.Socket.ReceiveAsync(buffer, cancellationToken);
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        return;
+                    }
+
+                    stream.Write(buffer, 0, result.Count);
+                }
+                while (!result.EndOfMessage);
+
+                json = Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int)stream.Length);
+            }
             var message = WatchTogetherJson.Deserialize<WatchTogetherMessage>(json);
             if (message is null)
             {

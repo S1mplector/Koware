@@ -51,9 +51,11 @@ public sealed class ScrapeOrchestrator
             return matches;
         }
 
+        var queryTokens = normalizedQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
         var ordered = matches
             .Select((anime, index) => (Anime: anime, Index: index))
-            .OrderByDescending(x => ScoreMatch(normalizedQuery, x.Anime.Title))
+            .OrderByDescending(x => ScoreMatch(normalizedQuery, queryTokens, x.Anime.Title))
             .ThenBy(x => x.Index)
             .Select(x => x.Anime)
             .ToArray();
@@ -218,13 +220,17 @@ public sealed class ScrapeOrchestrator
             return 0;
         }
 
-        var digits = new string(quality.Where(char.IsDigit).ToArray());
-        if (int.TryParse(digits, out var value))
+        Span<char> digits = stackalloc char[quality.Length];
+        var count = 0;
+        foreach (var c in quality)
         {
-            return value;
+            if (char.IsDigit(c))
+            {
+                digits[count++] = c;
+            }
         }
 
-        return 0;
+        return count > 0 && int.TryParse(digits[..count], out var value) ? value : 0;
     }
 
     /// <summary>Normalize a string for comparison (lowercase, strip punctuation).</summary>
@@ -235,13 +241,30 @@ public sealed class ScrapeOrchestrator
             return string.Empty;
         }
 
-        var cleaned = new string(
-            value
-                .ToLowerInvariant()
-                .Select(c => char.IsLetterOrDigit(c) || char.IsWhiteSpace(c) ? c : ' ')
-                .ToArray());
+        var lower = value.ToLowerInvariant();
+        var sb = new System.Text.StringBuilder(lower.Length);
+        var prevWasSpace = true;
 
-        return string.Join(' ', cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        foreach (var c in lower)
+        {
+            if (char.IsLetterOrDigit(c))
+            {
+                sb.Append(c);
+                prevWasSpace = false;
+            }
+            else if (!prevWasSpace)
+            {
+                sb.Append(' ');
+                prevWasSpace = true;
+            }
+        }
+
+        if (sb.Length > 0 && sb[sb.Length - 1] == ' ')
+        {
+            sb.Length--;
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>Score how well a title matches the query (higher = better).</summary>

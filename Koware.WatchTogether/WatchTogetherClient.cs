@@ -1,4 +1,5 @@
 // Author: Ilgaz Mehmetoğlu
+using System.Buffers;
 using System.Net.WebSockets;
 using System.Text;
 
@@ -120,31 +121,52 @@ public sealed class WatchTogetherClient : IAsyncDisposable
 
     public async Task<WatchTogetherMessage?> ReceiveAsync(CancellationToken cancellationToken)
     {
-        var buffer = new byte[8192];
-        using var stream = new MemoryStream();
-
-        while (true)
+        var buffer = ArrayPool<byte>.Shared.Rent(8192);
+        try
         {
+            // Fast path: single-frame message fits in the buffer
             var result = await _socket.ReceiveAsync(buffer, cancellationToken);
             if (result.MessageType == WebSocketMessageType.Close)
             {
                 return null;
             }
 
-            stream.Write(buffer, 0, result.Count);
+            string json;
             if (result.EndOfMessage)
             {
-                break;
+                json = Encoding.UTF8.GetString(buffer, 0, result.Count);
             }
-        }
+            else
+            {
+                // Multi-frame: accumulate into a MemoryStream
+                using var stream = new MemoryStream(buffer.Length * 2);
+                stream.Write(buffer, 0, result.Count);
+                do
+                {
+                    result = await _socket.ReceiveAsync(buffer, cancellationToken);
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        return null;
+                    }
 
-        var json = Encoding.UTF8.GetString(stream.ToArray());
-        if (string.IsNullOrWhiteSpace(json))
+                    stream.Write(buffer, 0, result.Count);
+                }
+                while (!result.EndOfMessage);
+
+                json = Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int)stream.Length);
+            }
+
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return null;
+            }
+
+            return WatchTogetherJson.Deserialize<WatchTogetherMessage>(json);
+        }
+        finally
         {
-            return null;
+            ArrayPool<byte>.Shared.Return(buffer);
         }
-
-        return WatchTogetherJson.Deserialize<WatchTogetherMessage>(json);
     }
 
     public Task StartReceiveLoopAsync(

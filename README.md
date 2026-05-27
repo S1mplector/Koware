@@ -8,9 +8,9 @@ Koware is a **standalone** link aggregator for **Windows**, **macOS**, and **Lin
 
 It has a text-based user interface but behaves like a regular CLI. You run a command, Koware queries your configured sources, and opens the selected stream in a video player or manga in a reader.
 
-> Koware requires no external dependencies or additional software. Everything—including the TUI components, fuzzy search, and terminal rendering—is built from scratch in pure C#.
+> Koware requires no external dependencies or additional software. Everything is built from scratch in pure C#.
 
-> **⚠️ Important:** Koware ships with **no active source configuration**. You must configure your own sources before using it. See [Source Configuration](#source-configuration) below.
+> **Important:** Koware ships with **no active source configuration**. You must configure your own sources before using it. See [Source Configuration](#source-configuration) below.
 
 ---
 

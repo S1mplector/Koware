@@ -398,7 +398,7 @@ public sealed class AllAnimeCatalog : IAnimeCatalog
                 buffer.Write(temp, 0, read);
             }
 
-            return Encoding.UTF8.GetString(buffer.ToArray());
+            return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
         }
         finally
         {
