@@ -268,9 +268,9 @@ public sealed class ScrapeOrchestrator
     }
 
     /// <summary>Score how well a title matches the query (higher = better).</summary>
-    private static int ScoreMatch(string normalizedQuery, string? title)
+    private static int ScoreMatch(string q, string[] qTokens, string? title)
     {
-        if (string.IsNullOrWhiteSpace(normalizedQuery) || string.IsNullOrWhiteSpace(title))
+        if (string.IsNullOrWhiteSpace(q) || string.IsNullOrWhiteSpace(title))
         {
             return 0;
         }
@@ -281,7 +281,6 @@ public sealed class ScrapeOrchestrator
             return 0;
         }
 
-        var q = normalizedQuery;
         var score = 0;
 
         if (t.Equals(q, StringComparison.Ordinal))
@@ -299,7 +298,6 @@ public sealed class ScrapeOrchestrator
             score += 300;
         }
 
-        var qTokens = q.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var tTokens = t.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
         foreach (var token in qTokens)

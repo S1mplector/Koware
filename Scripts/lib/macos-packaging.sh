@@ -29,6 +29,8 @@ macos_publish_project() {
         -r "$rid"
         -o "$output_dir"
         --self-contained "$self_contained"
+        /p:DebugType=none
+        /p:DebugSymbols=false
     )
 
     echo "dotnet ${args[*]}"
