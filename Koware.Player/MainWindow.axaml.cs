@@ -109,41 +109,58 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         InitializePlayer();
     }
 
+    private static string? FindMacVlcLibPath()
+    {
+        var candidates = new[]
+        {
+            "/Applications/VLC.app/Contents/MacOS/lib",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Applications", "VLC.app", "Contents", "MacOS", "lib"),
+        };
+        foreach (var path in candidates)
+        {
+            if (Directory.Exists(path) &&
+                (File.Exists(Path.Combine(path, "libvlc.dylib")) ||
+                 File.Exists(Path.Combine(path, "libvlc.5.dylib"))))
+                return path;
+        }
+        return null;
+    }
+
     private void InitializePlayer()
     {
         try
         {
-            var appDir = AppContext.BaseDirectory;
-            var vlcLibDir = Path.Combine(appDir, "lib");
-            var vlcPluginDir = Path.Combine(appDir, "plugins");
-
-            if (Directory.Exists(vlcPluginDir))
+            if (OperatingSystem.IsMacOS())
             {
-                Environment.SetEnvironmentVariable("VLC_PLUGIN_PATH", vlcPluginDir);
-            }
-
-            if (Directory.Exists(vlcLibDir))
-            {
-                Core.Initialize(vlcLibDir);
+                var macVlcLibDir = FindMacVlcLibPath();
+                if (macVlcLibDir == null)
+                {
+                    ShowError("VLC is required for video playback on macOS.\nPlease install VLC from https://www.videolan.org/vlc/");
+                    return;
+                }
+                var macPluginDir = Path.GetFullPath(Path.Combine(macVlcLibDir, "..", "plugins"));
+                if (Directory.Exists(macPluginDir))
+                    Environment.SetEnvironmentVariable("VLC_PLUGIN_PATH", macPluginDir);
+                Core.Initialize(macVlcLibDir);
             }
             else
             {
-                Core.Initialize();
-            }
-            
-            var libVlcOptions = new List<string>
-            {
-                "--no-xlib",
-                "--quiet",
-                "--no-video-title-show"
-            };
-
-            if (Directory.Exists(vlcPluginDir))
-            {
-                libVlcOptions.Add($"--plugin-path={vlcPluginDir}");
+                var appDir = AppContext.BaseDirectory;
+                var vlcLibDir = Path.Combine(appDir, "lib");
+                var vlcPluginDir = Path.Combine(appDir, "plugins");
+                if (Directory.Exists(vlcPluginDir))
+                    Environment.SetEnvironmentVariable("VLC_PLUGIN_PATH", vlcPluginDir);
+                if (Directory.Exists(vlcLibDir))
+                    Core.Initialize(vlcLibDir);
+                else
+                    Core.Initialize();
             }
 
-            _libVLC = new LibVLC(libVlcOptions.ToArray());
+            var vlcOptions = OperatingSystem.IsLinux()
+                ? new[] { "--no-xlib", "--quiet", "--no-video-title-show" }
+                : new[] { "--quiet", "--no-video-title-show" };
+            _libVLC = new LibVLC(vlcOptions);
             
             MediaPlayer = new MediaPlayer(_libVLC);
             
