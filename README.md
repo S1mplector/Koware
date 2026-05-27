@@ -122,7 +122,7 @@ If typing koware and other koware commands don't work in a powershell prompt, in
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ```
 
-If you prefer not to, koware will work perfectly fine in any command prompt shell.
+If you prefer not to run this command, koware will work perfectly fine in any command prompt (CMD) shell.
 
 ### Install on Linux
 

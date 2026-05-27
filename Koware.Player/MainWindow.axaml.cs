@@ -738,30 +738,73 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _watchTogetherCts = new CancellationTokenSource();
         _watchTogetherClient = new WatchTogetherClient(WatchTogetherSession);
 
-        _ = Task.Run(async () =>
+        _ = WatchTogetherConnectionLoopAsync(_watchTogetherCts.Token);
+
+        // Only hosts need to broadcast state; guests only receive.
+        if (WatchTogetherSession.IsHost)
+        {
+            _watchTogetherTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _watchTogetherTimer.Tick += (_, _) => SendWatchTogetherState();
+            _watchTogetherTimer.Start();
+        }
+    }
+
+    private async Task WatchTogetherConnectionLoopAsync(CancellationToken cancellationToken)
+    {
+        if (WatchTogetherSession is null) return;
+
+        var titleTagged = false;
+        var backoff = TimeSpan.FromSeconds(2);
+
+        while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await _watchTogetherClient.ConnectAsync(_watchTogetherCts.Token);
-                _ = _watchTogetherClient.StartReceiveLoopAsync(HandleWatchTogetherMessageAsync, _watchTogetherCts.Token);
+                await _watchTogetherClient!.ConnectAsync(cancellationToken);
 
-                Dispatcher.UIThread.Post(() =>
+                if (!titleTagged)
                 {
-                    TitleText.Text = WatchTogetherSession.IsHost
-                        ? $"{TitleText.Text} [host]"
-                        : $"{TitleText.Text} [watch together]";
-                });
+                    titleTagged = true;
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        TitleText.Text = WatchTogetherSession.IsHost
+                            ? $"{TitleText.Text} [host]"
+                            : $"{TitleText.Text} [watch together]";
+                    });
+                }
+
+                backoff = TimeSpan.FromSeconds(2);
+
+                // Await the receive loop — it returns when the connection closes
+                await _watchTogetherClient.StartReceiveLoopAsync(HandleWatchTogetherMessageAsync, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Koware.Player watch-together connection failed: {ex}");
-                Dispatcher.UIThread.Post(() => ShowSkipIndicator("Watch room disconnected"));
+                Console.Error.WriteLine($"Koware.Player watch-together: {ex.Message}");
             }
-        });
 
-        _watchTogetherTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _watchTogetherTimer.Tick += (_, _) => SendWatchTogetherState();
-        _watchTogetherTimer.Start();
+            if (cancellationToken.IsCancellationRequested) break;
+
+            Dispatcher.UIThread.Post(() => ShowSkipIndicator("Reconnecting..."));
+
+            try
+            {
+                await Task.Delay(backoff, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            // Recreate the client for the next connection attempt
+            await _watchTogetherClient!.DisposeAsync();
+            _watchTogetherClient = new WatchTogetherClient(WatchTogetherSession);
+            backoff = TimeSpan.FromSeconds(Math.Min(backoff.TotalSeconds * 2, 30));
+        }
     }
 
     private Task HandleWatchTogetherMessageAsync(WatchTogetherMessage message, CancellationToken cancellationToken)

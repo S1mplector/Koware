@@ -7208,7 +7208,9 @@ static async Task<int> HandleWatchTogetherCreateAsync(
         NewClientId(),
         options.DisplayName,
         WatchTogetherRoles.System);
-    if (!await CheckWatchTogetherRelayAsync(relayProbeSession, logger, "connect to", cancellationToken))
+    using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    probeCts.CancelAfter(TimeSpan.FromSeconds(5));
+    if (!await CheckWatchTogetherRelayAsync(relayProbeSession, logger, "connect to", probeCts.Token))
     {
         return 1;
     }
@@ -7318,11 +7320,23 @@ static async Task<int> HandleWatchTogetherJoinAsync(
 
     var playerOptions = services.GetRequiredService<IOptions<PlayerOptions>>().Value;
     var player = ResolveWatchTogetherPlayerExecutable(playerOptions);
+    WatchTogetherSessionOptions? playerSession = null;
+
     if (player.Path is null)
     {
-        WriteColoredLine("Watch together needs the bundled Koware player so playback can be synchronized.", ConsoleColor.Yellow);
-        Console.WriteLine("Build or install Koware.Player, then try joining again.");
-        return 1;
+        // Fall back to any available player without sync
+        player = ResolvePlayerExecutable(playerOptions);
+        if (player.Path is null)
+        {
+            WriteColoredLine("No video player found. Install mpv, VLC, or build Koware.Player to enable playback.", ConsoleColor.Yellow);
+            return 1;
+        }
+
+        WriteColoredLine("Bundled player not found — playback will not be synchronized with the host.", ConsoleColor.Yellow);
+    }
+    else
+    {
+        playerSession = cliSession with { ClientId = NewClientId() };
     }
 
     var stream = new StreamLink(
@@ -7335,7 +7349,6 @@ static async Task<int> HandleWatchTogetherJoinAsync(
             .Select(s => new SubtitleTrack(s.Label, new Uri(s.Url), s.Language))
             .ToArray());
 
-    var playerSession = cliSession with { ClientId = NewClientId() };
     return LaunchPlayer(
         playerOptions,
         stream,
@@ -7351,9 +7364,9 @@ static WatchTogetherCreateOptions ParseWatchTogetherCreateOptions(string[] args,
 {
     var roomCode = GenerateRoomCode();
     var displayName = DefaultWatchTogetherName();
-    var relayUri = DefaultWatchTogetherRelayUri();
+    Uri? relayUri = null;           // null = use the embedded relay URI at runtime
     var bindUri = new Uri("http://127.0.0.1:8765/");
-    var startEmbeddedRelay = false;
+    var startEmbeddedRelay = true;  // default: start a local relay so the feature works out of the box
     var planArgs = new List<string> { "watch" };
 
     for (var i = 2; i < args.Length; i++)
@@ -7400,6 +7413,10 @@ static WatchTogetherCreateOptions ParseWatchTogetherCreateOptions(string[] args,
         if (arg.Equals("--no-embedded-relay", StringComparison.OrdinalIgnoreCase))
         {
             startEmbeddedRelay = false;
+            if (relayUri is null)
+            {
+                relayUri = DefaultWatchTogetherRelayUri();
+            }
             continue;
         }
 
@@ -7419,6 +7436,12 @@ static WatchTogetherCreateOptions ParseWatchTogetherCreateOptions(string[] args,
     if (string.IsNullOrWhiteSpace(roomCode))
     {
         throw new ArgumentException("Room code cannot be empty.");
+    }
+
+    // If no explicit relay URI was given and embedded relay is disabled, fall back to public relay
+    if (relayUri is null && !startEmbeddedRelay)
+    {
+        relayUri = DefaultWatchTogetherRelayUri();
     }
 
     var plan = ParsePlan(planArgs.ToArray(), defaults);
@@ -7746,19 +7769,21 @@ static void PrintWatchTogetherHelp()
     Console.WriteLine("watch-together - Sync playback with other Koware users");
     Console.WriteLine();
     Console.WriteLine("Usage:");
-    Console.WriteLine("  koware watch-together create <query> [watch options] [--room <code>] [--relay <ws-url>] [--name <name>]");
-    Console.WriteLine("  koware watch-together join <room> [--relay <ws-url>] [--name <name>]");
+    Console.WriteLine("  koware watch-together create <query> [watch options] [--room <code>] [--bind <http-url>] [--relay <ws-url>] [--name <name>]");
+    Console.WriteLine("  koware watch-together join <room> [--relay <ws-url>] [--name <name>] [--wait <seconds>]");
     Console.WriteLine("  koware watch-together relay [--bind <http-url>]");
     Console.WriteLine();
     Console.WriteLine("Examples:");
     Console.WriteLine("  koware watch-together create \"frieren\" --episode 1");
-    Console.WriteLine("  koware watch-together join KWR7F3");
-    Console.WriteLine("  koware watch-together relay --bind http://127.0.0.1:8765/");
+    Console.WriteLine("  koware watch-together create \"frieren\" --bind http://0.0.0.0:8765/  # LAN hosting");
+    Console.WriteLine("  koware watch-together join KWR7F3 --relay ws://192.168.1.10:8765/");
+    Console.WriteLine("  koware watch-together relay --bind http://0.0.0.0:8765/");
     Console.WriteLine();
     Console.WriteLine("Notes:");
-    Console.WriteLine($"  Default relay: {DefaultWatchTogetherRelayUri()}");
-    Console.WriteLine("  Override with --relay or KOWARE_WATCH_RELAY.");
-    Console.WriteLine("  The relay only moves room metadata and playback state. It does not host or rebroadcast video.");
+    Console.WriteLine("  create starts an embedded local relay by default (ws://127.0.0.1:8765/).");
+    Console.WriteLine("  Use --bind http://0.0.0.0:8765/ to allow LAN connections, then share the printed join command.");
+    Console.WriteLine("  Use --relay <ws-url> to point at an external relay instead of the embedded one.");
+    Console.WriteLine("  The relay only moves room metadata and playback state — it never touches video data.");
     Console.WriteLine("  Live sync requires the bundled Koware player.");
 }
 
