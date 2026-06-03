@@ -325,7 +325,13 @@ public sealed class InteractiveSelector<T>
                 }
             }
 
-            _filtered.Sort((a, b) => b.Score.CompareTo(a.Score));
+            _filtered.Sort((a, b) =>
+            {
+                var scoreComparison = b.Score.CompareTo(a.Score);
+                return scoreComparison != 0
+                    ? scoreComparison
+                    : a.OriginalIndex.CompareTo(b.OriginalIndex);
+            });
         }
 
         // Reset selection if needed

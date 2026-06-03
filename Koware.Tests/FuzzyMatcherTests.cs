@@ -203,6 +203,36 @@ public class FuzzyMatcherTests
     }
 
     [Fact]
+    public void Filter_ExactMatch_RanksBeforeLongerPrefixMatches()
+    {
+        var items = new[] { "Demon Slayer", "Demonized", "Demon" };
+
+        var result = FuzzyMatcher.Filter(items, x => x, "demon");
+
+        Assert.Equal("Demon", result[0].Item);
+    }
+
+    [Fact]
+    public void Filter_WordBoundaryPrefix_RanksBeforeMidWordPrefix()
+    {
+        var items = new[] { "Demonized", "Demon Slayer" };
+
+        var result = FuzzyMatcher.Filter(items, x => x, "demon");
+
+        Assert.Equal("Demon Slayer", result[0].Item);
+    }
+
+    [Fact]
+    public void Filter_EqualScores_PreserveOriginalOrder()
+    {
+        var items = new[] { "Alpha Z", "Alpha Y", "Alpha X" };
+
+        var result = FuzzyMatcher.Filter(items, x => x, "alpha");
+
+        Assert.Equal(items, result.Select(r => r.Item).ToArray());
+    }
+
+    [Fact]
     public void Filter_PreservesOriginalIndex()
     {
         var items = new[] { "Cherry", "Apple", "Banana" };

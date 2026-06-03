@@ -30,8 +30,12 @@ public static class FuzzyMatcher
         var substringIndex = textSpan.IndexOf(patternSpan, StringComparison.OrdinalIgnoreCase);
         if (substringIndex >= 0)
         {
-            // Bonus for match at start
-            return substringIndex == 0 ? 1000 + patternSpan.Length : 500 + patternSpan.Length;
+            var baseScore = substringIndex == 0 ? 1000 : 500;
+            var exactBonus = textSpan.Length == patternSpan.Length ? 200 : 0;
+            var boundaryBonus = IsCleanSubstringMatch(textSpan, substringIndex, patternSpan.Length) ? 50 : 0;
+            var compactnessBonus = Math.Max(0, 100 - (textSpan.Length - patternSpan.Length));
+
+            return baseScore + exactBonus + boundaryBonus + compactnessBonus + patternSpan.Length;
         }
 
         // Fuzzy match: all pattern characters must appear in order
@@ -86,6 +90,13 @@ public static class FuzzyMatcher
         return score + consecutiveBonus;
     }
 
+    private static bool IsCleanSubstringMatch(ReadOnlySpan<char> text, int startIndex, int patternLength)
+    {
+        var endIndex = startIndex + patternLength;
+        return (startIndex == 0 || !char.IsLetterOrDigit(text[startIndex - 1]))
+            && (endIndex == text.Length || !char.IsLetterOrDigit(text[endIndex]));
+    }
+
     /// <summary>
     /// Filter and sort a list of items by fuzzy match score.
     /// </summary>
@@ -123,8 +134,14 @@ public static class FuzzyMatcher
             }
         }
 
-        // Sort in-place by score descending
-        results.Sort((a, b) => b.Score.CompareTo(a.Score));
+        // Sort in-place by score descending, keeping equal-score matches deterministic.
+        results.Sort((a, b) =>
+        {
+            var scoreComparison = b.Score.CompareTo(a.Score);
+            return scoreComparison != 0
+                ? scoreComparison
+                : a.OriginalIndex.CompareTo(b.OriginalIndex);
+        });
 
         return results;
     }
