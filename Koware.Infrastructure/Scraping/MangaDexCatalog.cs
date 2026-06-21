@@ -587,8 +587,8 @@ public sealed class MangaDexCatalog : IMangaCatalog
     {
         var request = new HttpRequestMessage(HttpMethod.Get, url)
         {
-            Version = HttpVersion.Version11,
-            VersionPolicy = HttpVersionPolicy.RequestVersionOrLower
+            Version = HttpVersion.Version20,
+            VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher
         };
 
         if (!string.IsNullOrWhiteSpace(_options.Referer) && Uri.TryCreate(_options.Referer, UriKind.Absolute, out var refererUri))
