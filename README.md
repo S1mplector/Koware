@@ -72,15 +72,18 @@ After that, fine-tune `appsettings.user.json` if you need custom hosts.
 | .NET 8 Runtime | Yes (for source builds) | Runtime for Koware CLI |
 | Git | Optional | Required for `koware sync` to sync data across devices |
 | GitHub CLI (`gh`) | Optional | Enables automatic private repo creation with `koware sync init` |
+| VLC Libraries (`libvlc`) | Optional (Linux only) | Required for the bundled Koware Player. The core CLI application works correctly without it. |
 
 **Installing optional dependencies:**
 
 ```bash
 # Arch/Manjaro
 sudo pacman -S git github-cli
+sudo pacman -S vlc # If using bundled player
 
 # Ubuntu/Debian
 sudo apt install git gh
+sudo apt install vlc libvlc5 vlc-plugin-base # If using bundled player
 
 # macOS
 brew install git gh
